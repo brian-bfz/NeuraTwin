@@ -99,9 +99,9 @@ if __name__ == "__main__":
     save_dir = os.path.join("generated_data", f"{case_name}_{timestamp}")
     os.makedirs(os.path.join(save_dir, "x"), exist_ok=True)
     os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
-    
-    pressed_keys_sequence = [['w']] * 100
+    os.makedirs(os.path.join(save_dir, "controller_points"), exist_ok=True)
+    pressed_keys_sequence = [['w']] * 50
 
     trainer.generate_data(
-        best_model_path, gaussians_path, args.n_ctrl_parts, args.inv_ctrl, save_dir, pressed_keys_sequence
+        best_model_path, gaussians_path, args.n_ctrl_parts, save_dir, pressed_keys_sequence
     )

@@ -921,7 +921,7 @@ class InvPhyTrainerWarp:
         return self.structure_points[min_idx].unsqueeze(0)
     
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None, pressed_keys_sequence=None
+        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, pressed_keys_sequence=None
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -979,20 +979,19 @@ class InvPhyTrainerWarp:
             self.mask_ctrl_pts = None
 
         # Initialize key mappings for target movement
-        self.inv_ctrl = -1.0 if inv_ctrl else 1.0
         self.key_mappings = {
             # Set 1 controls
-            "w": (0, np.array([0.005, 0, 0]) * self.inv_ctrl),
-            "s": (0, np.array([-0.005, 0, 0]) * self.inv_ctrl),
-            "a": (0, np.array([0, -0.005, 0]) * self.inv_ctrl),
-            "d": (0, np.array([0, 0.005, 0]) * self.inv_ctrl),
+            "w": (0, np.array([0.005, 0, 0])),
+            "s": (0, np.array([-0.005, 0, 0])),
+            "a": (0, np.array([0, -0.005, 0])),
+            "d": (0, np.array([0, 0.005, 0])),
             "e": (0, np.array([0, 0, 0.005])),
             "q": (0, np.array([0, 0, -0.005])),
             # Set 2 controls
-            "i": (1, np.array([0.005, 0, 0]) * self.inv_ctrl),
-            "k": (1, np.array([-0.005, 0, 0]) * self.inv_ctrl),
-            "j": (1, np.array([0, -0.005, 0]) * self.inv_ctrl),
-            "l": (1, np.array([0, 0.005, 0]) * self.inv_ctrl),
+            "i": (1, np.array([0.005, 0, 0])),
+            "k": (1, np.array([-0.005, 0, 0])),
+            "j": (1, np.array([0, -0.005, 0])),
+            "l": (1, np.array([0, 0.005, 0])),
             "o": (1, np.array([0, 0, 0.005])),
             "u": (1, np.array([0, 0, -0.005])),
         }
@@ -1022,6 +1021,12 @@ class InvPhyTrainerWarp:
                     'rotation': gaussians._rotation,
                     'frame_count': frame_count
                 }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+                # Save controller points
+                torch.save({
+                    'current_target': current_target,
+                    'prev_target': prev_target,
+                    'frame_count': frame_count
+                }, os.path.join(save_dir, "controller_points", f"controller_points_{frame_count}.pt"))
 
             if prev_x is not None:
                 prev_particle_pos = prev_x
@@ -1102,13 +1107,15 @@ class InvPhyTrainerWarp:
         overlay = cv2.imread(image_path)
         overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
-
         for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
-            # 1. Load x and gaussians
+            # 1. Load x, gaussians, and controller points
             x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
             gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+            controller_data = torch.load(os.path.join(save_dir, "controller_points", f"controller_points_{frame_count}.pt"))
+            
             gaussians._xyz = gaussians_data['xyz']
             gaussians._rotation = gaussians_data['rotation']
+            current_target = controller_data['current_target']
 
             torch.cuda.synchronize()
 
@@ -1118,7 +1125,6 @@ class InvPhyTrainerWarp:
             torch.cuda.synchronize()
 
             # 3. Rendering
-
             # render with gaussians and paste the image on top of the frame
             results = render_gaussian(view, gaussians, None, background)
             rendering = results["render"]  # (4, H, W)
@@ -1127,7 +1133,6 @@ class InvPhyTrainerWarp:
             torch.cuda.synchronize()
 
             # Continue frame compositing
-
             # composition code from Hanxiao
             image = image.clip(0, 1)
             if use_white_background:
@@ -1158,7 +1163,28 @@ class InvPhyTrainerWarp:
                 x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
             )
             frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
+
+            # Convert frame to BGR before drawing circles
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            # Draw controller points
+            points = current_target.cpu().numpy()
+            points_homogeneous = np.hstack([points, np.ones((points.shape[0], 1))])
+            points_camera = (w2c @ points_homogeneous.T).T
+            points_pixels = (intrinsic @ points_camera[:, :3].T).T
+            points_pixels = points_pixels[:, :2] / points_pixels[:, 2:3]
+            pixel_coords = points_pixels.astype(int)
+
+            # Filter points that are within the image bounds
+            valid_mask = (
+                (pixel_coords[:, 0] >= 0) & (pixel_coords[:, 0] < width) &
+                (pixel_coords[:, 1] >= 0) & (pixel_coords[:, 1] < height)
+            )
+            valid_pixel_coords = pixel_coords[valid_mask]
+
+            # Draw red circles for controller points
+            for x, y in valid_pixel_coords:
+                cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
 
             cv2.imshow("Interactive Playground", frame)
             cv2.waitKey(1)
