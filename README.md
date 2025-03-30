@@ -84,6 +84,7 @@ python interactive_playground.py \
 # Examples of usage:
 python interactive_playground.py --n_ctrl_parts 2 --case_name double_stretch_sloth
 python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_lift_cloth_3
+python generate_data.py --n_ctrl_parts 2 --case_name double_stretch_sloth
 ```
 
 Options: 
