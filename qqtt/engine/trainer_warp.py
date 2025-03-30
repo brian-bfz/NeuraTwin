@@ -549,21 +549,6 @@ class InvPhyTrainerWarp:
                 save_path=video_path,
             )
 
-    # def on_press(self, key):
-    #     try:
-    #         self.pressed_keys.add(key.char)
-    #     except AttributeError:
-    #         pass
-
-    # def on_release(self, key):
-    #     try:
-    #         self.pressed_keys.remove(key.char)
-    #     except (KeyError, AttributeError):
-    #         try:
-    #             self.pressed_keys.remove(str(key))
-    #         except KeyError:
-    #             pass
-
     def get_target_change(self):
         target_change = np.zeros((self.n_ctrl_parts, 3))
         for key in self.pressed_keys:
@@ -935,7 +920,6 @@ class InvPhyTrainerWarp:
         min_idx = min_indices[torch.argmin(min_dist_per_ctrl_pts)]
         return self.structure_points[min_idx].unsqueeze(0)
     
-    # TODO: remove keyboard listener and pass in a time sequence of pressed keys 
     def generate_data(
         self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None, pressed_keys_sequence=None
     ):
@@ -963,23 +947,13 @@ class InvPhyTrainerWarp:
             collide_object_fric.detach().clone(),
         )
 
-        ###########################################################################
-
-        logger.info("Party Time Start!!!!")
+        logger.info("Starting data generation")
         self.simulator.set_init_state(
             self.simulator.wp_init_vertices, self.simulator.wp_init_velocities
         )
 
-        vis_cam_idx = 0
-        FPS = cfg.FPS
-        width, height = cfg.WH
-        intrinsic = cfg.intrinsics[vis_cam_idx]
-        w2c = cfg.w2cs[vis_cam_idx]
-
         current_target = self.simulator.controller_points[0]
         prev_target = current_target
-
-        vis_controller_points = current_target.cpu().numpy()
 
         gaussians = GaussianModel(sh_degree=3)
         gaussians.load_ply(gs_path)
@@ -987,47 +961,24 @@ class InvPhyTrainerWarp:
         gaussians.isotropic = True
         current_pos = gaussians.get_xyz
         current_rot = gaussians.get_rotation
-        use_white_background = True  # set to True for white background
-        bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
-        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-        view = self._create_gs_view(w2c, intrinsic, height, width)
         prev_x = None
         relations = None
         weights = None
-        image_path = cfg.bg_img_path
-        overlay = cv2.imread(image_path)
-        overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
+        # Initialize control parts
+        self.n_ctrl_parts = n_ctrl_parts
         if n_ctrl_parts > 1:
             kmeans = KMeans(n_clusters=n_ctrl_parts, random_state=0, n_init=10)
-            cluster_labels = kmeans.fit_predict(vis_controller_points)
-            N = vis_controller_points.shape[0]
+            cluster_labels = kmeans.fit_predict(current_target.cpu().numpy())
             masks_ctrl_pts = []
             for i in range(n_ctrl_parts):
                 mask = cluster_labels == i
                 masks_ctrl_pts.append(torch.from_numpy(mask))
-            # project the center of the cluster to the object to the image space, those on the left will be mask 1
-            center1 = np.mean(vis_controller_points[masks_ctrl_pts[0]], axis=0)
-            center2 = np.mean(vis_controller_points[masks_ctrl_pts[1]], axis=0)
-            center1 = np.concatenate([center1, [1]])
-            center2 = np.concatenate([center2, [1]])
-            proj_mat = intrinsic @ w2c[:3, :]
-            center1 = proj_mat @ center1
-            center2 = proj_mat @ center2
-            center1 = center1 / center1[-1]
-            center2 = center2 / center2[-1]
-            if center1[0] > center2[0]:
-                print("Switching the control parts")
-                masks_ctrl_pts = [masks_ctrl_pts[1], masks_ctrl_pts[0]]
+            self.mask_ctrl_pts = masks_ctrl_pts
         else:
-            masks_ctrl_pts = None
-        self.n_ctrl_parts = n_ctrl_parts
-        self.mask_ctrl_pts = masks_ctrl_pts
-        self.scale_factors = 1.0
-        assert n_ctrl_parts <= 2, "Only support 1 or 2 control parts"
-        print("UI Controls:")
-        print("- Set 1: WASD (XY movement), QE (Z movement)")
-        print("- Set 2: IJKL (XY movement), UO (Z movement)")
+            self.mask_ctrl_pts = None
+
+        # Initialize key mappings for target movement
         self.inv_ctrl = -1.0 if inv_ctrl else 1.0
         self.key_mappings = {
             # Set 1 controls
@@ -1045,90 +996,11 @@ class InvPhyTrainerWarp:
             "o": (1, np.array([0, 0, 0.005])),
             "u": (1, np.array([0, 0, -0.005])),
         }
-        self.pressed_keys = set()
-        self.w2c = w2c
-        self.intrinsic = intrinsic
-        self.init_control_ui()
-        if n_ctrl_parts > 1:
-            hand_positions = []
-            for i in range(2):
-                target_points = torch.from_numpy(
-                    vis_controller_points[self.mask_ctrl_pts[i]]
-                ).to("cuda")
-                hand_positions.append(self._find_closest_point(target_points))
-            self.hand_left_pos, self.hand_right_pos = hand_positions
-        else:
-            target_points = torch.from_numpy(vis_controller_points).to("cuda")
-            self.hand_left_pos = self._find_closest_point(target_points)
-        self.target_change = np.zeros((n_ctrl_parts, 3))
 
-        ############## Temporary timer ##############
-        import time
-
-        class Timer:
-            def __init__(self, name):
-                self.name = name
-                self.elapsed = 0
-                self.start_time = None
-                self.cuda_start_event = None
-                self.cuda_end_event = None
-                self.use_cuda = torch.cuda.is_available()
-
-            def start(self):
-                if self.use_cuda:
-                    torch.cuda.synchronize()
-                    self.cuda_start_event = torch.cuda.Event(enable_timing=True)
-                    self.cuda_end_event = torch.cuda.Event(enable_timing=True)
-                    self.cuda_start_event.record()
-                self.start_time = time.time()
-
-            def stop(self):
-                if self.use_cuda:
-                    self.cuda_end_event.record()
-                    torch.cuda.synchronize()
-                    self.elapsed = (
-                        self.cuda_start_event.elapsed_time(self.cuda_end_event) / 1000
-                    )  # convert ms to seconds
-                else:
-                    self.elapsed = time.time() - self.start_time
-                return self.elapsed
-
-            def reset(self):
-                self.elapsed = 0
-                self.start_time = None
-                self.cuda_start_event = None
-                self.cuda_end_event = None
-
-        sim_timer = Timer("Simulator")
-        render_timer = Timer("Rendering")
-        frame_timer = Timer("Frame Compositing")
-        interp_timer = Timer("Full Motion Interpolation")
-        total_timer = Timer("Total Loop")
-
-        # Performance stats
-        fps_history = []
-        component_times = {
-            "simulator": [],
-            "rendering": [],
-            "frame_compositing": [],
-            "full_motion_interpolation": [],
-            "total": [],
-            "knn_weights": [],
-            "motion_interp": [],
-        }
-
-        # Number of frames to average over for stats
-        STATS_WINDOW = 10
         frame_count = 0
 
-        ############## End Temporary timer ##############
-
         for pressed_keys in pressed_keys_sequence:
-            total_timer.start()
-
             # 1. Simulator step
-            sim_timer.start()
-
             self.simulator.set_controller_interactive(prev_target, current_target)
             if self.simulator.object_collision_flag:
                 self.simulator.update_collision_graph()
@@ -1139,7 +1011,6 @@ class InvPhyTrainerWarp:
                 self.simulator.wp_states[-1].wp_x,
                 self.simulator.wp_states[-1].wp_v,
             )
-
 
             # Save initial state at the start of each loop
             if save_dir is not None:
@@ -1152,85 +1023,7 @@ class InvPhyTrainerWarp:
                     'frame_count': frame_count
                 }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
 
-
-            sim_time = sim_timer.stop()
-            component_times["simulator"].append(sim_time)
-
-            torch.cuda.synchronize()
-
-            # 2. Frame initialization and setup
-            frame_timer.start()
-
-            frame = overlay.copy()
-
-            frame_setup_time = (
-                frame_timer.stop()
-            )  # We'll accumulate times for frame compositing
-
-            torch.cuda.synchronize()
-
-            # 3. Rendering
-            render_timer.start()
-
-            # render with gaussians and paste the image on top of the frame
-            results = render_gaussian(view, gaussians, None, background)
-            rendering = results["render"]  # (4, H, W)
-            image = rendering.permute(1, 2, 0).detach().cpu().numpy()
-
-            render_time = render_timer.stop()
-            component_times["rendering"].append(render_time)
-
-            torch.cuda.synchronize()
-
-            # Continue frame compositing
-            frame_timer.start()
-
-            # composition code from Hanxiao
-            image = image.clip(0, 1)
-            if use_white_background:
-                image_mask = np.logical_and(
-                    (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
-                )
-            else:
-                image_mask = np.logical_and(
-                    (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
-                )
-            image[~image_mask, 3] = 0
-
-            alpha = image[..., 3:4]
-            rgb = image[..., :3] * 255
-            frame = alpha * rgb + (1 - alpha) * frame
-            frame = frame.astype(np.uint8)
-
-            frame = self.update_frame(frame, self.pressed_keys)
-
-            # Add shadows
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-            cv2.imshow("Interactive Playground", frame)
-            cv2.waitKey(1)
-
-            frame_comp_time = (
-                frame_timer.stop() + frame_setup_time
-            )  # Total frame compositing time
-            component_times["frame_compositing"].append(frame_comp_time)
-
-            torch.cuda.synchronize()
-
             if prev_x is not None:
-
                 prev_particle_pos = prev_x
                 cur_particle_pos = x
 
@@ -1243,8 +1036,6 @@ class InvPhyTrainerWarp:
                     weights, weights_indices = knn_weights_sparse(
                         prev_particle_pos, current_pos, K=16
                     )  # only computed in the first iteration
-
-                interp_timer.start()
 
                 with torch.no_grad():
                     weights = calc_weights_vals_from_indices(
@@ -1264,85 +1055,30 @@ class InvPhyTrainerWarp:
                     # update gaussians with the new positions and rotations
                     gaussians._xyz = current_pos
                     gaussians._rotation = current_rot
-                    
-                interp_time = interp_timer.stop()
-                component_times["full_motion_interpolation"].append(interp_time)
-
-            torch.cuda.synchronize()
 
             prev_x = x.clone()
-
             prev_target = current_target
 
-            # set key presses
-            self.pressed_keys = pressed_keys
-            target_change = self.get_target_change()
-            if masks_ctrl_pts is not None:
+            # Update target based on pressed keys
+            target_change = np.zeros((n_ctrl_parts, 3))
+            for key in pressed_keys:
+                if key in self.key_mappings:
+                    idx, change = self.key_mappings[key]
+                    target_change[idx] += change
+
+            if self.mask_ctrl_pts is not None:
                 for i in range(n_ctrl_parts):
-                    if masks_ctrl_pts[i].sum() > 0:
-                        current_target[masks_ctrl_pts[i]] += torch.tensor(
+                    if self.mask_ctrl_pts[i].sum() > 0:
+                        current_target[self.mask_ctrl_pts[i]] += torch.tensor(
                             target_change[i], dtype=torch.float32, device=cfg.device
                         )
-                        if i == 0:
-                            self.hand_left_pos += torch.tensor(
-                                target_change[i], dtype=torch.float32, device=cfg.device
-                            )
-                        if i == 1:
-                            self.hand_right_pos += torch.tensor(
-                                target_change[i], dtype=torch.float32, device=cfg.device
-                            )
             else:
                 current_target += torch.tensor(
-                    target_change, dtype=torch.float32, device=cfg.device
-                )
-                self.hand_left_pos += torch.tensor(
-                    target_change, dtype=torch.float32, device=cfg.device
+                    target_change[0], dtype=torch.float32, device=cfg.device
                 )
 
-            ############### Temporary timer ###############
-            # Total loop time
-            total_time = total_timer.stop()
-            component_times["total"].append(total_time)
-
-            # Calculate FPS
-            fps = 1.0 / total_time
-            fps_history.append(fps)
-
-            # Display performance stats periodically
             frame_count += 1
-            if frame_count % 10 == 0:
-                # Limit stats to last STATS_WINDOW frames
-                if len(fps_history) > STATS_WINDOW:
-                    fps_history = fps_history[-STATS_WINDOW:]
-                    for key in component_times:
-                        component_times[key] = component_times[key][-STATS_WINDOW:]
 
-                avg_fps = np.mean(fps_history)
-                print(
-                    f"\n--- Performance Stats (avg over last {len(fps_history)} frames) ---"
-                )
-                print(f"FPS: {avg_fps:.2f}")
-
-                # Calculate percentages for pie chart
-                total_avg = np.mean(component_times["total"])
-                print(f"Total Frame Time: {total_avg*1000:.2f} ms")
-
-                # Display individual component times
-                for key in [
-                    "simulator",
-                    "rendering",
-                    "frame_compositing",
-                    "full_motion_interpolation",
-                    "knn_weights",
-                    "motion_interp",
-                ]:
-                    avg_time = np.mean(component_times[key])
-                    percentage = (avg_time / total_avg) * 100
-                    print(
-                        f"{key.capitalize()}: {avg_time*1000:.2f} ms ({percentage:.1f}%)"
-                    )
-
-    
     def video_from_data(
         self, gs_path, save_dir
     ):
@@ -1426,11 +1162,6 @@ class InvPhyTrainerWarp:
 
             cv2.imshow("Interactive Playground", frame)
             cv2.waitKey(1)
-
-
-
-
-
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
 
