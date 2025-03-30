@@ -549,20 +549,20 @@ class InvPhyTrainerWarp:
                 save_path=video_path,
             )
 
-    def on_press(self, key):
-        try:
-            self.pressed_keys.add(key.char)
-        except AttributeError:
-            pass
+    # def on_press(self, key):
+    #     try:
+    #         self.pressed_keys.add(key.char)
+    #     except AttributeError:
+    #         pass
 
-    def on_release(self, key):
-        try:
-            self.pressed_keys.remove(key.char)
-        except (KeyError, AttributeError):
-            try:
-                self.pressed_keys.remove(str(key))
-            except KeyError:
-                pass
+    # def on_release(self, key):
+    #     try:
+    #         self.pressed_keys.remove(key.char)
+    #     except (KeyError, AttributeError):
+    #         try:
+    #             self.pressed_keys.remove(str(key))
+    #         except KeyError:
+    #             pass
 
     def get_target_change(self):
         target_change = np.zeros((self.n_ctrl_parts, 3))
@@ -935,8 +935,9 @@ class InvPhyTrainerWarp:
         min_idx = min_indices[torch.argmin(min_dist_per_ctrl_pts)]
         return self.structure_points[min_idx].unsqueeze(0)
     
+    # TODO: remove keyboard listener and pass in a time sequence of pressed keys 
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None
+        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None, pressed_keys_sequence=None
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -1059,9 +1060,6 @@ class InvPhyTrainerWarp:
         else:
             target_points = torch.from_numpy(vis_controller_points).to("cuda")
             self.hand_left_pos = self._find_closest_point(target_points)
-
-        listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
-        listener.start()
         self.target_change = np.zeros((n_ctrl_parts, 3))
 
         ############## Temporary timer ##############
@@ -1106,8 +1104,6 @@ class InvPhyTrainerWarp:
         frame_timer = Timer("Frame Compositing")
         interp_timer = Timer("Full Motion Interpolation")
         total_timer = Timer("Total Loop")
-        knn_weights_timer = Timer("KNN Weights")
-        motion_interp_timer = Timer("Motion Interpolation")
 
         # Performance stats
         fps_history = []
@@ -1127,7 +1123,7 @@ class InvPhyTrainerWarp:
 
         ############## End Temporary timer ##############
 
-        while True:
+        for pressed_keys in pressed_keys_sequence:
             total_timer.start()
 
             # 1. Simulator step
@@ -1277,6 +1273,9 @@ class InvPhyTrainerWarp:
             prev_x = x.clone()
 
             prev_target = current_target
+
+            # set key presses
+            self.pressed_keys = pressed_keys
             target_change = self.get_target_change()
             if masks_ctrl_pts is not None:
                 for i in range(n_ctrl_parts):
@@ -1342,8 +1341,6 @@ class InvPhyTrainerWarp:
                     print(
                         f"{key.capitalize()}: {avg_time*1000:.2f} ms ({percentage:.1f}%)"
                     )
-
-        listener.stop()
 
     
     def video_from_data(
