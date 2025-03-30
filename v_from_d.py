@@ -44,10 +44,6 @@ if __name__ == "__main__":
     )
     parser.add_argument("--case_name", type=str, required=True)
     parser.add_argument("--timestamp", type=str, required=True)
-    parser.add_argument("--n_ctrl_parts", type=int, default=2)
-    parser.add_argument(
-        "--inv_ctrl", action="store_true", help="invert horizontal control direction"
-    )
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -60,15 +56,6 @@ if __name__ == "__main__":
 
     base_dir = f"./temp_experiments/{case_name}"
 
-    # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = f"./experiments_optimization/{case_name}/optimal_params.pkl"
-    logger.info(f"Load optimal parameters from: {optimal_path}")
-    assert os.path.exists(
-        optimal_path
-    ), f"{case_name}: Optimal parameters not found: {optimal_path}"
-    with open(optimal_path, "rb") as f:
-        optimal_params = pickle.load(f)
-    cfg.set_optimal_params(optimal_params)
 
     # Set the intrinsic and extrinsic parameters for visualization
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
@@ -92,11 +79,8 @@ if __name__ == "__main__":
         pure_inference_mode=True,
     )
 
-    best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
-    
-    timestamp = args.timestamp
-    save_dir = os.path.join("generated_data", f"{case_name}_{timestamp}")
-    
+    # Generate video from saved data
+    save_dir = os.path.join("generated_data", f"{case_name}_{args.timestamp}")
     trainer.video_from_data(
         gaussians_path, save_dir
     )

@@ -37,11 +37,6 @@ if __name__ == "__main__":
         type=str,
         default="./gaussian_output",
     )
-    parser.add_argument(
-        "--bg_img_path",
-        type=str,
-        default="./data/bg.png",
-    )
     parser.add_argument("--case_name", type=str, default="double_lift_cloth_3")
     parser.add_argument("--n_ctrl_parts", type=int, default=2)
     parser.add_argument(
@@ -68,18 +63,6 @@ if __name__ == "__main__":
     with open(optimal_path, "rb") as f:
         optimal_params = pickle.load(f)
     cfg.set_optimal_params(optimal_params)
-
-    # Set the intrinsic and extrinsic parameters for visualization
-    with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
-        c2ws = pickle.load(f)
-    w2cs = [np.linalg.inv(c2w) for c2w in c2ws]
-    cfg.c2ws = np.array(c2ws)
-    cfg.w2cs = np.array(w2cs)
-    with open(f"{base_path}/{case_name}/metadata.json", "r") as f:
-        data = json.load(f)
-    cfg.intrinsics = np.array(data["intrinsics"])
-    cfg.WH = data["WH"]
-    cfg.bg_img_path = args.bg_img_path
 
     exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
     gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
