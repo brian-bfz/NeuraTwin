@@ -934,9 +934,9 @@ class InvPhyTrainerWarp:
         min_dist_per_ctrl_pts, min_indices = torch.min(dist_matrix, dim=1)
         min_idx = min_indices[torch.argmin(min_dist_per_ctrl_pts)]
         return self.structure_points[min_idx].unsqueeze(0)
-
-    def interactive_playground(
-        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False
+    
+    def generate_data(
+        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -1128,11 +1128,9 @@ class InvPhyTrainerWarp:
         ############## End Temporary timer ##############
 
         while True:
-
             total_timer.start()
 
             # 1. Simulator step
-
             sim_timer.start()
 
             self.simulator.set_controller_interactive(prev_target, current_target)
@@ -1146,13 +1144,25 @@ class InvPhyTrainerWarp:
                 self.simulator.wp_states[-1].wp_v,
             )
 
+
+            # Save initial state at the start of each loop
+            if save_dir is not None:
+                # Save x tensor
+                torch.save(x, os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
+                # Save gaussians
+                torch.save({
+                    'xyz': gaussians._xyz,
+                    'rotation': gaussians._rotation,
+                    'frame_count': frame_count
+                }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+
+
             sim_time = sim_timer.stop()
             component_times["simulator"].append(sim_time)
 
             torch.cuda.synchronize()
 
             # 2. Frame initialization and setup
-
             frame_timer.start()
 
             frame = overlay.copy()
@@ -1258,7 +1268,7 @@ class InvPhyTrainerWarp:
                     # update gaussians with the new positions and rotations
                     gaussians._xyz = current_pos
                     gaussians._rotation = current_rot
-
+                    
                 interp_time = interp_timer.stop()
                 component_times["full_motion_interpolation"].append(interp_time)
 
@@ -1334,6 +1344,96 @@ class InvPhyTrainerWarp:
                     )
 
         listener.stop()
+
+    
+    def video_from_data(
+        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None
+    ):
+
+        logger.info("Party Time Start!!!!")
+
+        vis_cam_idx = 0
+        width, height = cfg.WH
+        intrinsic = cfg.intrinsics[vis_cam_idx]
+        w2c = cfg.w2cs[vis_cam_idx]
+
+        gaussians = GaussianModel(sh_degree=3)
+        gaussians.load_ply(gs_path)
+        gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
+        gaussians.isotropic = True
+        use_white_background = True  # set to True for white background
+        bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
+        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+        view = self._create_gs_view(w2c, intrinsic, height, width)
+        image_path = cfg.bg_img_path
+        overlay = cv2.imread(image_path)
+        overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+
+
+        for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
+            # 1. Load x and gaussians
+            x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
+            gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+            gaussians._xyz = gaussians_data['xyz']
+            gaussians._rotation = gaussians_data['rotation']
+
+            torch.cuda.synchronize()
+
+            # 2. Frame initialization and setup
+            frame = overlay.copy()
+
+            torch.cuda.synchronize()
+
+            # 3. Rendering
+
+            # render with gaussians and paste the image on top of the frame
+            results = render_gaussian(view, gaussians, None, background)
+            rendering = results["render"]  # (4, H, W)
+            image = rendering.permute(1, 2, 0).detach().cpu().numpy()
+
+            torch.cuda.synchronize()
+
+            # Continue frame compositing
+
+            # composition code from Hanxiao
+            image = image.clip(0, 1)
+            if use_white_background:
+                image_mask = np.logical_and(
+                    (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
+                )
+            else:
+                image_mask = np.logical_and(
+                    (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
+                )
+            image[~image_mask, 3] = 0
+
+            alpha = image[..., 3:4]
+            rgb = image[..., :3] * 255
+            frame = alpha * rgb + (1 - alpha) * frame
+            frame = frame.astype(np.uint8)
+
+            # Add shadows
+            final_shadow = get_simple_shadow(
+                x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
+            )
+            frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
+            final_shadow = get_simple_shadow(
+                x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
+            )
+            frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
+            final_shadow = get_simple_shadow(
+                x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
+            )
+            frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            cv2.imshow("Interactive Playground", frame)
+            cv2.waitKey(1)
+
+
+
+
+
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
 
