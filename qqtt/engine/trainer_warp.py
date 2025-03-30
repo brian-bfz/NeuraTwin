@@ -1087,8 +1087,7 @@ class InvPhyTrainerWarp:
     def video_from_data(
         self, gs_path, save_dir
     ):
-
-        logger.info("Party Time Start!!!!")
+        logger.info("Starting video generation")
 
         vis_cam_idx = 0
         width, height = cfg.WH
@@ -1106,6 +1105,11 @@ class InvPhyTrainerWarp:
         image_path = cfg.bg_img_path
         overlay = cv2.imread(image_path)
         overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+
+        # Initialize video writer
+        output_path = os.path.join(save_dir, "output.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
 
         for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
             # 1. Load x, gaussians, and controller points
@@ -1186,8 +1190,17 @@ class InvPhyTrainerWarp:
             for x, y in valid_pixel_coords:
                 cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
 
+            # Write frame to video file
+            out.write(frame)
+
+            # Display frame
             cv2.imshow("Interactive Playground", frame)
             cv2.waitKey(1)
+
+        # Release video writer
+        out.release()
+        cv2.destroyAllWindows()
+        logger.info(f"Video saved to {output_path}")
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
 

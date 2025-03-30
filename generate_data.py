@@ -25,6 +25,27 @@ def set_all_seeds(seed):
 seed = 42
 set_all_seeds(seed)
 
+def random_movement(n_ctrl_parts, num_movements=10, frames_per_movement=10):
+    # Define possible keys for each hand
+    hand1_keys = ['w', 's', 'a', 'd', 'e', 'q']  # Left hand keys
+    hand2_keys = ['i', 'k', 'j', 'l', 'o', 'u']  # Right hand keys
+    
+    sequence = []
+    for _ in range(num_movements):
+        # Generate random movements for each hand
+        movement = []
+        # Left hand movement
+        movement.append(random.choice(hand1_keys))
+        
+        # Right hand movement (if n_ctrl_parts > 1)
+        if n_ctrl_parts > 1:
+            movement.append(random.choice(hand2_keys))
+        
+        # Repeat this movement for frames_per_movement frames
+        sequence.extend([movement] * frames_per_movement)
+    
+    return sequence
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
@@ -83,8 +104,10 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(save_dir, "x"), exist_ok=True)
     os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
     os.makedirs(os.path.join(save_dir, "controller_points"), exist_ok=True)
-    pressed_keys_sequence = [['w']] * 50
 
+    pressed_keys_sequence = random_movement(args.n_ctrl_parts)
+    print(pressed_keys_sequence)
+    
     trainer.generate_data(
         best_model_path, gaussians_path, args.n_ctrl_parts, save_dir, pressed_keys_sequence
     )
