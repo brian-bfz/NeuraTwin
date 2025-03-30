@@ -98,5 +98,5 @@ if __name__ == "__main__":
     save_dir = os.path.join("generated_data", f"{case_name}_{timestamp}")
     
     trainer.video_from_data(
-        best_model_path, gaussians_path, args.n_ctrl_parts, args.inv_ctrl, save_dir
+        gaussians_path, save_dir
     )

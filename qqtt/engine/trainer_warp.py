@@ -1347,7 +1347,7 @@ class InvPhyTrainerWarp:
 
     
     def video_from_data(
-        self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, save_dir=None
+        self, gs_path, save_dir
     ):
 
         logger.info("Party Time Start!!!!")
