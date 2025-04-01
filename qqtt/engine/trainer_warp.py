@@ -1121,20 +1121,14 @@ class InvPhyTrainerWarp:
             gaussians._rotation = gaussians_data['rotation']
             current_target = controller_data['current_target']
 
-            torch.cuda.synchronize()
-
             # 2. Frame initialization and setup
             frame = overlay.copy()
-
-            torch.cuda.synchronize()
 
             # 3. Rendering
             # render with gaussians and paste the image on top of the frame
             results = render_gaussian(view, gaussians, None, background)
             rendering = results["render"]  # (4, H, W)
             image = rendering.permute(1, 2, 0).detach().cpu().numpy()
-
-            torch.cuda.synchronize()
 
             # Continue frame compositing
             # composition code from Hanxiao
