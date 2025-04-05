@@ -1396,11 +1396,11 @@ class InvPhyTrainerWarp:
         cv2.destroyAllWindows()
         
         # Visualize the control points after selection
-        self.visualize_control_points(None, control_points, x)
+        self.visualize_control_points(control_points, x)
         
         return control_points
 
-    def visualize_control_points(self, old_control_points, new_control_points, x):
+    def visualize_control_points(self, control_points, x):
         """Visualize object points and new control points using Open3D."""
         # Create point clouds for visualization
         object_pcd = o3d.geometry.PointCloud()
@@ -1419,7 +1419,7 @@ class InvPhyTrainerWarp:
         vis.add_geometry(coordinate_frame)
         
         # Add control points with different colors
-        for i, points in enumerate(new_control_points):
+        for i, points in enumerate(control_points):
             ctrl_pcd = o3d.geometry.PointCloud()
             ctrl_pcd.points = o3d.utility.Vector3dVector(points.cpu().numpy())
             # Use red for first set, green for second set
