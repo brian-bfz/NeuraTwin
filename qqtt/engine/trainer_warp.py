@@ -1195,6 +1195,258 @@ class InvPhyTrainerWarp:
         out.release()
         cv2.destroyAllWindows()
         logger.info(f"Video saved to {output_path}")
+    
+    def select_control_points(self, model_path, gs_path, n_ctrl_parts):
+        # Load the model
+        logger.info(f"Load model from {model_path}")
+        checkpoint = torch.load(model_path, map_location=cfg.device)
+
+        spring_Y = checkpoint["spring_Y"]
+        collide_elas = checkpoint["collide_elas"]
+        collide_fric = checkpoint["collide_fric"]
+        collide_object_elas = checkpoint["collide_object_elas"]
+        collide_object_fric = checkpoint["collide_object_fric"]
+
+        assert (
+            len(spring_Y) == self.simulator.n_springs
+        ), "Check if the loaded checkpoint match the config file to connect the springs"
+
+        self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
+        self.simulator.set_collide(
+            collide_elas.detach().clone(), collide_fric.detach().clone()
+        )
+        self.simulator.set_collide_object(
+            collide_object_elas.detach().clone(),
+            collide_object_fric.detach().clone(),
+        )
+
+        # Get initial state
+        self.simulator.set_init_state(
+            self.simulator.wp_init_vertices, self.simulator.wp_init_velocities
+        )
+        # Run one step to initialize the states
+        self.simulator.step()
+        current_target = self.simulator.controller_points[0]
+        x = wp.to_torch(self.simulator.wp_states[-1].wp_x, requires_grad=False)
+        print("Initial state shape:", x.shape)
+        print("Initial state values:", x)
+
+        # Store initial control points for visualization
+        initial_control_points = current_target.clone()
+
+        # Setup visualization
+        vis_cam_idx = 0
+        width, height = cfg.WH
+        intrinsic = cfg.intrinsics[vis_cam_idx]
+        w2c = cfg.w2cs[vis_cam_idx]
+
+        # Load and setup gaussians
+        gaussians = GaussianModel(sh_degree=3)
+        gaussians.load_ply(gs_path)
+        gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
+        gaussians.isotropic = True
+
+        # Setup rendering
+        use_white_background = True
+        bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
+        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+        view = self._create_gs_view(w2c, intrinsic, height, width)
+        
+        # Load background image
+        image_path = cfg.bg_img_path
+        overlay = cv2.imread(image_path)
+        overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+
+        # Initialize control parts
+        self.n_ctrl_parts = n_ctrl_parts
+        if n_ctrl_parts > 1:
+            kmeans = KMeans(n_clusters=n_ctrl_parts, random_state=0, n_init=10)
+            cluster_labels = kmeans.fit_predict(current_target.cpu().numpy())
+            masks_ctrl_pts = []
+            for i in range(n_ctrl_parts):
+                mask = cluster_labels == i
+                masks_ctrl_pts.append(torch.from_numpy(mask))
+            self.mask_ctrl_pts = masks_ctrl_pts
+        else:
+            self.mask_ctrl_pts = None
+
+        self.scale_factors = 1.0
+        assert self.n_ctrl_parts <= 2, "Only support 1 or 2 control parts"
+        self.w2c = w2c
+        self.intrinsic = intrinsic
+
+        def generate_frame(current_target, x):
+            frame = overlay.copy()
+            results = render_gaussian(view, gaussians, None, background)
+            rendering = results["render"]  # (4, H, W)
+            image = rendering.permute(1, 2, 0).detach().cpu().numpy()
+
+            # Composite rendering with background
+            image = image.clip(0, 1)
+            if use_white_background:
+                image_mask = np.logical_and(
+                    (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
+                )
+            else:
+                image_mask = np.logical_and(
+                    (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
+                )
+            image[~image_mask, 3] = 0
+
+            alpha = image[..., 3:4]
+            rgb = image[..., :3] * 255
+            frame = alpha * rgb + (1 - alpha) * frame
+            frame = frame.astype(np.uint8)
+
+            # Add shadows
+            final_shadow = get_simple_shadow(
+                x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
+            )
+            frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
+            final_shadow = get_simple_shadow(
+                x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
+            )
+            frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
+            final_shadow = get_simple_shadow(
+                x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
+            )
+            frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            # Draw control points
+            points = current_target.cpu().numpy()
+            for point in points:
+                point_homogeneous = np.append(point, 1)
+                point_camera = w2c @ point_homogeneous
+                point_pixel = intrinsic @ point_camera[:3]
+                point_pixel = point_pixel[:2] / point_pixel[2]
+                pixel_x, pixel_y = point_pixel.astype(int)
+                
+                if 0 <= pixel_x < width and 0 <= pixel_y < height:
+                    cv2.circle(frame, (pixel_x, pixel_y), 2, (0, 255, 0), -1)
+
+            return frame, image
+
+        # Local variables that will be modified by the click handler
+        count = 0
+        
+        print(current_target)
+        def click_handler(event, x1, y1, flags, param):
+            nonlocal count, current_target, x
+            if event == cv2.EVENT_LBUTTONDOWN:
+                # Convert 2D pixel coordinates to a ray in 3D camera space
+                pixel_coords = np.array([x1, y1, 1])
+                camera_ray = np.linalg.inv(intrinsic) @ pixel_coords
+                camera_ray = camera_ray / np.linalg.norm(camera_ray)
+                
+                # Transform ray to world space
+                world_ray = np.linalg.inv(w2c[:3, :3]) @ camera_ray
+                camera_center = -np.linalg.inv(w2c[:3, :3]) @ w2c[:3, 3]
+                
+                # Find intersection with object points
+                # For each point, calculate the distance from camera center to the point
+                # along the ray direction
+                distances = []
+                for point in x.cpu().numpy():
+                    # Vector from camera center to point
+                    v = point - camera_center
+                    # Project this vector onto the ray direction
+                    t = np.dot(v, world_ray)
+                    # If t < 0, point is behind camera
+                    if t < 0:
+                        continue
+                    # Calculate perpendicular distance from point to ray
+                    perp_dist = np.linalg.norm(v - t * world_ray)
+                    # If point is close enough to ray, consider it a potential intersection
+                    # print(v, t, point, perp_dist)
+                    if perp_dist < 0.01:  # Threshold in world units
+                        distances.append(t)
+                
+                if not distances:
+                    print("No valid intersection found")
+                    return
+                    
+                # Use the closest intersection point
+                depth = min(distances)
+                world_coords = camera_center + depth * world_ray
+                
+                count += 1
+                
+                if self.n_ctrl_parts == 1:
+                    # For single controller part, translate all points
+                    current_center = current_target.cpu().numpy().mean(axis=0)
+                    translation = world_coords - current_center
+                    current_target += torch.tensor(translation, dtype=torch.float32, device=cfg.device)
+                    print(current_center)
+                else:
+                    # For two controller parts, translate only the selected cluster
+                    cluster_idx = count - 1
+                    cluster_mask = self.mask_ctrl_pts[cluster_idx]
+                    cluster = current_target[cluster_mask]
+                    current_center = cluster.cpu().numpy().mean(axis=0)
+                    translation = world_coords - current_center
+                    current_target[cluster_mask] += torch.tensor(translation, dtype=torch.float32, device=cfg.device)
+
+                print(f"Selected control point {count}: {world_coords}")
+
+        # Create the window first
+        cv2.namedWindow("Select Control Points")
+
+        cv2.setMouseCallback("Select Control Points", click_handler)
+
+
+        # Main loop for frame generation and display
+        while count < self.n_ctrl_parts:
+            frame, image = generate_frame(current_target, x)
+            cv2.imshow("Select Control Points", frame)
+            cv2.waitKey(1)
+        
+        cv2.destroyAllWindows()
+        
+        # Visualize the control points after selection
+        self.visualize_control_points(initial_control_points, current_target, x)
+        
+        return current_target
+
+    def visualize_control_points(self, old_control_points, new_control_points, x):
+        """Visualize object points, old control points, and new control points using Open3D."""
+        # Create point clouds for visualization
+        object_pcd = o3d.geometry.PointCloud()
+        old_ctrl_pcd = o3d.geometry.PointCloud()
+        new_ctrl_pcd = o3d.geometry.PointCloud()
+        
+        # Set points
+        object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
+        old_ctrl_pcd.points = o3d.utility.Vector3dVector(old_control_points.cpu().numpy())
+        new_ctrl_pcd.points = o3d.utility.Vector3dVector(new_control_points.cpu().numpy())
+        
+        # Set colors
+        object_pcd.paint_uniform_color([0.5, 0.5, 0.5])  # Gray for object points
+        old_ctrl_pcd.paint_uniform_color([1, 0, 0])      # Red for old control points
+        new_ctrl_pcd.paint_uniform_color([0, 1, 0])      # Green for new control points
+        
+        # Create coordinate frame
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        
+        # Create visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+        
+        # Add geometries
+        vis.add_geometry(object_pcd)
+        vis.add_geometry(old_ctrl_pcd)
+        vis.add_geometry(new_ctrl_pcd)
+        vis.add_geometry(coordinate_frame)
+        
+        # Set default camera view
+        view_control = vis.get_view_control()
+        view_control.set_front([1, 0, -2])
+        view_control.set_up([0, 0, -1])
+        view_control.set_zoom(0.5)
+        
+        # Run visualization
+        vis.run()
+        vis.destroy_window()
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
 
@@ -1304,3 +1556,18 @@ def get_simple_shadow(
     final_shadow[image_mask] = 0
     final_shadow = final_shadow == 255
     return final_shadow
+
+
+'''
+[-0.04025196  0.0259362  -0.07883434]
+Selected control point 1: [ 0.1074927  -0.16420561 -0.00984779]
+
+[-0.04025196  0.0259362  -0.07883434]
+Selected control point 1: [-0.14578269 -0.19089821 -0.009117  ]
+
+[-0.04025196  0.0259362  -0.07883434]
+Selected control point 1: [-0.17029284  0.20677952 -0.00766289]
+
+[-0.04025196  0.0259362  -0.07883434]
+Selected control point 1: [ 0.06977675  0.24097862 -0.01045121]
+'''
