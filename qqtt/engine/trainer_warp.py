@@ -1226,13 +1226,9 @@ class InvPhyTrainerWarp:
         )
         # Run one step to initialize the states
         self.simulator.step()
-        current_target = self.simulator.controller_points[0]
         x = wp.to_torch(self.simulator.wp_states[-1].wp_x, requires_grad=False)
         print("Initial state shape:", x.shape)
         print("Initial state values:", x)
-
-        # Store initial control points for visualization
-        initial_control_points = current_target.clone()
 
         # Setup visualization
         vis_cam_idx = 0
@@ -1259,23 +1255,12 @@ class InvPhyTrainerWarp:
 
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
-        if n_ctrl_parts > 1:
-            kmeans = KMeans(n_clusters=n_ctrl_parts, random_state=0, n_init=10)
-            cluster_labels = kmeans.fit_predict(current_target.cpu().numpy())
-            masks_ctrl_pts = []
-            for i in range(n_ctrl_parts):
-                mask = cluster_labels == i
-                masks_ctrl_pts.append(torch.from_numpy(mask))
-            self.mask_ctrl_pts = masks_ctrl_pts
-        else:
-            self.mask_ctrl_pts = None
-
         self.scale_factors = 1.0
         assert self.n_ctrl_parts <= 2, "Only support 1 or 2 control parts"
         self.w2c = w2c
         self.intrinsic = intrinsic
 
-        def generate_frame(current_target, x):
+        def generate_frame(x, control_points):
             frame = overlay.copy()
             results = render_gaussian(view, gaussians, None, background)
             rendering = results["render"]  # (4, H, W)
@@ -1313,26 +1298,34 @@ class InvPhyTrainerWarp:
             frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-            # Draw control points
-            points = current_target.cpu().numpy()
-            for point in points:
-                point_homogeneous = np.append(point, 1)
-                point_camera = w2c @ point_homogeneous
-                point_pixel = intrinsic @ point_camera[:3]
-                point_pixel = point_pixel[:2] / point_pixel[2]
-                pixel_x, pixel_y = point_pixel.astype(int)
-                
-                if 0 <= pixel_x < width and 0 <= pixel_y < height:
-                    cv2.circle(frame, (pixel_x, pixel_y), 2, (0, 255, 0), -1)
+            # Draw control points if they exist
+            for i, points in enumerate(control_points):
+                points_homogeneous = np.hstack([points.cpu().numpy(), np.ones((points.shape[0], 1))])
+                points_camera = (w2c @ points_homogeneous.T).T
+                points_pixels = (intrinsic @ points_camera[:, :3].T).T
+                points_pixels = points_pixels[:, :2] / points_pixels[:, 2:3]
+                pixel_coords = points_pixels.astype(int)
+
+                # Filter points that are within the image bounds
+                valid_mask = (
+                    (pixel_coords[:, 0] >= 0) & (pixel_coords[:, 0] < width) &
+                    (pixel_coords[:, 1] >= 0) & (pixel_coords[:, 1] < height)
+                )
+                valid_pixel_coords = pixel_coords[valid_mask]
+
+                # Draw circles for control points (red for first set, green for second set)
+                color = (0, 0, 255) if i == 0 else (0, 255, 0)
+                for x, y in valid_pixel_coords:
+                    cv2.circle(frame, (x, y), 3, color, -1)
 
             return frame, image
 
         # Local variables that will be modified by the click handler
         count = 0
+        control_points = []
         
-        print(current_target)
         def click_handler(event, x1, y1, flags, param):
-            nonlocal count, current_target, x
+            nonlocal count, control_points
             if event == cv2.EVENT_LBUTTONDOWN:
                 # Convert 2D pixel coordinates to a ray in 3D camera space
                 pixel_coords = np.array([x1, y1, 1])
@@ -1344,8 +1337,6 @@ class InvPhyTrainerWarp:
                 camera_center = -np.linalg.inv(w2c[:3, :3]) @ w2c[:3, 3]
                 
                 # Find intersection with object points
-                # For each point, calculate the distance from camera center to the point
-                # along the ray direction
                 distances = []
                 for point in x.cpu().numpy():
                     # Vector from camera center to point
@@ -1358,72 +1349,63 @@ class InvPhyTrainerWarp:
                     # Calculate perpendicular distance from point to ray
                     perp_dist = np.linalg.norm(v - t * world_ray)
                     # If point is close enough to ray, consider it a potential intersection
-                    # print(v, t, point, perp_dist)
-                    if perp_dist < 0.01:  # Threshold in world units
-                        distances.append(t)
+                    if perp_dist < 0.01: # threshold in world units
+                        distances.append((t, perp_dist))
                 
                 if not distances:
                     print("No valid intersection found")
                     return
                     
-                # Use the closest intersection point
-                depth = min(distances)
+                # Use the closest intersection point (minimum perpendicular distance)
+                depth, perp_dist = min(distances, key=lambda x: x[1])
                 world_coords = camera_center + depth * world_ray
                 
                 count += 1
-                
-                if self.n_ctrl_parts == 1:
-                    # For single controller part, translate all points
-                    current_center = current_target.cpu().numpy().mean(axis=0)
-                    translation = world_coords - current_center
-                    current_target += torch.tensor(translation, dtype=torch.float32, device=cfg.device)
-                    print(current_center)
-                else:
-                    # For two controller parts, translate only the selected cluster
-                    cluster_idx = count - 1
-                    cluster_mask = self.mask_ctrl_pts[cluster_idx]
-                    cluster = current_target[cluster_mask]
-                    current_center = cluster.cpu().numpy().mean(axis=0)
-                    translation = world_coords - current_center
-                    current_target[cluster_mask] += torch.tensor(translation, dtype=torch.float32, device=cfg.device)
-
                 print(f"Selected control point {count}: {world_coords}")
+                
+                # Create a cube of control points centered at the clicked location
+                cube_size = 0.02 # Size of the cube in world units
+                
+                # Generate 8 vertices for a single cube
+                points = []
+                for i in range(2):
+                    for j in range(2):
+                        for k in range(2):
+                            # Calculate offset from center
+                            offset = np.array([
+                                (i - 0.5) * cube_size,
+                                (j - 0.5) * cube_size,
+                                (k - 0.5) * cube_size
+                            ])
+                            points.append(world_coords + offset)
+                
+                # Convert to tensor and store
+                new_points = torch.tensor(points, dtype=torch.float32, device=cfg.device)
+                control_points.append(new_points)
 
         # Create the window first
         cv2.namedWindow("Select Control Points")
-
         cv2.setMouseCallback("Select Control Points", click_handler)
-
 
         # Main loop for frame generation and display
         while count < self.n_ctrl_parts:
-            frame, image = generate_frame(current_target, x)
+            frame, image = generate_frame(x, control_points)
             cv2.imshow("Select Control Points", frame)
             cv2.waitKey(1)
         
         cv2.destroyAllWindows()
         
         # Visualize the control points after selection
-        self.visualize_control_points(initial_control_points, current_target, x)
+        self.visualize_control_points(None, control_points, x)
         
-        return current_target
+        return control_points
 
     def visualize_control_points(self, old_control_points, new_control_points, x):
-        """Visualize object points, old control points, and new control points using Open3D."""
+        """Visualize object points and new control points using Open3D."""
         # Create point clouds for visualization
         object_pcd = o3d.geometry.PointCloud()
-        old_ctrl_pcd = o3d.geometry.PointCloud()
-        new_ctrl_pcd = o3d.geometry.PointCloud()
-        
-        # Set points
         object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
-        old_ctrl_pcd.points = o3d.utility.Vector3dVector(old_control_points.cpu().numpy())
-        new_ctrl_pcd.points = o3d.utility.Vector3dVector(new_control_points.cpu().numpy())
-        
-        # Set colors
         object_pcd.paint_uniform_color([0.5, 0.5, 0.5])  # Gray for object points
-        old_ctrl_pcd.paint_uniform_color([1, 0, 0])      # Red for old control points
-        new_ctrl_pcd.paint_uniform_color([0, 1, 0])      # Green for new control points
         
         # Create coordinate frame
         coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
@@ -1434,9 +1416,15 @@ class InvPhyTrainerWarp:
         
         # Add geometries
         vis.add_geometry(object_pcd)
-        vis.add_geometry(old_ctrl_pcd)
-        vis.add_geometry(new_ctrl_pcd)
         vis.add_geometry(coordinate_frame)
+        
+        # Add control points with different colors
+        for i, points in enumerate(new_control_points):
+            ctrl_pcd = o3d.geometry.PointCloud()
+            ctrl_pcd.points = o3d.utility.Vector3dVector(points.cpu().numpy())
+            # Use red for first set, green for second set
+            ctrl_pcd.paint_uniform_color([1, 0, 0] if i == 0 else [0, 1, 0])
+            vis.add_geometry(ctrl_pcd)
         
         # Set default camera view
         view_control = vis.get_view_control()
