@@ -60,6 +60,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--case_name", type=str)
     parser.add_argument("--n_ctrl_parts", type=int)
+    parser.add_argument("--custom_ctrl_points", type=str, help="Path to directory containing custom control points")
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -102,9 +103,18 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
     os.makedirs(os.path.join(save_dir, "controller_points"), exist_ok=True)
 
+    # Load custom control points if provided
+    custom_control_points = None
+    if args.custom_ctrl_points:
+        cp_path = os.path.join(args.custom_ctrl_points, "cp.pt")
+        if not os.path.exists(cp_path):
+            raise FileNotFoundError(f"Control points file not found: {cp_path}")
+        custom_control_points = torch.load(cp_path)
+        logger.info(f"Loaded custom control points from {cp_path}")
+
     pressed_keys_sequence = random_movement(args.n_ctrl_parts)
     print(pressed_keys_sequence)
     
     trainer.generate_data(
-        best_model_path, gaussians_path, args.n_ctrl_parts, save_dir, pressed_keys_sequence
+        best_model_path, gaussians_path, args.n_ctrl_parts, save_dir, pressed_keys_sequence, custom_control_points
     )

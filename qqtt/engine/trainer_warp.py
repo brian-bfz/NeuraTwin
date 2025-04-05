@@ -936,7 +936,7 @@ class InvPhyTrainerWarp:
         return self.structure_points[min_idx].unsqueeze(0)
     
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, pressed_keys_sequence=None
+        self, model_path, gs_path, n_ctrl_parts=1, custom_control_points=None, save_dir=None, pressed_keys_sequence=None
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -967,7 +967,14 @@ class InvPhyTrainerWarp:
             self.simulator.wp_init_vertices, self.simulator.wp_init_velocities
         )
 
-        current_target = self.simulator.controller_points[0]
+        if custom_control_points is not None:
+            current_target = custom_control_points
+            # TODO: change current_target to the points selected by select_cp.py
+            # TODO: delete old connections between controller points and object points
+            # TODO: add new connections between the new controller points and object points using code from outdomain_inference
+        else:   
+            current_target = self.simulator.controller_points[0]
+
         prev_target = current_target
 
         gaussians = GaussianModel(sh_degree=3)
@@ -1411,7 +1418,7 @@ class InvPhyTrainerWarp:
         cv2.destroyAllWindows()
         
         # Visualize the control points after selection
-        self.visualize_control_points(control_points, x)
+        # self.visualize_control_points(control_points, x)
         
         return control_points
 

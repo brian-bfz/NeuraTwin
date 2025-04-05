@@ -118,4 +118,12 @@ if __name__ == "__main__":
     cp = trainer.select_control_points(
         best_model_path, gaussians_path, args.n_ctrl_parts
     )
-    print(cp)
+    # print(cp)
+
+    # Save control points in generated_data directory
+    save_dir = os.path.join("generated_data", case_name)
+    os.makedirs(save_dir, exist_ok=True)
+    
+    save_path = os.path.join(save_dir, "cp.pt")
+    torch.save(cp, save_path)
+    print(f"Saved control points to {save_path}")
