@@ -33,12 +33,37 @@ This repository contains the official implementation of the **PhysTwin** framewo
 ### Update
 **This repository will be actively maintained by the authors, with continuous updates introducing new features to inspire further research.**
 
+<<<<<<< HEAD
 #### Upcoming Releases (Next Few Days)
 - **Force Visualization:** Visualize the forces applied to objects after optimization, aiding in force analysis from videos.
 - **Material Visualization:** Visualize object materials post-optimization to facilitate material analysis from interactions.
 - **Material Transfer:** Provide a demo for transferring material properties from one PhysTwin to another object.
 - **Rigid Object Demo:** Demonstrate our framework on rigid object interactions, showcasing its capability for rigid object tracking from videos.
 - **Claw Machine:** Utilize our constructed PhysTwin to develop a claw machine demo, illustrating collision handling among multiple objects.
+=======
+- **[25.4.4] Material Visualization:** Show the experimental features to visualize the materials approximated from the underlying spring-mass model. (See below for detailed instructions)
+<p align="center">
+  <img src="./assets/material_rope.gif" width="30%">
+  <img src="./assets/material_cloth.gif" width="30%">
+  <img src="./assets/material_sloth.gif" width="30%">
+</p>
+
+
+- **[25.4.3] Multiple Objects Demos:** Show the experimental features for handling collisions among multiple PhysTwins we construct. (See below for detailed instructions)
+<p align="center">
+  <img src="./assets/rope_multiple.gif" width="45%">
+  <img src="./assets/sloth_multiple.gif" width="45%">
+</p>
+
+- **[25.4.3] LBS GPU Memory Fix:** Clear intermediate variables to significantly reduce GPU memory usage in the interactive playground. The sloth case now requires only about 4GB in total. (Pull the latest code to apply the fix.)
+
+- **[25.4.1] Force Visualization:** Visualize the forces applied to objects after optimization, aiding in force analysis from videos. (See below for detailed instructions)
+<p align="center">
+  <img src="./assets/force_rope.gif" width="30%">
+  <img src="./assets/force_cloth.gif" width="30%">
+  <img src="./assets/force_sloth.gif" width="30%">
+</p>
+>>>>>>> upstream/main
 
 #### Long-Term Plans
 - **Batch Inferencing Support:** Integrate batch inferencing into the underlying SpringMass code, enabling faster rollouts and efficient data generation.
@@ -54,6 +79,10 @@ conda create -y -n phystwin python=3.10
 conda activate phystwin
 
 # Install the packages
+<<<<<<< HEAD
+=======
+# If you only want to explore the interactive playground, you can skip installing Trellis, Grounding-SAM-2, RealSense, and SDXL.
+>>>>>>> upstream/main
 bash ./env_install/env_install.sh
 
 # Download the necessary pretrained models for data processing
@@ -84,7 +113,10 @@ python interactive_playground.py \
 # Examples of usage:
 python interactive_playground.py --n_ctrl_parts 2 --case_name double_stretch_sloth
 python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_lift_cloth_3
+<<<<<<< HEAD
 python generate_data.py --n_ctrl_parts 2 --case_name double_stretch_sloth
+=======
+>>>>>>> upstream/main
 ```
 
 Options: 
@@ -122,6 +154,10 @@ bash evaluate.sh
 
 ### Data Processing from Raw Videos
 The original data in each case only includes `color`, `depth`, `calibrate.pkl`, `metadata.json`. All other data are processed as below to get, including the projection, tracking and shape priors.
+<<<<<<< HEAD
+=======
+(Note: Be aware of the conflict in the diff-gaussian-rasterization library between Gaussian Splatting and Trellis. For data processing, you don't need to install the gaussian splatting; ignore the last section in env_install.sh)
+>>>>>>> upstream/main
 ```
 # Process the data
 python script_process_data.py
@@ -133,6 +169,49 @@ python export_gaussian_data.py
 python export_video_human_mask.py
 ```
 
+<<<<<<< HEAD
+=======
+### Control Force Visualization
+Visualize the force applied by the hand to the object as inferred from our PhysTwin model, based solely on video data.
+```
+python visualize_force.py \
+--n_ctrl_parts [1 or 2] \
+--case_name [case_name]
+
+# Examples of usage:
+python visualize_force.py --case_name single_push_rope_1 --n_ctrl_parts 1 
+python visualize_force.py --case_name single_clift_cloth_1 --n_ctrl_parts 1    
+python visualize_force.py --case_name double_stretch_sloth 
+```
+The visualziation video is saved under `experiments` folder.
+
+### Material Visualization
+Experimental feature to visualize the approximated material from the constructed PhysTwin.
+```
+python visualize_material.py \
+--case_name [case_name]
+
+# Examples of usage:
+python visualize_material.py --case_name double_lift_cloth_1
+python visualize_material.py --case_name single_push_rope
+python visualize_material.py --case_name double_stretch_sloth
+```
+
+
+### Multiple Objects Demos
+Try the experimental features for handling collisions among the multiple PhysTwins we construct.
+
+```
+# The stuff is deployed in the 'claw_matchine' branch
+git pull
+git checkout claw_machine
+
+# Play with the examples
+python interactive_playground.py --n_ctrl_parts 1 --case_name single_push_rope_1 --n_dup 4
+python interactive_playground.py --n_ctrl_parts 2 --case_name double_stretch_sloth --n_dup 2
+```
+
+>>>>>>> upstream/main
 ### Follow-up and Potential Collaborations  
 If you are interested in collaborating or extending this work for your research, feel free to contact us at `hanxiao.jiang@columbia.edu`.  
 

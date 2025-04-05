@@ -39,7 +39,10 @@ temp_experiments/
 gaussian_output/
 gaussian_output_video/
 gaussian_output_dynamic
+<<<<<<< HEAD
 generated_data/
+=======
+>>>>>>> upstream/main
 
 
 # Byte-compiled / optimized / DLL files

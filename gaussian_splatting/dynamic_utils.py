@@ -297,6 +297,10 @@ def knn_weights_sparse(bones, pts, K=5):
     weights_vals, indices = torch.topk(dist, K, dim=-1, largest=False)
     weights_vals = 1 / (weights_vals + 1e-6)
     weights_vals = weights_vals / weights_vals.sum(dim=-1, keepdim=True)  # (N, k)
+<<<<<<< HEAD
+=======
+    torch.cuda.empty_cache()
+>>>>>>> upstream/main
     return weights_vals, indices
 
 
