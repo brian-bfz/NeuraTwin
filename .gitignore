@@ -39,6 +39,9 @@ temp_experiments/
 gaussian_output/
 gaussian_output_video/
 gaussian_output_dynamic
+interactive_my_test.py
+xarm/
+temp.sh
 <<<<<<< HEAD
 generated_data/
 =======

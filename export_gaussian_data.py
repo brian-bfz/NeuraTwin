@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 import open3d as o3d
 
-base_path = "./data/different_types"
+base_path = "./data/phystwin_eval"
 output_path = "./data/gaussian_data"
 CONTROLLER_NAME = "hand"
 

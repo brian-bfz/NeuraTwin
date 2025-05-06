@@ -33,14 +33,10 @@ This repository contains the official implementation of the **PhysTwin** framewo
 ### Update
 **This repository will be actively maintained by the authors, with continuous updates introducing new features to inspire further research.**
 
-<<<<<<< HEAD
-#### Upcoming Releases (Next Few Days)
-- **Force Visualization:** Visualize the forces applied to objects after optimization, aiding in force analysis from videos.
-- **Material Visualization:** Visualize object materials post-optimization to facilitate material analysis from interactions.
-- **Material Transfer:** Provide a demo for transferring material properties from one PhysTwin to another object.
-- **Rigid Object Demo:** Demonstrate our framework on rigid object interactions, showcasing its capability for rigid object tracking from videos.
-- **Claw Machine:** Utilize our constructed PhysTwin to develop a claw machine demo, illustrating collision handling among multiple objects.
-=======
+- **[25.4.15] GPU Memory Optimization:** Thanks to user feedback and testing, we've further optimized the code to reduce GPU memory usage in the interactive playground—now requiring only about 2GB in total. Previously, LBS initialization consumed a significant amount of GPU memory; it's now offloaded to the CPU and only needs to run once at startup. Everything runs smoothly as a result.
+
+- **[25.4.8] Optmization Speed:** Regarding the questions on optimization speed, thanks to Nvidia Warp, our differentiable Spring-Mass simulator enables first-order optimization in approximately 5 minutes—and even faster with visualizations disabled—significantly outperforming prior work that typically requires hours. The zero-order, sampling-based optimization (CMA-ES) takes around 12 minutes, depending on the number of epochs. These statistics are based on the stuffed animal experiments without self-collision enabled.
+  
 - **[25.4.4] Material Visualization:** Show the experimental features to visualize the materials approximated from the underlying spring-mass model. (See below for detailed instructions)
 <p align="center">
   <img src="./assets/material_rope.gif" width="30%">
@@ -102,7 +98,7 @@ Use the previously constructed PhysTwin to explore the interactive playground. U
 
 ![example](./assets/sloth.gif)
 
-Run the interactive playground with our different cases (Need to wait some time for the first usage of interactive playground; Can achieve about 30 FPS using RTX 4090)
+Run the interactive playground with our different cases (Need to wait some time for the first usage of interactive playground; Can achieve about 37 FPS using RTX 4090 on sloth case)
 
 ```
 python interactive_playground.py \
