@@ -45,3 +45,8 @@ cd gaussian_splatting/
 pip install submodules/diff-gaussian-rasterization/
 pip install submodules/simple-knn/
 cd ..
+
+# Brian added
+pip install networkx
+pip install sapien
+pip install urdfpy

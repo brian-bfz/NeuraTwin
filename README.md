@@ -109,6 +109,9 @@ python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_
 python generate_data.py --n_ctrl_parts 2 --case_name double_stretch_sloth
 ```
 
+Brian's notes: 
+1. urdfpy is outdated. Ignore its requirement on networkx version. When running it for the first time, numpy will return an error saying that np.float is outdated. Replace that with float. 
+
 Options: 
 -   --inv_ctrl: inverse the control direction
 -   --n_ctrol_parts: number of control panel (single: 1, double: 2) 
