@@ -1,7 +1,7 @@
 import os
 import glob
 
-base_path = "./data/different_types"
+base_path = "./data/phystwin_eval"
 output_path = "./data/different_types_human_mask"
 
 def existDir(dir_path):

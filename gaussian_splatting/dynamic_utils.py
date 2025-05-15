@@ -293,13 +293,14 @@ def calc_weights_vals_from_indices(bones, pts, indices):
 
 
 def knn_weights_sparse(bones, pts, K=5):
-    dist = torch.norm(pts[:, None] - bones, dim=-1)  # (n_pts, n_bones)
+    dist = torch.norm(pts[:, None].cpu() - bones.cpu(), dim=-1)  # (n_pts, n_bones)
     weights_vals, indices = torch.topk(dist, K, dim=-1, largest=False)
+    weights_vals = weights_vals.to(pts.device)
+    indices = indices.to(pts.device)
     weights_vals = 1 / (weights_vals + 1e-6)
     weights_vals = weights_vals / weights_vals.sum(dim=-1, keepdim=True)  # (N, k)
     torch.cuda.empty_cache()
     return weights_vals, indices
-
 
 def interpolate_motions_speedup(bones, motions, relations, xyz, rot=None, quat=None, weights=None, weights_indices=None, device='cuda', step='n/a'):
     # bones: (n_bones, 3) bone positions
