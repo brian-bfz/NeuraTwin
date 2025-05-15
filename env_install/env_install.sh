@@ -39,7 +39,7 @@ cd TRELLIS
 
 cd ../..
 
-pip install gsplat
+pip install gsplat==1.4.0
 pip install kornia
 cd gaussian_splatting/
 pip install submodules/diff-gaussian-rasterization/
