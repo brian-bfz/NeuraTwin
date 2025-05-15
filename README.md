@@ -79,10 +79,7 @@ conda create -y -n phystwin python=3.10
 conda activate phystwin
 
 # Install the packages
-<<<<<<< HEAD
-=======
 # If you only want to explore the interactive playground, you can skip installing Trellis, Grounding-SAM-2, RealSense, and SDXL.
->>>>>>> upstream/main
 bash ./env_install/env_install.sh
 
 # Download the necessary pretrained models for data processing
@@ -113,10 +110,7 @@ python interactive_playground.py \
 # Examples of usage:
 python interactive_playground.py --n_ctrl_parts 2 --case_name double_stretch_sloth
 python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_lift_cloth_3
-<<<<<<< HEAD
 python generate_data.py --n_ctrl_parts 2 --case_name double_stretch_sloth
-=======
->>>>>>> upstream/main
 ```
 
 Options: 

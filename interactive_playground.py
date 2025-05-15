@@ -1,8 +1,5 @@
-<<<<<<< HEAD
 # import sys
 # sys.path.append("./gaussian_splatting")
-=======
->>>>>>> upstream/main
 from qqtt import InvPhyTrainerWarp
 from qqtt.utils import logger, cfg
 from datetime import datetime
