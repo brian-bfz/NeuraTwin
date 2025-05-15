@@ -211,15 +211,15 @@ if __name__ == "__main__":
 
     # Load the static_meshes
     static_meshes = []
-    clip_mesh = o3d.io.read_triangle_mesh("clip.stl")
-    clip_mesh.scale(0.0015, center=[0, 0, 0])
-    static_poses = np.array(
-        [
-            [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, -0.005], [0, 0, 0, 1]],
-            [[1, 0, 0, 0.1], [0, -1, 0, 0.3], [0, 0, -1, -0.005], [0, 0, 0, 1]],
-        ],
-        dtype=np.float32,
-    )
+    # clip_mesh = o3d.io.read_triangle_mesh("clip.stl")
+    # clip_mesh.scale(0.0015, center=[0, 0, 0])
+    # static_poses = np.array(
+    #     [
+    #         [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, -0.005], [0, 0, 0, 1]],
+    #         [[1, 0, 0, 0.1], [0, -1, 0, 0.3], [0, 0, -1, -0.005], [0, 0, 0, 1]],
+    #     ],
+    #     dtype=np.float32,
+    # )
     # static_poses = np.array(
     #     [
     #         [[0, -1, 0, 0], [-1, 0, 0, 0], [0, 0, -1, -0.005], [0, 0, 0, 1]],
@@ -227,12 +227,12 @@ if __name__ == "__main__":
     #     ],
     #     dtype=np.float32,
     # )
-    for static_pose in static_poses:
-        new_mesh = o3d.geometry.TriangleMesh(clip_mesh)
-        new_mesh.transform(static_pose)
-        new_mesh.paint_uniform_color([0.929, 0, 1])
-        new_mesh.compute_vertex_normals()
-        static_meshes.append(new_mesh)
+    # for static_pose in static_poses:
+    #     new_mesh = o3d.geometry.TriangleMesh(clip_mesh)
+    #     new_mesh.transform(static_pose)
+    #     new_mesh.paint_uniform_color([0.929, 0, 1])
+    #     new_mesh.compute_vertex_normals()
+    #     static_meshes.append(new_mesh)
     # coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
     # o3d.visualization.draw_geometries(static_meshes + [coordinate])
 
