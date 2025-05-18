@@ -1403,6 +1403,9 @@ class InvPhyTrainerWarp:
         is_closing = False
 
         for pressed_keys in pressed_keys_sequence:
+            self.pressed_keys.clear()
+            for key in pressed_keys:
+                self.pressed_keys.add(key)
 
             total_timer.start()
 
@@ -1505,7 +1508,7 @@ class InvPhyTrainerWarp:
                 static_vis_mask = np.all(static_image == [255, 255, 255], axis=-1)
                 frame[~static_vis_mask] = static_image[~static_vis_mask]
 
-            frame = self.update_frame(frame, pressed_keys, overlay_hand=False)
+            frame = self.update_frame(frame, self.pressed_keys, overlay_hand=False)
 
             # Add shadows
             final_shadow = get_simple_shadow(
@@ -1719,7 +1722,6 @@ class InvPhyTrainerWarp:
                     num_object_springs,
                 )
                 print(f"Energy: {total_energy:.2f}")
-
 
     def video_from_data(
         self, gs_path, save_dir
