@@ -210,7 +210,7 @@ if __name__ == "__main__":
     cfg.bg_img_path = args.bg_img_path
 
     # Load the static_meshes
-    static_meshes = []
+    # static_meshes = []
     # clip_mesh = o3d.io.read_triangle_mesh("clip.stl")
     # clip_mesh.scale(0.0015, center=[0, 0, 0])
     # static_poses = np.array(
@@ -258,7 +258,7 @@ if __name__ == "__main__":
         data_path=f"{base_path}/{case_name}/final_data.pkl",
         base_dir=base_dir,
         pure_inference_mode=True,
-        static_meshes=static_meshes,
+        static_meshes=[],
         robot=sample_robot,
     )
 
