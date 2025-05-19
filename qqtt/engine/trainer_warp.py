@@ -983,7 +983,7 @@ class InvPhyTrainerWarp:
         return self.structure_points[min_idx].unsqueeze(0)
     
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, custom_control_points=None, save_dir=None, pressed_keys_sequence=None
+        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, pressed_keys_sequence=None, custom_control_points=None, 
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -1116,6 +1116,7 @@ class InvPhyTrainerWarp:
             "c": [2.0 / 180 * np.pi, 0, 0],
             "v": [-2.0 / 180 * np.pi, 0, 0],
         }
+        self.pressed_keys = set()
 
         frame_count = 0
 
@@ -1174,13 +1175,13 @@ class InvPhyTrainerWarp:
                     'frame_count': frame_count
                 }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
                 # Save robot mesh
-                for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                    o3d.io.write_triangle_mesh(os.path.join(save_dir, "meshes", f"finger_{i}_frame_{frame_count}.obj"), dynamic_mesh)
-                # mesh_dir = os.path.join(save_dir, "robot_meshes")
-                # os.makedirs(mesh_dir, exist_ok=True)
                 # for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                #     mesh_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.obj")
-                #     o3d.io.write_triangle_mesh(mesh_path, dynamic_mesh)
+                #     o3d.io.write_triangle_mesh(os.path.join(save_dir, "meshes", f"finger_{i}_frame_{frame_count}.obj"), dynamic_mesh)
+                mesh_dir = os.path.join(save_dir, "robot_meshes")
+                os.makedirs(mesh_dir, exist_ok=True)
+                for i, dynamic_mesh in enumerate(self.dynamic_meshes):
+                    mesh_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.obj")
+                    o3d.io.write_triangle_mesh(mesh_path, dynamic_mesh)
 
             if prev_x is not None:
                 with torch.no_grad():
