@@ -1177,10 +1177,8 @@ class InvPhyTrainerWarp:
                 # Save robot mesh
                 # for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                 #     o3d.io.write_triangle_mesh(os.path.join(save_dir, "meshes", f"finger_{i}_frame_{frame_count}.obj"), dynamic_mesh)
-                mesh_dir = os.path.join(save_dir, "robot_meshes")
-                os.makedirs(mesh_dir, exist_ok=True)
                 for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                    mesh_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.obj")
+                    mesh_path = os.path.join(save_dir, f"meshes/finger_{i}_frame_{frame_count}.obj")
                     o3d.io.write_triangle_mesh(mesh_path, dynamic_mesh)
 
             if prev_x is not None:
@@ -1949,7 +1947,7 @@ class InvPhyTrainerWarp:
             gaussians._rotation = gaussians_data['rotation']
 
             # Load robot mesh into self.dynamic_meshes
-            mesh_dir = os.path.join(save_dir, "robot_meshes")
+            mesh_dir = os.path.join(save_dir, "meshes")
             for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                 mesh_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.obj")
                 loaded_mesh = o3d.io.read_triangle_mesh(mesh_path)
@@ -1959,37 +1957,37 @@ class InvPhyTrainerWarp:
                 # dynamic_mesh.vertex_normals = loaded_mesh.vertex_normals
 
             # 2. Frame initialization and setup
-            frame = overlay.copy()
+            frame = overlay.clone()
 
             # 3. Rendering
             # render with gaussians and paste the image on top of the frame
             results = render_gaussian(view, gaussians, None, background)
             rendering = results["render"]  # (4, H, W)
-            image = rendering.permute(1, 2, 0).detach().cpu().numpy()
+            image = rendering.permute(1, 2, 0).detach()
 
             # Continue frame compositing
             # composition code from Hanxiao
-            image = image.clip(0, 1)
+            image = image.clamp(0, 1)
             if use_white_background:
-                image_mask = np.logical_and(
+                image_mask = torch.logical_and(
                     (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
                 )
             else:
-                image_mask = np.logical_and(
+                image_mask = torch.logical_and(
                     (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
                 )
-            image[~image_mask, 3] = 0
+            image[..., 3].masked_fill_(~image_mask, 0.0)
 
             alpha = image[..., 3:4]
             rgb = image[..., :3] * 255
             frame = alpha * rgb + (1 - alpha) * frame
+            frame = frame.cpu().numpy()
+            image_mask = image_mask.cpu().numpy()
             frame = frame.astype(np.uint8)
 
             # render robot mesh
+            # TODO: modify this to use the saved meshes instead of the dynamic_vertices
             for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                dynamic_mesh.vertices = o3d.utility.Vector3dVector(
-                    self.dynamic_vertices[i]
-                )
                 vis.update_geometry(dynamic_mesh)
             vis.poll_events()
             vis.update_renderer()

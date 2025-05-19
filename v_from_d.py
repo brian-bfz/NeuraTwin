@@ -11,6 +11,7 @@ import glob
 import os
 import pickle
 import json
+from SampleRobot import RobotPcSampler
 
 def set_all_seeds(seed):
     random.seed(seed)
@@ -56,6 +57,16 @@ if __name__ == "__main__":
 
     base_dir = f"./temp_experiments/{case_name}"
 
+    # Load the robot finger
+    urdf_path = "xarm/xarm7_with_gripper.urdf"
+    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+
+    init_pose = np.eye(4)
+    init_pose[:3, :3] = R
+    init_pose[:3, 3] = [0.2, 0.0, 0.23]
+    sample_robot = RobotPcSampler(
+        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+    )
 
     # Set the intrinsic and extrinsic parameters for visualization
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
@@ -77,6 +88,8 @@ if __name__ == "__main__":
         data_path=f"{base_path}/{case_name}/final_data.pkl",
         base_dir=base_dir,
         pure_inference_mode=True,
+        static_meshes=[],
+        robot=sample_robot,
     )
 
     # Generate video from saved data
