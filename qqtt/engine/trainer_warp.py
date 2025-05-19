@@ -1174,12 +1174,10 @@ class InvPhyTrainerWarp:
                     'rotation': gaussians._rotation,
                     'frame_count': frame_count
                 }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
-                # Save robot mesh
-                # for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                #     o3d.io.write_triangle_mesh(os.path.join(save_dir, "meshes", f"finger_{i}_frame_{frame_count}.obj"), dynamic_mesh)
-                for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                    mesh_path = os.path.join(save_dir, f"meshes/finger_{i}_frame_{frame_count}.obj")
-                    o3d.io.write_triangle_mesh(mesh_path, dynamic_mesh)
+                # Save dynamic vertices
+                for i, vertices in enumerate(self.dynamic_vertices):
+                    vertices_path = os.path.join(save_dir, f"meshes/finger_{i}_frame_{frame_count}.npy")
+                    np.save(vertices_path, vertices)
 
             if prev_x is not None:
                 with torch.no_grad():
@@ -1946,15 +1944,15 @@ class InvPhyTrainerWarp:
             gaussians._xyz = gaussians_data['xyz']
             gaussians._rotation = gaussians_data['rotation']
 
-            # Load robot mesh into self.dynamic_meshes
+            # Load saved vertices and update dynamic_meshes
             mesh_dir = os.path.join(save_dir, "meshes")
             for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                mesh_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.obj")
-                loaded_mesh = o3d.io.read_triangle_mesh(mesh_path)
-                # Update only the vertices of the existing mesh to preserve topology and references
-                dynamic_mesh.vertices = loaded_mesh.vertices
-                # Optionally, update normals if needed:
-                # dynamic_mesh.vertex_normals = loaded_mesh.vertex_normals
+                vertices_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.npy")
+                vertices = np.load(vertices_path)
+                # Update vertices while preserving mesh topology
+                dynamic_mesh.vertices = o3d.utility.Vector3dVector(vertices)
+                # Update normals after changing vertices
+                dynamic_mesh.compute_vertex_normals()
 
             # 2. Frame initialization and setup
             frame = overlay.clone()
