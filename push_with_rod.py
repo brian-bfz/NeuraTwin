@@ -33,12 +33,16 @@ def random_movement(n_ctrl_parts, num_movements=10, frames_per_movement=10):
     hand2_keys = ['i', 'k', 'j', 'l', 'o', 'u']  # Right hand keys
     
     sequence = []
-    for _ in range(num_movements):
+
+    # temporary code to set position
+    movement = []
+    movement.append("m")
+    movement.append("d")
+    sequence.extend([movement] * 2 * frames_per_movement)
+
+    for _ in range(num_movements - 2):
         # Generate random movements for each hand
         movement = []
-
-        # close the gripper
-        movement.append("m");
 
         # Left hand movement
         movement.append(random.choice(hand1_keys))
