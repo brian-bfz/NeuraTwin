@@ -1671,7 +1671,7 @@ class InvPhyTrainerWarp:
                 static_vis_mask = np.all(static_image == [255, 255, 255], axis=-1)
                 frame[~static_vis_mask] = static_image[~static_vis_mask]
 
-            frame = self.update_frame(frame, self.pressed_keys, overlay_hand=False)
+            # frame = self.update_frame(frame, self.pressed_keys, overlay_hand=False)
 
             # Add shadows
             final_shadow = get_simple_shadow(
@@ -1900,13 +1900,41 @@ class InvPhyTrainerWarp:
         gaussians.load_ply(gs_path)
         gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
         gaussians.isotropic = True
+        current_pos = gaussians.get_xyz
+        current_rot = gaussians.get_rotation
         use_white_background = True  # set to True for white background
         bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         view = self._create_gs_view(w2c, intrinsic, height, width)
+        prev_x = None
+        relations = None
+        weights = None
         image_path = cfg.bg_img_path
         overlay = cv2.imread(image_path)
         overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+        overlay = torch.tensor(overlay, dtype=torch.float32, device=cfg.device)
+
+        # Render mesh 
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(visible=False, width=width, height=height)
+        render_option = vis.get_render_option()
+        render_option.point_size = 10.0
+        for static_mesh in self.static_meshes:
+            vis.add_geometry(static_mesh)
+
+        for dynamic_mesh in self.dynamic_meshes:
+            vis.add_geometry(dynamic_mesh)
+
+        view_control = vis.get_view_control()
+        camera_params = o3d.camera.PinholeCameraParameters()
+        intrinsic_parameter = o3d.camera.PinholeCameraIntrinsic(
+            width, height, intrinsic
+        )
+        camera_params.intrinsic = intrinsic_parameter
+        camera_params.extrinsic = w2c
+        view_control.convert_from_pinhole_camera_parameters(
+            camera_params, allow_arbitrary=True
+        )
 
         # Initialize video writer
         output_path = os.path.join(save_dir, "output.mp4")
@@ -1914,14 +1942,21 @@ class InvPhyTrainerWarp:
         out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
 
         for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
-            # 1. Load x, gaussians, and controller points
+            # 1. Load x, gaussians, and mesh
             x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
             gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
-            controller_data = torch.load(os.path.join(save_dir, "controller_points", f"controller_points_{frame_count}.pt"))
-            
             gaussians._xyz = gaussians_data['xyz']
             gaussians._rotation = gaussians_data['rotation']
-            current_target = controller_data['current_target']
+
+            # Load robot mesh into self.dynamic_meshes
+            mesh_dir = os.path.join(save_dir, "robot_meshes")
+            for i, dynamic_mesh in enumerate(self.dynamic_meshes):
+                mesh_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.obj")
+                loaded_mesh = o3d.io.read_triangle_mesh(mesh_path)
+                # Update only the vertices of the existing mesh to preserve topology and references
+                dynamic_mesh.vertices = loaded_mesh.vertices
+                # Optionally, update normals if needed:
+                # dynamic_mesh.vertex_normals = loaded_mesh.vertex_normals
 
             # 2. Frame initialization and setup
             frame = overlay.copy()
@@ -1950,6 +1985,21 @@ class InvPhyTrainerWarp:
             frame = alpha * rgb + (1 - alpha) * frame
             frame = frame.astype(np.uint8)
 
+            # render robot mesh
+            for i, dynamic_mesh in enumerate(self.dynamic_meshes):
+                dynamic_mesh.vertices = o3d.utility.Vector3dVector(
+                    self.dynamic_vertices[i]
+                )
+                vis.update_geometry(dynamic_mesh)
+            vis.poll_events()
+            vis.update_renderer()
+            static_image = np.asarray(
+                vis.capture_screen_float_buffer(do_render=True)
+            )
+            static_image = (static_image * 255).astype(np.uint8)
+            static_vis_mask = np.all(static_image == [255, 255, 255], axis=-1)
+            frame[~static_vis_mask] = static_image[~static_vis_mask]
+
             # Add shadows
             final_shadow = get_simple_shadow(
                 x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
@@ -1967,30 +2017,11 @@ class InvPhyTrainerWarp:
             # Convert frame to BGR before drawing circles
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-            # Draw controller points
-            points = current_target.cpu().numpy()
-            points_homogeneous = np.hstack([points, np.ones((points.shape[0], 1))])
-            points_camera = (w2c @ points_homogeneous.T).T
-            points_pixels = (intrinsic @ points_camera[:, :3].T).T
-            points_pixels = points_pixels[:, :2] / points_pixels[:, 2:3]
-            pixel_coords = points_pixels.astype(int)
-
-            # Filter points that are within the image bounds
-            valid_mask = (
-                (pixel_coords[:, 0] >= 0) & (pixel_coords[:, 0] < width) &
-                (pixel_coords[:, 1] >= 0) & (pixel_coords[:, 1] < height)
-            )
-            valid_pixel_coords = pixel_coords[valid_mask]
-
-            # Draw red circles for controller points
-            for x, y in valid_pixel_coords:
-                cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
-
             # Write frame to video file
             out.write(frame)
 
             # Display frame
-            cv2.imshow("Interactive Playground", frame)
+            cv2.imshow("Generated Video", frame)
             cv2.waitKey(1)
 
         # Release video writer
