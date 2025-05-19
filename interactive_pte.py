@@ -210,7 +210,7 @@ if __name__ == "__main__":
     cfg.bg_img_path = args.bg_img_path
 
     # Load the static_meshes
-    # static_meshes = []
+    static_meshes = []
     # clip_mesh = o3d.io.read_triangle_mesh("clip.stl")
     # clip_mesh.scale(0.0015, center=[0, 0, 0])
     # static_poses = np.array(
@@ -258,7 +258,7 @@ if __name__ == "__main__":
         data_path=f"{base_path}/{case_name}/final_data.pkl",
         base_dir=base_dir,
         pure_inference_mode=True,
-        static_meshes=[],
+        static_meshes=static_meshes,
         robot=sample_robot,
     )
 
@@ -269,3 +269,26 @@ if __name__ == "__main__":
         args.n_ctrl_parts,
         args.inv_ctrl,
     )
+
+'''rope
+[ 0.25215911 -0.25688532 -0.02905989]
+cloth
+[ 0.25215911 -0.25688532 -0.02905989]
+rope
+camera parameters:  PinholeCameraIntrinsic(width=848, height=480, ) [[-0.00651439  0.99932604  0.03612512 -0.08345831]
+ [-0.78932813 -0.02731824  0.61336353  0.15281548]
+ [ 0.61393702 -0.02451888  0.78897412  0.55585475]
+ [ 0.          0.          0.          1.        ]]
+ cloth
+ camera parameters:  PinholeCameraIntrinsic(width=848, height=480, ) [[ 0.00376547 -0.99918123  0.04028274  0.15342079]
+ [ 0.7874922   0.02779003  0.61569777  0.01038025]
+ [-0.61631311  0.02940395  0.78695206  0.65531986]
+ [ 0.          0.          0.          1.        ]]
+ intrinsic parameters:  [[426.76251221   0.         424.43331909]
+ [  0.         426.37734985 246.92410278]
+ [  0.           0.           1.        ]]
+extrinsic parameters:  [[ 0.00376547 -0.99918123  0.04028274  0.15342079]
+ [ 0.7874922   0.02779003  0.61569777  0.01038025]
+ [-0.61631311  0.02940395  0.78695206  0.65531986]
+ [ 0.          0.          0.          1.        ]]
+'''

@@ -27,16 +27,16 @@ set_all_seeds(seed)
 
 def random_movement(n_ctrl_parts, num_movements=10, frames_per_movement=10):
     # Define possible keys for each hand
-    hand1_keys = ['w', 's', 'a', 'd', 'e', 'q']  # Left hand keys
-    hand2_keys = ['i', 'k', 'j', 'l', 'o', 'u']  # Right hand keys
+    hand1_keys = ['w', 's', 'a', 'd']  # Left hand keys
+    hand2_keys = ['i', 'k', 'j', 'l']  # Right hand keys
     
     sequence = []
 
     # temporary code to set position
-    movement = []
-    movement.append("m")
-    movement.append("d")
-    sequence.extend([movement] * 2 * frames_per_movement)
+    # movement = []
+    # movement.append("m")
+    # movement.append("d")
+    # sequence.extend([movement] * 2 * frames_per_movement)
 
     for _ in range(num_movements):
         # Generate random movements for each hand
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     init_pose = np.eye(4)
     init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.2, 0.0, 0.23]
+    init_pose[:3, 3] = [0.1, 0.3, 0.23]
     sample_robot = RobotPcSampler(
         urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
     )
