@@ -126,7 +126,7 @@ class InvPhyTrainerWarp:
             if robot is not None:
                 # Extract the dynamic meshes from the robot
                 self.robot = robot
-                finger_meshes = self.robot.get_finger_mesh(1.0)
+                finger_meshes = self.robot.get_finger_mesh(0.0)
                 self.dynamic_meshes = finger_meshes
                 self.num_dynamic = len(self.dynamic_meshes)
                 dynamic_vertices = [
@@ -1353,6 +1353,15 @@ class InvPhyTrainerWarp:
         for dynamic_mesh in self.dynamic_meshes:
             vis.add_geometry(dynamic_mesh)
 
+        x_vis = wp.to_torch(
+            self.simulator.wp_states[0].wp_x, requires_grad=False
+        ).clone()
+        object_pcd = o3d.geometry.PointCloud()
+        object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
+        object_pcd.paint_uniform_color([0, 0, 1])
+        # object_pcd.paint_uniform_color([1, 1, 1])
+        vis.add_geometry(object_pcd)
+
         view_control = vis.get_view_control()
         camera_params = o3d.camera.PinholeCameraParameters()
         intrinsic_parameter = o3d.camera.PinholeCameraIntrinsic(
@@ -1415,8 +1424,11 @@ class InvPhyTrainerWarp:
             image_mask = image_mask.cpu().numpy()
             frame = frame.astype(np.uint8)
 
-            # render robot mesh
-            # TODO: modify this to use the saved meshes instead of the dynamic_vertices
+            # render robot and object
+            x_vis = x.clone()
+            object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
+            vis.update_geometry(object_pcd)
+
             for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                 vis.update_geometry(dynamic_mesh)
             vis.poll_events()
