@@ -90,7 +90,7 @@ class RobotPcSampler:
             all_mats.append(mat)
         return np.stack(all_mats)
 
-    def get_finger_mesh(self, gripper_openness=1.0):
+    def get_finger_mesh(self, gripper_openness=0.0):
         g = 800 * gripper_openness  # gripper openness
         g = (800 - g) * 180 / np.pi
         base_qpos = (
