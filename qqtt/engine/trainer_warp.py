@@ -1324,23 +1324,23 @@ class InvPhyTrainerWarp:
         intrinsic = cfg.intrinsics[vis_cam_idx]
         w2c = cfg.w2cs[vis_cam_idx]
 
-        gaussians = GaussianModel(sh_degree=3)
-        gaussians.load_ply(gs_path)
-        gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
-        gaussians.isotropic = True
-        current_pos = gaussians.get_xyz
-        current_rot = gaussians.get_rotation
-        use_white_background = True  # set to True for white background
-        bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
-        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-        view = self._create_gs_view(w2c, intrinsic, height, width)
-        prev_x = None
-        relations = None
-        weights = None
-        image_path = cfg.bg_img_path
-        overlay = cv2.imread(image_path)
-        overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-        overlay = torch.tensor(overlay, dtype=torch.float32, device=cfg.device)
+        # gaussians = GaussianModel(sh_degree=3)
+        # gaussians.load_ply(gs_path)
+        # gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
+        # gaussians.isotropic = True
+        # current_pos = gaussians.get_xyz
+        # current_rot = gaussians.get_rotation
+        # use_white_background = True  # set to True for white background
+        # bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
+        # background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+        # view = self._create_gs_view(w2c, intrinsic, height, width)
+        # prev_x = None
+        # relations = None
+        # weights = None
+        # image_path = cfg.bg_img_path
+        # overlay = cv2.imread(image_path)
+        # overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+        # overlay = torch.tensor(overlay, dtype=torch.float32, device=cfg.device)
 
         # Render mesh 
         vis = o3d.visualization.Visualizer()
@@ -1381,9 +1381,9 @@ class InvPhyTrainerWarp:
         for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
             # 1. Load x, gaussians, and mesh
             x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
-            gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
-            gaussians._xyz = gaussians_data['xyz']
-            gaussians._rotation = gaussians_data['rotation']
+            # gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+            # gaussians._xyz = gaussians_data['xyz']
+            # gaussians._rotation = gaussians_data['rotation']
 
             # Load saved vertices and update dynamic_meshes
             mesh_dir = os.path.join(save_dir, "meshes")
@@ -1396,33 +1396,33 @@ class InvPhyTrainerWarp:
                 dynamic_mesh.compute_vertex_normals()
 
             # 2. Frame initialization and setup
-            frame = overlay.clone()
+            # frame = overlay.clone()
 
             # 3. Rendering
             # render with gaussians and paste the image on top of the frame
-            results = render_gaussian(view, gaussians, None, background)
-            rendering = results["render"]  # (4, H, W)
-            image = rendering.permute(1, 2, 0).detach()
+            # results = render_gaussian(view, gaussians, None, background)
+            # rendering = results["render"]  # (4, H, W)
+            # image = rendering.permute(1, 2, 0).detach()
 
             # Continue frame compositing
             # composition code from Hanxiao
-            image = image.clamp(0, 1)
-            if use_white_background:
-                image_mask = torch.logical_and(
-                    (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
-                )
-            else:
-                image_mask = torch.logical_and(
-                    (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
-                )
-            image[..., 3].masked_fill_(~image_mask, 0.0)
+            # image = image.clamp(0, 1)
+            # if use_white_background:
+            #     image_mask = torch.logical_and(
+            #         (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
+            #     )
+            # else:
+            #     image_mask = torch.logical_and(
+            #         (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
+            #     )
+            # image[..., 3].masked_fill_(~image_mask, 0.0)
 
-            alpha = image[..., 3:4]
-            rgb = image[..., :3] * 255
-            frame = alpha * rgb + (1 - alpha) * frame
-            frame = frame.cpu().numpy()
-            image_mask = image_mask.cpu().numpy()
-            frame = frame.astype(np.uint8)
+            # alpha = image[..., 3:4]
+            # rgb = image[..., :3] * 255
+            # frame = alpha * rgb + (1 - alpha) * frame
+            # frame = frame.cpu().numpy()
+            # image_mask = image_mask.cpu().numpy()
+            # frame = frame.astype(np.uint8)
 
             # render robot and object
             x_vis = x.clone()
@@ -1437,31 +1437,33 @@ class InvPhyTrainerWarp:
                 vis.capture_screen_float_buffer(do_render=True)
             )
             static_image = (static_image * 255).astype(np.uint8)
-            static_vis_mask = np.all(static_image == [255, 255, 255], axis=-1)
-            frame[~static_vis_mask] = static_image[~static_vis_mask]
+            # static_vis_mask = np.all(static_image == [255, 255, 255], axis=-1)
+            # frame[~static_vis_mask] = static_image[~static_vis_mask]
 
             # Add shadows
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
+            # final_shadow = get_simple_shadow(
+            #     x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
+            # )
+            # frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
+            # final_shadow = get_simple_shadow(
+            #     x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
+            # )
+            # frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
+            # final_shadow = get_simple_shadow(
+            #     x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
+            # )
+            # frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
 
             # Convert frame to BGR before drawing circles
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
             # Write frame to video file
-            out.write(frame)
+            # out.write(frame)
+            out.write(static_image)
 
             # Display frame
-            cv2.imshow("Generated Video", frame)
+            # cv2.imshow("Generated Video", frame)
+            cv2.imshow("Generated Video", static_image)
             cv2.waitKey(1)
 
         # Release video writer
