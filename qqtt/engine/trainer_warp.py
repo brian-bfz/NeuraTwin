@@ -983,7 +983,7 @@ class InvPhyTrainerWarp:
         return self.structure_points[min_idx].unsqueeze(0)
     
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, pressed_keys_sequence=None, custom_control_points=None, 
+        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, changes=None, custom_control_points=None, 
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -1092,34 +1092,33 @@ class InvPhyTrainerWarp:
         #     self.mask_ctrl_pts = None
 
         # Initialize key mappings for target movement
-        self.key_mappings = {
-            # Set 1 controls
-            "w": (0, np.array([0.005, 0, 0])),
-            "s": (0, np.array([-0.005, 0, 0])),
-            "a": (0, np.array([0, -0.005, 0])),
-            "d": (0, np.array([0, 0.005, 0])),
-            "e": (0, np.array([0, 0, 0.005])),
-            "q": (0, np.array([0, 0, -0.005])),
-            # Set 2 controls
-            "i": (1, np.array([0.005, 0, 0])),
-            "k": (1, np.array([-0.005, 0, 0])),
-            "j": (1, np.array([0, -0.005, 0])),
-            "l": (1, np.array([0, 0.005, 0])),
-            "o": (1, np.array([0, 0, 0.005])),
-            "u": (1, np.array([0, 0, -0.005])),
-            # Set the finger
-            "n": 0.05,
-            "m": -0.05,
-            # Set the rotation
-            "z": [0, 0, 2.0 / 180 * np.pi],
-            "x": [0, 0, -2.0 / 180 * np.pi],
-            "c": [2.0 / 180 * np.pi, 0, 0],
-            "v": [-2.0 / 180 * np.pi, 0, 0],
-        }
-        self.pressed_keys = set()
+        # self.key_mappings = {
+        #     # Set 1 controls
+        #     "w": (0, np.array([0.005, 0, 0])),
+        #     "s": (0, np.array([-0.005, 0, 0])),
+        #     "a": (0, np.array([0, -0.005, 0])),
+        #     "d": (0, np.array([0, 0.005, 0])),
+        #     "e": (0, np.array([0, 0, 0.005])),
+        #     "q": (0, np.array([0, 0, -0.005])),
+        #     # Set 2 controls
+        #     "i": (1, np.array([0.005, 0, 0])),
+        #     "k": (1, np.array([-0.005, 0, 0])),
+        #     "j": (1, np.array([0, -0.005, 0])),
+        #     "l": (1, np.array([0, 0.005, 0])),
+        #     "o": (1, np.array([0, 0, 0.005])),
+        #     "u": (1, np.array([0, 0, -0.005])),
+        #     # Set the finger
+        #     "n": 0.05,
+        #     "m": -0.05,
+        #     # Set the rotation
+        #     "z": [0, 0, 2.0 / 180 * np.pi],
+        #     "x": [0, 0, -2.0 / 180 * np.pi],
+        #     "c": [2.0 / 180 * np.pi, 0, 0],
+        #     "v": [-2.0 / 180 * np.pi, 0, 0],
+        # }
+        # self.pressed_keys = set()
 
         frame_count = 0
-
         accumulate_trans = np.zeros((n_ctrl_parts, 3))
         accumulate_rot = torch.eye(3, dtype=torch.float32, device=cfg.device)
 
@@ -1137,10 +1136,10 @@ class InvPhyTrainerWarp:
         is_closing = True
 
 
-        for pressed_keys in pressed_keys_sequence:
-            self.pressed_keys.clear()
-            for key in pressed_keys:
-                self.pressed_keys.add(key)
+        for target_change, finger_change, rot_change in changes:
+            # self.pressed_keys.clear()
+            # for key in pressed_keys:
+            #     self.pressed_keys.add(key)
 
             # 1. Simulator step
             if self.simulator.object_collision_flag:
@@ -1218,9 +1217,9 @@ class InvPhyTrainerWarp:
 
             # =====================robot stuff=====================
             # Update the changes
-            target_change = self.get_target_change()
-            finger_change = self.get_finger_change()
-            rot_change = self.get_rot_change()
+            # target_change = self.get_target_change()
+            # finger_change = self.get_finger_change()
+            # rot_change = self.get_rot_change()
 
             # Calculate the substep vertices
             if finger_change > 0:
@@ -1353,9 +1352,8 @@ class InvPhyTrainerWarp:
         for dynamic_mesh in self.dynamic_meshes:
             vis.add_geometry(dynamic_mesh)
 
-        x_vis = wp.to_torch(
-            self.simulator.wp_states[0].wp_x, requires_grad=False
-        ).clone()
+        x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"), weights_only=True)
+        x_vis = x.clone()
         object_pcd = o3d.geometry.PointCloud()
         object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
         object_pcd.paint_uniform_color([0, 0, 1])
