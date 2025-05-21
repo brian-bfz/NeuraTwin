@@ -12,6 +12,10 @@ def trimesh_to_open3d(trimesh_mesh):
     return o3d_mesh
 
 class RobotPcSampler:
+    def change_init_pose(self, position):
+        self.init_pose[:3, 3] = position
+        # self.init_pose[:3, :3] = rotation
+
     def __init__(self, urdf_path, link_names, init_pose):
         self.engine = sapien.Engine()
         self.scene = self.engine.create_scene()

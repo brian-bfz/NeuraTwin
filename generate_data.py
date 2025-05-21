@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
     init_pose = np.eye(4)
     init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.15, 0.35, 0.23]
+    init_pose[:3, 3] = [0.0, 0.0, 0.0]
     sample_robot = RobotPcSampler(
         urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
     )
