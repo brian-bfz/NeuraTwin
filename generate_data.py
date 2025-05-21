@@ -137,13 +137,13 @@ if __name__ == "__main__":
     #     custom_control_points = torch.load(cp_path)
     #     logger.info(f"Loaded custom control points from {cp_path}")
 
-    pressed_keys_sequence = random_movement(args.n_ctrl_parts)
-    print(pressed_keys_sequence)
+    # pressed_keys_sequence = random_movement(args.n_ctrl_parts)
+    # print(pressed_keys_sequence)
+
     
     trainer.generate_data(
         best_model_path, 
         gaussians_path, 
         args.n_ctrl_parts, 
         save_dir, 
-        pressed_keys_sequence, 
     )

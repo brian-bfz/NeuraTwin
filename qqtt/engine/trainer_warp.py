@@ -982,8 +982,89 @@ class InvPhyTrainerWarp:
         min_idx = min_indices[torch.argmin(min_dist_per_ctrl_pts)]
         return self.structure_points[min_idx].unsqueeze(0)
     
+    def generate_random_robot_movement(self, offset_dist=0.1, keep_off=0.05, multiplier=2.0):
+        """
+        Generate random robot movement parameters.
+        
+        Args:
+            offset_dist: Distance to offset from the selected object point
+            keep_off: Minimum distance to keep from all object points
+            multiplier: Multiplier for the target movement distance
+            
+        Returns:
+            tuple: (initial_translation, target_changes)
+                - initial_translation: numpy array of shape (3,) for initial robot position
+                - target_changes: numpy array for target movement
+        """
+        # Get object points from the simulator
+        x = wp.to_torch(self.simulator.wp_states[-1].wp_x, requires_grad=False)
+        object_points = x[:self.num_all_points]
+        
+        # Move computation to GPU if available
+        if torch.cuda.is_available():
+            object_points_gpu = object_points
+        else:
+            object_points_gpu = object_points
+        
+        max_attempts = 100
+        for _ in range(max_attempts):
+            # 1. Select a random point on the object
+            random_idx = torch.randint(0, len(object_points), (1,)).item()
+            selected_point = object_points[random_idx].cpu().numpy()
+            
+            # 2. Select a random direction
+            random_angle = np.random.uniform(-np.pi, np.pi)
+            random_direction = np.array([
+                np.cos(random_angle),
+                np.sin(random_angle),
+                0.0  # Assuming movement in the XY plane
+            ])
+            random_direction = random_direction / np.linalg.norm(random_direction)
+            
+            # 3. Set starting position with offset
+            start_position = selected_point + random_direction * offset_dist
+            
+            # 4. Check minimum distance from all object points
+            # Convert to tensor for GPU computation
+            start_position_tensor = torch.tensor(start_position, 
+                                                device=object_points_gpu.device, 
+                                                dtype=object_points_gpu.dtype)
+            
+            # Sample points if there are too many (for efficiency)
+            if len(object_points_gpu) > 1000:
+                indices = torch.randperm(len(object_points_gpu))[:1000]
+                sampled_points = object_points_gpu[indices]
+            else:
+                sampled_points = object_points_gpu
+                
+            # Compute distances on GPU if available
+            distances = torch.norm(sampled_points - start_position_tensor, dim=1)
+            min_distance = torch.min(distances).item()
+            
+            if min_distance >= keep_off:
+                # Valid position found
+                break
+        else:
+            # If we couldn't find a valid position after max attempts
+            raise RuntimeError("Could not find valid robot position after maximum attempts")
+        
+        # 5. Find robot's current position and calculate translation
+        if hasattr(self, 'dynamic_vertices') and self.dynamic_vertices is not None:
+            current_robot_position = np.mean(self.dynamic_vertices.reshape(-1, 3), axis=0)
+        else:
+            # If dynamic_vertices is not available, use the robot's initial position
+            current_robot_position = self.robot.init_pose[:3, 3]
+        
+        initial_translation = start_position - current_robot_position
+        
+        # 6. Generate target changes (stub for now)
+        # Move in the reverse direction with the multiplier
+        target_changes = -random_direction * offset_dist * multiplier
+        
+        return initial_translation, target_changes
+    
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, changes=None, custom_control_points=None, 
+        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, custom_control_points=None, 
     ):
         # Load the model
         logger.info(f"Load model from {model_path}")
@@ -994,7 +1075,7 @@ class InvPhyTrainerWarp:
         collide_fric = checkpoint["collide_fric"]
         collide_object_elas = checkpoint["collide_object_elas"]
         collide_object_fric = checkpoint["collide_object_fric"]
-        num_object_springs = checkpoint["num_object_springs"]
+        # num_object_springs = checkpoint["num_object_springs"]
 
         assert (
             len(spring_Y) == self.simulator.n_springs
@@ -1132,11 +1213,11 @@ class InvPhyTrainerWarp:
         current_force_judge = origin_force_judge.clone()
         current_trans_dynamic_points = self.dynamic_points
         current_finger = 0.0
-        close_flag = False
-        is_closing = True
+        # close_flag = False
+        # is_closing = True
 
 
-        for target_change, finger_change, rot_change in changes:
+        for i in range(num_frames):
             # self.pressed_keys.clear()
             # for key in pressed_keys:
             #     self.pressed_keys.add(key)
@@ -1222,32 +1303,28 @@ class InvPhyTrainerWarp:
             # rot_change = self.get_rot_change()
 
             # Calculate the substep vertices
-            if finger_change > 0:
-                is_closing = False
-            elif finger_change < 0:
-                is_closing = True
+            # if finger_change > 0:
+            #     is_closing = False
+            # elif finger_change < 0:
+            #     is_closing = True
                 
-            if is_closing:
-                if close_flag == True:
-                    finger_change = -0.05
-                else:
-                    finger_change = 0.0
-            else:
-                finger_change = 0.05
+            # if is_closing:
+            #     if close_flag == True:
+            #         finger_change = -0.05
+            #     else:
+            #         finger_change = 0.0
+            # else:
+            #     finger_change = 0.05
 
-            current_finger += finger_change
+            current_finger += finger_changes[i]
             current_finger = max(0.0, min(1.0, current_finger))
 
-            accumulate_trans += target_change
+            accumulate_trans += target_changes[i]
             finger_meshes = self.robot.get_finger_mesh(current_finger)
             dynamic_vertices = torch.tensor(
-                np.array([
-                    np.asarray(finger_mesh.vertices) + accumulate_trans[0]
-                    for finger_mesh in finger_meshes
-                ]),
-                dtype=torch.float32,
+                (np.asarray(finger_mesh.vertices) + accumulate_trans[0] for finger_mesh in finger_meshes),
                 device=cfg.device,
-            )
+            ) # Directly converting from list to tensor is okay because there are only 2 fingers. 
             prev_trans_dynamic_points = current_trans_dynamic_points
             current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
 
@@ -1269,7 +1346,7 @@ class InvPhyTrainerWarp:
             interpolated_center = torch.mean(interpolated_trans_dynamic_points, dim=1)
 
             # Do the rotation on the interpolated points
-            new_rot = torch.tensor(rot_change, dtype=torch.float32, device=cfg.device)
+            new_rot = torch.tensor(rot_changes[i], dtype=torch.float32, device=cfg.device)
             interpolated_rot_angle =  new_rot.unsqueeze(
                 0
             ) * ratios.reshape(-1, 1)
@@ -1289,12 +1366,12 @@ class InvPhyTrainerWarp:
 
             # Calculate the velocity and omega for calculating relative velocity
             dynamic_velocity = torch.tensor(
-                target_change[0] / (2 * cfg.dt * cfg.num_substeps),
+                target_changes[i][0] / (2 * cfg.dt * cfg.num_substeps),
                 dtype=torch.float32,
                 device=cfg.device,
             )
             dynamic_omega = torch.tensor(
-                rot_change / (2 * cfg.dt * cfg.num_substeps),
+                rot_changes[i] / (2 * cfg.dt * cfg.num_substeps),
                 dtype=torch.float32,
                 device=cfg.device,
             )
