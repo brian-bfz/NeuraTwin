@@ -1242,10 +1242,10 @@ class InvPhyTrainerWarp:
             accumulate_trans += target_change
             finger_meshes = self.robot.get_finger_mesh(current_finger)
             dynamic_vertices = torch.tensor(
-                [
+                np.array([
                     np.asarray(finger_mesh.vertices) + accumulate_trans[0]
                     for finger_mesh in finger_meshes
-                ],
+                ]),
                 dtype=torch.float32,
                 device=cfg.device,
             )
@@ -1374,13 +1374,17 @@ class InvPhyTrainerWarp:
         )
 
         # Initialize video writer
-        output_path = os.path.join(save_dir, "output.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Determine case_name and timestamp from save_dir
+        case_name_timestamp = os.path.basename(save_dir.rstrip('/'))
+        videos_dir = os.path.join(os.path.dirname(save_dir), "videos")
+        os.makedirs(videos_dir, exist_ok=True)
+        output_path = os.path.join(videos_dir, f"{case_name_timestamp}.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
 
         for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
             # 1. Load x, gaussians, and mesh
-            x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
+            x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"), weights_only=True)
             # gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
             # gaussians._xyz = gaussians_data['xyz']
             # gaussians._rotation = gaussians_data['rotation']

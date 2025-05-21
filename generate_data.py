@@ -12,18 +12,23 @@ import os
 import pickle
 from SampleRobot import RobotPcSampler
 
-def set_all_seeds(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+# def set_all_seeds(seed):
+#     random.seed(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
 
 
-seed = 42
-set_all_seeds(seed)
+# seed = 
+# set_all_seeds(seed)
+
+import warnings
+warnings.simplefilter("ignore")
+
+random.seed()
 
 def random_movement(n_ctrl_parts, num_movements=10, frames_per_movement=10):
     # Define possible keys for each hand
@@ -96,7 +101,7 @@ if __name__ == "__main__":
 
     init_pose = np.eye(4)
     init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.1, 0.3, 0.23]
+    init_pose[:3, 3] = [0.15, 0.35, 0.23]
     sample_robot = RobotPcSampler(
         urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
     )

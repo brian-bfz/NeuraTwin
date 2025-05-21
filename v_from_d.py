@@ -13,6 +13,9 @@ import pickle
 import json
 from SampleRobot import RobotPcSampler
 
+import warnings
+warnings.filterwarnings("ignore")
+
 def set_all_seeds(seed):
     random.seed(seed)
     np.random.seed(seed)
