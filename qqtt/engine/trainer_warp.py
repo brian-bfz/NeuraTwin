@@ -126,17 +126,7 @@ class InvPhyTrainerWarp:
             if robot is not None:
                 # Extract the dynamic meshes from the robot
                 self.robot = robot
-                finger_meshes = self.robot.get_finger_mesh(0.0)
-                self.dynamic_meshes = finger_meshes
-                self.num_dynamic = len(self.dynamic_meshes)
-                dynamic_vertices = [
-                    np.asarray(finger_mesh.vertices) for finger_mesh in finger_meshes
-                ]
-                new_vertices = np.concatenate(dynamic_vertices, axis=0)
-                new_vertices = torch.tensor(
-                    new_vertices, dtype=torch.float32, device=cfg.device
-                )
-                self.dynamic_points = new_vertices
+                self.reset_robot()
             else:
                 self.dynamic_meshes = []
                 self.dynamic_points = None
@@ -201,6 +191,23 @@ class InvPhyTrainerWarp:
             if not os.path.exists(f"{cfg.base_dir}/train"):
                 # Create directory if it doesn't exist
                 os.makedirs(f"{cfg.base_dir}/train")
+
+    def reset_robot(self):
+                finger_meshes = self.robot.get_finger_mesh(0.0)
+                self.dynamic_meshes = finger_meshes
+                self.num_dynamic = len(self.dynamic_meshes)
+                dynamic_vertices = [
+                    np.asarray(finger_mesh.vertices) for finger_mesh in finger_meshes
+                ]
+                new_vertices = np.concatenate(dynamic_vertices, axis=0)
+                new_vertices = torch.tensor(
+                    new_vertices, dtype=torch.float32, device=cfg.device
+                )
+                self.dynamic_points = new_vertices
+                self.dynamic_vertices = [
+                    np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
+                ]
+
 
     def _init_start(
         self,
@@ -1074,9 +1081,6 @@ class InvPhyTrainerWarp:
         #     self.mask_ctrl_pts = None
 
         # set robot position and movement parameters
-        self.dynamic_vertices = [
-            np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
-        ]
 
         translation, target_changes = self.robot_translation(offset_dist=0.2, keep_off=0.05, multiplier=2.0, speed=0.005)
         n_frames = target_changes.shape[0]
@@ -1198,9 +1202,7 @@ class InvPhyTrainerWarp:
 
         frame_count = 0
 
-        self.dynamic_vertices = [
-            np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
-        ]
+        self.reset_robot()
 
         origin_force_judge = torch.tensor(
             [[-1, 0, 0], [1, 0, 0]], dtype=torch.float32, device=cfg.device
