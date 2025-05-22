@@ -74,15 +74,7 @@ class ParticleDataset(Dataset):
         return particles
 
     def __getitem__(self, idx):
-
-        # particle_den_candidates = [200., 500., 1000., 2000.]
-        particle_den_min = 15
-        particle_den_max = 6500
-        # particle_den_min = 6500
-        # particle_den_max = 6500
-        # particle_den = particle_den_candidates[np.random.randint(0, len(particle_den_candidates))]
-        particle_den = np.random.uniform(particle_den_min, particle_den_max)
-        particle_r = 1/np.sqrt(particle_den)
+        particle_r = 0.03; 
 
         offset = self.n_timestep - self.n_his - self.n_roll + 1
         idx_episode = idx // offset + self.epi_st_idx
@@ -198,7 +190,7 @@ class ParticleDataset(Dataset):
         states = torch.FloatTensor(states)
         states_delta = torch.FloatTensor(states_delta)
         attrs = torch.FloatTensor(attrs)
-        return states, states_delta, attrs, particle_num, particle_den, color_imgs
+        return states, states_delta, attrs, particle_num, color_imgs
 
 def dataset_test():
     config = load_yaml('config.yaml')
@@ -236,9 +228,9 @@ def calibrate_res_range():
     depth = raw_obs[..., -1] / config['dataset']['global_scale']
 
     depth_fgpcd = depth2fgpcd(depth, (depth < 0.599/0.8), env.get_cam_params()) # [N, 3]
-    sampled_pts, min_particle_r = fps_np(depth_fgpcd, 100)
-    max_particle_den = 1 / (min_particle_r ** 2)
-    print('max_particle_den: %f' % max_particle_den)
+    # sampled_pts, min_particle_r = fps_np(depth_fgpcd, 100)
+    # max_particle_den = 1 / (min_particle_r ** 2)
+    # print('max_particle_den: %f' % max_particle_den)
     
     env.init_pos = 'extra_small_wkspc_spread'
     env.reset()
@@ -246,9 +238,9 @@ def calibrate_res_range():
     raw_obs = env.render()
     depth = raw_obs[..., -1] / config['dataset']['global_scale']
     depth_fgpcd = depth2fgpcd(depth, (depth < 0.599/0.8), env.get_cam_params()) # [N, 3]
-    sampled_pts, max_particle_r = fps_np(depth_fgpcd, 2)
-    min_particle_den = 1 / (max_particle_r ** 2)
-    print('min_particle_den: %f' % min_particle_den)
+    # sampled_pts, max_particle_r = fps_np(depth_fgpcd, 2)
+    # min_particle_den = 1 / (max_particle_r ** 2)
+    # print('min_particle_den: %f' % min_particle_den)
     
 
 if __name__ == '__main__':

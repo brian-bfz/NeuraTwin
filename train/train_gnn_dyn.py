@@ -23,7 +23,7 @@ def collate_fn(data):
             where 'example' is a tensor of arbitrary shape
             and label/length are scalars
     """
-    states, states_delta, attrs, particle_num, particle_den, color_imgs = zip(*data)
+    states, states_delta, attrs, particle_num, color_imgs = zip(*data)
     max_len = max(particle_num)
     batch_size = len(data)
     n_time, _, n_dim = states[0].shape
@@ -31,7 +31,6 @@ def collate_fn(data):
     states_delta_tensor = torch.zeros((batch_size, n_time - 1, max_len, n_dim), dtype=torch.float32)
     attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
     particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
-    particle_den_tensor = torch.tensor(particle_den, dtype=torch.float32)
     color_imgs_np = np.array(color_imgs)
     color_imgs_tensor = torch.tensor(color_imgs_np, dtype=torch.float32)
 
@@ -40,7 +39,7 @@ def collate_fn(data):
         states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
         attr[i, :, :particle_num[i]] = attrs[i]
 
-    return states_tensor, states_delta_tensor, attr, particle_num_tensor, particle_den_tensor, color_imgs_tensor
+    return states_tensor, states_delta_tensor, attr, particle_num_tensor, color_imgs_tensor
 
 def train():
 
@@ -135,7 +134,7 @@ def train():
                 # attrs: B x (n_his + n_roll) x (particles_num + pusher_num)
                 # next_pusher: B x (n_his + n_roll - 1) x (pusher_num) X 3
                 # states, next_pusher, attrs, _ = data
-                states, states_delta, attrs, particle_nums, particle_dens, _ = data
+                states, states_delta, attrs, particle_nums, _ = data
 
                 B, length, n_obj, _ = states.size()
                 assert length == n_rollout + n_history
@@ -145,7 +144,6 @@ def train():
                     attrs = attrs.cuda()
                     # next_pusher = next_pusher.cuda()
                     states_delta = states_delta.cuda()
-                    particle_dens = particle_dens.cuda()
 
 
                 loss = 0.
@@ -167,7 +165,7 @@ def train():
                         # s_pred: B x particles_num x 3
                         # s_pred = model.predict_one_step(a_cur, s_cur, s_delta)
                         # s_pred = model.predict_one_step_adj_list(a_cur, s_cur, s_delta)
-                        s_pred = model.predict_one_step(a_cur, s_cur, s_delta, particle_dens)
+                        s_pred = model.predict_one_step(a_cur, s_cur, s_delta)
                         # print('diff between s_pred and s_pred_adj: ', torch.sum(torch.abs(s_pred[0, :particle_nums[0]] - s_pred_adj[0, :particle_nums[0]])))
 
                         # loss += F.mse_loss(s_pred, s_nxt[:, pusher_num:])
