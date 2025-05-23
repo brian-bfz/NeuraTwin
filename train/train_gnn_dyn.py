@@ -23,7 +23,7 @@ def collate_fn(data):
             where 'example' is a tensor of arbitrary shape
             and label/length are scalars
     """
-    states, states_delta, attrs, particle_num, color_imgs = zip(*data)
+    states, states_delta, attrs, particle_num = zip(*data)
     max_len = max(particle_num)
     batch_size = len(data)
     n_time, _, n_dim = states[0].shape
@@ -31,15 +31,15 @@ def collate_fn(data):
     states_delta_tensor = torch.zeros((batch_size, n_time - 1, max_len, n_dim), dtype=torch.float32)
     attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
     particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
-    color_imgs_np = np.array(color_imgs)
-    color_imgs_tensor = torch.tensor(color_imgs_np, dtype=torch.float32)
+    # color_imgs_np = np.array(color_imgs)
+    # color_imgs_tensor = torch.tensor(color_imgs_np, dtype=torch.float32)
 
     for i in range(len(data)):
         states_tensor[i, :, :particle_num[i], :] = states[i]
         states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
         attr[i, :, :particle_num[i]] = attrs[i]
 
-    return states_tensor, states_delta_tensor, attr, particle_num_tensor, color_imgs_tensor
+    return states_tensor, states_delta_tensor, attr, particle_num_tensor
 
 def train():
 

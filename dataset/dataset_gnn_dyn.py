@@ -101,7 +101,7 @@ class ParticleDataset(Dataset):
         _, nearest_idx = first_particles_tree.query(sampled_pts, k=1)
         
         states = np.zeros((self.n_his + self.n_roll, particle_num, 3))
-        color_imgs = np.zeros((self.n_his + self.n_roll, 720, 720, 3)).astype(np.uint8)
+        # color_imgs = np.zeros((self.n_his + self.n_roll, 720, 720, 3)).astype(np.uint8)
         states_delta = np.zeros((self.n_his + self.n_roll - 1, particle_num, 3))
         attrs = np.zeros(states.shape[:2])
 
@@ -184,13 +184,13 @@ class ParticleDataset(Dataset):
                 pos_diff_to_end_cam = (e_3d_cam[None, :] - particles[nearest_idx, :]) # [particle_num, 3]
                 pos_diff_to_end_cam = (pos_diff_to_end_cam * np.tile(push_dir_cam[None, :], (particle_num, 1))).sum(axis=1) # [particle_num,]
                 states_delta[i - idx_timestep] = pos_diff_to_end_cam[:, None] * push_dir_cam[None, :] * pos_diff_l_mask[:, None] * pos_diff_w_mask[:, None]
-            color_img_path = os.path.join(self.data_dir, '%d/%d_color.png' % (idx_episode, i))
-            color_img = cv2.imread(color_img_path)
-            color_imgs[i - idx_timestep, :, :, :] = color_img
+            # color_img_path = os.path.join(self.data_dir, '%d/%d_color.png' % (idx_episode, i))
+            # color_img = cv2.imread(color_img_path)
+            # color_imgs[i - idx_timestep, :, :, :] = color_img
         states = torch.FloatTensor(states)
         states_delta = torch.FloatTensor(states_delta)
         attrs = torch.FloatTensor(attrs)
-        return states, states_delta, attrs, particle_num, color_imgs
+        return states, states_delta, attrs, particle_num
 
 def dataset_test():
     config = load_yaml('config.yaml')
