@@ -16,7 +16,7 @@ import matplotlib.transforms as transforms
 import torch
 from torch.autograd import Variable
 
-from dgl.geometry import farthest_point_sampler
+# from dgl.geometry import farthest_point_sampler
 import open3d as o3d
 
 from PIL import Image, ImageEnhance
@@ -420,20 +420,20 @@ def findClosestPoint(pcd, point):
     dist = np.linalg.norm(pcd - point[None, :], axis=1)
     return np.argmin(dist)
 
-def fps(pcd, particle_num, init_idx=-1):
-    # pcd: (n, 3) numpy array
-    # pcd_fps: (self.particle_num, 3) numpy array
-    pcd_tensor = torch.from_numpy(pcd).float()[None, ...]
-    if init_idx == -1:
-        # init_idx = findClosestPoint(pcd, pcd.mean(axis=0))
-        pcd_fps_idx_tensor = farthest_point_sampler(pcd_tensor, particle_num)[0]
-    else:
-        pcd_fps_idx_tensor = farthest_point_sampler(pcd_tensor, particle_num, init_idx)[0]
-    pcd_fps_tensor = pcd_tensor[0, pcd_fps_idx_tensor]
-    pcd_fps = pcd_fps_tensor.numpy()
-    dist = np.linalg.norm(pcd[:, None] - pcd_fps[None, :], axis=-1)
-    dist = dist.min(axis=1)
-    return pcd_fps, dist.max()
+# def fps(pcd, particle_num, init_idx=-1):
+#     # pcd: (n, 3) numpy array
+#     # pcd_fps: (self.particle_num, 3) numpy array
+#     pcd_tensor = torch.from_numpy(pcd).float()[None, ...]
+#     if init_idx == -1:
+#         # init_idx = findClosestPoint(pcd, pcd.mean(axis=0))
+#         pcd_fps_idx_tensor = farthest_point_sampler(pcd_tensor, particle_num)[0]
+#     else:
+#         pcd_fps_idx_tensor = farthest_point_sampler(pcd_tensor, particle_num, init_idx)[0]
+#     pcd_fps_tensor = pcd_tensor[0, pcd_fps_idx_tensor]
+#     pcd_fps = pcd_fps_tensor.numpy()
+#     dist = np.linalg.norm(pcd[:, None] - pcd_fps[None, :], axis=-1)
+#     dist = dist.min(axis=1)
+#     return pcd_fps, dist.max()
 
 def fps_rad(pcd, radius):
     # pcd: (n, 3) numpy array
@@ -459,7 +459,7 @@ def fps_rad_tensor(pcd_tensor, radius):
         Returns:
             torch.Tensor: indices of sampled points
         """
-        pcd = pcd_tensor.numpy()  # Convert only once
+        pcd = pcd_tensor.cpu().numpy()  # Convert only once
         rand_idx = np.random.randint(pcd.shape[0])
         selected_indices = [rand_idx]
         dist = np.linalg.norm(pcd - pcd[rand_idx], axis=1)

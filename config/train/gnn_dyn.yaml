@@ -54,3 +54,4 @@ train:
     add_delta: False
   lam_reg: 2e-4
   lam_sp: 1e-2
+  fps_radius: 0.03

@@ -11,22 +11,21 @@ import time
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-from scipy.spatial.distance import cdist
 
-from env.flex_env import FlexEnv
+# from env.flex_env import FlexEnv
 
 from scipy.spatial import KDTree
 from utils import load_yaml, set_seed, fps_rad_tensor, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
 
 import matplotlib.pyplot as plt
-from dgl.geometry import farthest_point_sampler
+# from dgl.geometry import farthest_point_sampler
 
 from torch.utils.data import DataLoader
 
 np.seterr(divide='ignore', invalid='ignore')
 
 class ParticleDataset(Dataset):
-    def __init__(self, data_dir, config, phase, cam):
+    def __init__(self, data_dir, config, phase):
         self.config = config
 
         n_episode = config['dataset']['n_episode']
@@ -56,9 +55,7 @@ class ParticleDataset(Dataset):
         self.screenWidth = 720
         self.img_channel = 1
 
-        self.fps_radius = config.get('fps_radius', 0.03)
-
-        # self.cam_params, self.cam_extrinsic = cam
+        self.fps_radius = config['train']['fps_radius']
 
     def __len__(self):
         return self.n_episode * (self.n_timestep - self.n_his - self.n_roll + 1)
