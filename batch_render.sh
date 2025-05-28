@@ -5,15 +5,15 @@
 
 echo "Starting batch rendering..."
 
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185250
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185207
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185215
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185233
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185308
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185158
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185241
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185224
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185150
-python v_from_d.py --case_name single_push_rope --timestamp 20250521_185259
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123347
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123405
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123245
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123330
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123356
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123313
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123254
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123321
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123303
+python v_from_d.py --case_name single_push_rope --timestamp 20250528_123338
 
 echo "Batch rendering complete."

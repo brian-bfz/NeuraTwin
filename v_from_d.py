@@ -2,11 +2,11 @@
 # sys.path.append("./gaussian_splatting")
 # from qqtt import InvPhyTrainerWarp
 from qqtt.utils import logger, cfg
-from datetime import datetime
 # import random
 import numpy as np
 import torch
 from argparse import ArgumentParser
+from SampleRobot import RobotPcSampler
 # import glob
 import os
 import pickle
@@ -14,7 +14,7 @@ import json
 import cv2
 import open3d as o3d
 
-def video_from_data(cfg, save_dir):
+def video_from_data(cfg, save_dir, robot):
         logger.info("Starting video generation")
 
         vis_cam_idx = 0
@@ -41,7 +41,9 @@ def video_from_data(cfg, save_dir):
         # overlay = torch.tensor(overlay, dtype=torch.float32, device=cfg.device)
 
         # Render mesh 
-        # dynamic_meshes = robot.get_finger_mesh(0.0)
+        dynamic_meshes = robot.get_finger_mesh(0.0)
+        finger_vertex_counts = [len(mesh.vertices) for mesh in dynamic_meshes]
+
         vis = o3d.visualization.Visualizer()
         vis.create_window(visible=False, width=width, height=height)
         render_option = vis.get_render_option()
@@ -49,8 +51,8 @@ def video_from_data(cfg, save_dir):
         # for static_mesh in self.static_meshes:
         #     vis.add_geometry(static_mesh)
 
-        # for dynamic_mesh in dynamic_meshes:
-        #     vis.add_geometry(dynamic_mesh)
+        for dynamic_mesh in dynamic_meshes:
+            vis.add_geometry(dynamic_mesh)
 
         x = torch.load(os.path.join(save_dir, "object", "x_0.pt"), weights_only=True)
         object_pcd = o3d.geometry.PointCloud()
@@ -58,11 +60,11 @@ def video_from_data(cfg, save_dir):
         object_pcd.paint_uniform_color([0, 0, 1])
         vis.add_geometry(object_pcd)
 
-        x_robot = torch.load(os.path.join(save_dir, "robot", "x_0.pt"), weights_only=True)
-        robot_pcd = o3d.geometry.PointCloud()
-        robot_pcd.points = o3d.utility.Vector3dVector(x_robot.cpu().numpy())
-        robot_pcd.paint_uniform_color([1, 0, 0])
-        vis.add_geometry(robot_pcd)
+        # x_robot = torch.load(os.path.join(save_dir, "robot", "x_0.pt"), weights_only=True)
+        # robot_pcd = o3d.geometry.PointCloud()
+        # robot_pcd.points = o3d.utility.Vector3dVector(x_robot.cpu().numpy())
+        # robot_pcd.paint_uniform_color([1, 0, 0])
+        # vis.add_geometry(robot_pcd)
 
         view_control = vis.get_view_control()
         camera_params = o3d.camera.PinholeCameraParameters()
@@ -134,12 +136,19 @@ def video_from_data(cfg, save_dir):
             # render robot and object
             # x_vis = x.clone()
             object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
-            vis.update_geometry(object_pcd)
-            robot_pcd.points = o3d.utility.Vector3dVector(x_robot.cpu().numpy())
-            vis.update_geometry(robot_pcd)
+            vis.update_geometry(object_pcd) 
 
-            # for i, dynamic_mesh in enumerate(dynamic_meshes):
-            #     vis.update_geometry(dynamic_mesh)
+            cnt = 0
+            for i, dynamic_mesh in enumerate(dynamic_meshes):
+                vertices = x_robot[cnt : cnt + finger_vertex_counts[i]].cpu().numpy()
+                dynamic_mesh.vertices = o3d.utility.Vector3dVector(vertices)
+                cnt += finger_vertex_counts[i]
+            # robot_pcd.points = o3d.utility.Vector3dVector(x_robot.cpu().numpy())
+            # vis.update_geometry(robot_pcd)
+
+            for i, dynamic_mesh in enumerate(dynamic_meshes):
+                vis.update_geometry(dynamic_mesh)
+
             vis.poll_events()
             vis.update_renderer()
             static_image = np.asarray(
@@ -213,15 +222,15 @@ if __name__ == "__main__":
     base_dir = f"./temp_experiments/{case_name}"
 
     # Load the robot finger
-    # urdf_path = "xarm/xarm7_with_gripper.urdf"
-    # R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+    urdf_path = "xarm/xarm7_with_gripper.urdf"
+    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 
-    # init_pose = np.eye(4)
-    # init_pose[:3, :3] = R
-    # init_pose[:3, 3] = [0.2, 0.0, 0.23]
-    # sample_robot = RobotPcSampler(
-    #     urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
-    # )
+    init_pose = np.eye(4)
+    init_pose[:3, :3] = R
+    init_pose[:3, 3] = [0.2, 0.0, 0.23]
+    sample_robot = RobotPcSampler(
+        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+    )
 
     # Set the intrinsic and extrinsic parameters for visualization
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
@@ -249,7 +258,7 @@ if __name__ == "__main__":
 
     # Generate video from saved data
     save_dir = os.path.join("generated_data", f"{case_name}_{args.timestamp}")
-    video_from_data(cfg, save_dir)
+    video_from_data(cfg, save_dir, sample_robot)
     # trainer.video_from_data(
     #     gaussians_path, save_dir
     # )
