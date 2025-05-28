@@ -124,9 +124,9 @@ if __name__ == "__main__":
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # print(case_name, timestamp, f"{case_name}_{timestamp}")
     save_dir = os.path.join("generated_data", f"{case_name}_{timestamp}")
-    os.makedirs(os.path.join(save_dir, "x"), exist_ok=True)
+    os.makedirs(os.path.join(save_dir, "object"), exist_ok=True)
     os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
-    os.makedirs(os.path.join(save_dir, "meshes"), exist_ok=True)
+    os.makedirs(os.path.join(save_dir, "robot"), exist_ok=True)
 
     # Load custom control points if provided
     # custom_control_points = None

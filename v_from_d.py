@@ -11,11 +11,10 @@ from argparse import ArgumentParser
 import os
 import pickle
 import json
-from SampleRobot import RobotPcSampler
 import cv2
 import open3d as o3d
 
-def video_from_data(cfg, save_dir, robot):
+def video_from_data(cfg, save_dir):
         logger.info("Starting video generation")
 
         vis_cam_idx = 0
@@ -42,7 +41,7 @@ def video_from_data(cfg, save_dir, robot):
         # overlay = torch.tensor(overlay, dtype=torch.float32, device=cfg.device)
 
         # Render mesh 
-        dynamic_meshes = robot.get_finger_mesh(0.0)
+        # dynamic_meshes = robot.get_finger_mesh(0.0)
         vis = o3d.visualization.Visualizer()
         vis.create_window(visible=False, width=width, height=height)
         render_option = vis.get_render_option()
@@ -50,16 +49,20 @@ def video_from_data(cfg, save_dir, robot):
         # for static_mesh in self.static_meshes:
         #     vis.add_geometry(static_mesh)
 
-        for dynamic_mesh in dynamic_meshes:
-            vis.add_geometry(dynamic_mesh)
+        # for dynamic_mesh in dynamic_meshes:
+        #     vis.add_geometry(dynamic_mesh)
 
-        x = torch.load(os.path.join(save_dir, "x", "x_0.pt"), weights_only=True)
-        x_vis = x.clone()
+        x = torch.load(os.path.join(save_dir, "object", "x_0.pt"), weights_only=True)
         object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
+        object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
         object_pcd.paint_uniform_color([0, 0, 1])
-        # object_pcd.paint_uniform_color([1, 1, 1])
         vis.add_geometry(object_pcd)
+
+        x_robot = torch.load(os.path.join(save_dir, "robot", "x_0.pt"), weights_only=True)
+        robot_pcd = o3d.geometry.PointCloud()
+        robot_pcd.points = o3d.utility.Vector3dVector(x_robot.cpu().numpy())
+        robot_pcd.paint_uniform_color([1, 0, 0])
+        vis.add_geometry(robot_pcd)
 
         view_control = vis.get_view_control()
         camera_params = o3d.camera.PinholeCameraParameters()
@@ -83,20 +86,21 @@ def video_from_data(cfg, save_dir, robot):
 
         for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
             # 1. Load x, gaussians, and mesh
-            x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"), weights_only=True)
+            x = torch.load(os.path.join(save_dir, "object", f"x_{frame_count}.pt"), weights_only=True)
+            x_robot = torch.load(os.path.join(save_dir, "robot", f"x_{frame_count}.pt"), weights_only=True)
             # gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
             # gaussians._xyz = gaussians_data['xyz']
             # gaussians._rotation = gaussians_data['rotation']
 
             # Load saved vertices and update dynamic_meshes
-            mesh_dir = os.path.join(save_dir, "meshes")
-            for i, dynamic_mesh in enumerate(dynamic_meshes):
-                vertices_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.npy")
-                vertices = np.load(vertices_path)
-                # Update vertices while preserving mesh topology
-                dynamic_mesh.vertices = o3d.utility.Vector3dVector(vertices)
-                # Update normals after changing vertices
-                dynamic_mesh.compute_vertex_normals()
+            # mesh_dir = os.path.join(save_dir, "meshes")
+            # for i, dynamic_mesh in enumerate(dynamic_meshes):
+            #     vertices_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.npy")
+            #     vertices = np.load(vertices_path)
+            #     # Update vertices while preserving mesh topology
+            #     dynamic_mesh.vertices = o3d.utility.Vector3dVector(vertices)
+            #     # Update normals after changing vertices
+            #     dynamic_mesh.compute_vertex_normals()
 
             # 2. Frame initialization and setup
             # frame = overlay.clone()
@@ -128,12 +132,14 @@ def video_from_data(cfg, save_dir, robot):
             # frame = frame.astype(np.uint8)
 
             # render robot and object
-            x_vis = x.clone()
-            object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
+            # x_vis = x.clone()
+            object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
             vis.update_geometry(object_pcd)
+            robot_pcd.points = o3d.utility.Vector3dVector(x_robot.cpu().numpy())
+            vis.update_geometry(robot_pcd)
 
-            for i, dynamic_mesh in enumerate(dynamic_meshes):
-                vis.update_geometry(dynamic_mesh)
+            # for i, dynamic_mesh in enumerate(dynamic_meshes):
+            #     vis.update_geometry(dynamic_mesh)
             vis.poll_events()
             vis.update_renderer()
             static_image = np.asarray(
@@ -207,15 +213,15 @@ if __name__ == "__main__":
     base_dir = f"./temp_experiments/{case_name}"
 
     # Load the robot finger
-    urdf_path = "xarm/xarm7_with_gripper.urdf"
-    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+    # urdf_path = "xarm/xarm7_with_gripper.urdf"
+    # R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 
-    init_pose = np.eye(4)
-    init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.2, 0.0, 0.23]
-    sample_robot = RobotPcSampler(
-        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
-    )
+    # init_pose = np.eye(4)
+    # init_pose[:3, :3] = R
+    # init_pose[:3, 3] = [0.2, 0.0, 0.23]
+    # sample_robot = RobotPcSampler(
+    #     urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+    # )
 
     # Set the intrinsic and extrinsic parameters for visualization
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
@@ -243,7 +249,7 @@ if __name__ == "__main__":
 
     # Generate video from saved data
     save_dir = os.path.join("generated_data", f"{case_name}_{args.timestamp}")
-    video_from_data(cfg, save_dir, sample_robot)
+    video_from_data(cfg, save_dir)
     # trainer.video_from_data(
     #     gaussians_path, save_dir
     # )

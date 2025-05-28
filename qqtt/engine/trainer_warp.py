@@ -1053,6 +1053,15 @@ class InvPhyTrainerWarp:
                 
         return translation.astype(np.float32), target_changes.astype(np.float32)
     
+    def save_data(self, save_dir, frame_count, x, gaussians, robot):
+        torch.save(x, os.path.join(save_dir, "object", f"x_{frame_count}.pt"))
+        torch.save({
+            'xyz': gaussians._xyz,
+            'rotation': gaussians._rotation,
+            'frame_count': frame_count
+        }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+        torch.save(robot, os.path.join(save_dir, "robot", f"x_{frame_count}.pt"))
+
     def generate_data(
         self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, custom_control_points=None, 
     ):
@@ -1090,6 +1099,7 @@ class InvPhyTrainerWarp:
         accumulate_rot = torch.eye(3, dtype=torch.float32, device=cfg.device)
         rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
         self.robot.change_init_pose(translation)
+        self.reset_robot()
 
         assert (
             len(spring_Y) == self.simulator.n_springs
@@ -1202,8 +1212,6 @@ class InvPhyTrainerWarp:
 
         frame_count = 0
 
-        self.reset_robot()
-
         origin_force_judge = torch.tensor(
             [[-1, 0, 0], [1, 0, 0]], dtype=torch.float32, device=cfg.device
         )
@@ -1212,7 +1220,6 @@ class InvPhyTrainerWarp:
         # close_flag = False
         # is_closing = True
 
-        
 
         for i in range(n_frames):
             # self.pressed_keys.clear()
@@ -1241,20 +1248,8 @@ class InvPhyTrainerWarp:
                 self.simulator.wp_states[-1].wp_v,
             )
 
-            # Save initial state at the start of each loop
-            if save_dir is not None:
-                # Save x tensor
-                torch.save(x, os.path.join(save_dir, "x", f"x_{frame_count}.pt"))
-                # Save gaussians
-                torch.save({
-                    'xyz': gaussians._xyz,
-                    'rotation': gaussians._rotation,
-                    'frame_count': frame_count
-                }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
-                # Save dynamic vertices
-                for i, vertices in enumerate(self.dynamic_vertices):
-                    vertices_path = os.path.join(save_dir, f"meshes/finger_{i}_frame_{frame_count}.npy")
-                    np.save(vertices_path, vertices)
+            if frame_count == 0:
+                self.save_data(save_dir, frame_count, x, gaussians, current_trans_dynamic_points)
 
             if prev_x is not None:
                 with torch.no_grad():
@@ -1354,12 +1349,12 @@ class InvPhyTrainerWarp:
             interpolated_dynamic_points = (
                 interpolated_trans_dynamic_points - interpolated_center.unsqueeze(1)
             ) @ interpolated_rot_mat.permute(0, 2, 1) + interpolated_center.unsqueeze(1)
-            self.dynamic_vertices = (
-                interpolated_dynamic_points[-1]
-                .reshape([-1] + list(self.dynamic_vertices[0].shape))
-                .cpu()
-                .numpy()
-            )
+            # self.dynamic_vertices = (
+            #     interpolated_dynamic_points[-1]
+            #     .reshape([-1] + list(self.dynamic_vertices[0].shape))
+            #     .cpu()
+            #     .numpy()
+            # )
 
             # Calculate the velocity and omega for calculating relative velocity
             dynamic_velocity = torch.tensor(
@@ -1386,6 +1381,8 @@ class InvPhyTrainerWarp:
             )
 
             frame_count += 1
+
+            self.save_data(save_dir, frame_count, x, gaussians, interpolated_dynamic_points[-1])
 
     def video_from_data(
         self, gs_path, save_dir
@@ -1546,7 +1543,7 @@ class InvPhyTrainerWarp:
         out.release()
         cv2.destroyAllWindows()
         logger.info(f"Video saved to {output_path}")
-    
+
     def select_control_points(self, model_path, gs_path, n_ctrl_parts):
         # Load the model
         logger.info(f"Load model from {model_path}")
