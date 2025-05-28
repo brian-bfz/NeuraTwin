@@ -1379,7 +1379,6 @@ class InvPhyTrainerWarp:
                 dynamic_velocity,
                 dynamic_omega,
             )
-
             frame_count += 1
 
             self.save_data(save_dir, frame_count, x, gaussians, interpolated_dynamic_points[-1])

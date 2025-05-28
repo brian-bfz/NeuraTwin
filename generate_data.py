@@ -102,31 +102,39 @@ if __name__ == "__main__":
     init_pose = np.eye(4)
     init_pose[:3, :3] = R
     init_pose[:3, 3] = [0.0, 0.0, 0.0]
-    sample_robot = RobotPcSampler(
-        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
-    )
 
     exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
     gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
 
     logger.set_log_file(path=base_dir, name="inference_log")
-    trainer = InvPhyTrainerWarp(
-        data_path=f"{base_path}/{case_name}/final_data.pkl",
-        base_dir=base_dir,
-        pure_inference_mode=True,
-        static_meshes=[],
-        robot=sample_robot,
-    )
 
     best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
     
     # Create timestamped folder for this simulation run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # print(case_name, timestamp, f"{case_name}_{timestamp}")
-    save_dir = os.path.join("generated_data", f"{case_name}_{timestamp}")
-    os.makedirs(os.path.join(save_dir, "object"), exist_ok=True)
-    os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
-    os.makedirs(os.path.join(save_dir, "robot"), exist_ok=True)
+
+    for i in range(2):
+        sample_robot = RobotPcSampler(
+            urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+        )
+        trainer = InvPhyTrainerWarp(
+            data_path=f"{base_path}/{case_name}/final_data.pkl",
+            base_dir=base_dir,
+            pure_inference_mode=True,
+            static_meshes=[],
+            robot=sample_robot,
+        )
+        save_dir = os.path.join("generated_data", f"{i}")
+        os.makedirs(os.path.join(save_dir, "object"), exist_ok=True)
+        os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
+        os.makedirs(os.path.join(save_dir, "robot"), exist_ok=True)
+        trainer.generate_data(
+            best_model_path, 
+            gaussians_path, 
+            args.n_ctrl_parts, 
+            save_dir, 
+        )
 
     # Load custom control points if provided
     # custom_control_points = None
@@ -141,9 +149,3 @@ if __name__ == "__main__":
     # print(pressed_keys_sequence)
 
     
-    trainer.generate_data(
-        best_model_path, 
-        gaussians_path, 
-        args.n_ctrl_parts, 
-        save_dir, 
-    )
