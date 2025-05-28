@@ -448,6 +448,30 @@ def fps_rad(pcd, radius):
     pcd_fps = np.stack(pcd_fps_lst, axis=0)
     return pcd_fps
 
+def fps_rad_tensor(pcd_tensor, radius):
+        """
+        Tensor-based FPS that returns indices directly.
+        
+        Args:
+            pcd_tensor: torch.Tensor of shape (n, 3)
+            radius: float, sampling radius
+        
+        Returns:
+            torch.Tensor: indices of sampled points
+        """
+        pcd = pcd_tensor.numpy()  # Convert only once
+        rand_idx = np.random.randint(pcd.shape[0])
+        selected_indices = [rand_idx]
+        dist = np.linalg.norm(pcd - pcd[rand_idx], axis=1)
+        
+        while dist.max() > radius:
+            farthest_idx = dist.argmax()
+            selected_indices.append(farthest_idx)
+            dist = np.minimum(dist, np.linalg.norm(pcd - pcd[farthest_idx], axis=1))
+        
+        return torch.from_numpy(np.array(selected_indices)).long()
+
+
 def fps_np(pcd, particle_num, init_idx=-1):
     # pcd: (n, c) numpy array
     # pcd_fps: (particle_num, c) numpy array

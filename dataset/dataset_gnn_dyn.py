@@ -11,11 +11,12 @@ import time
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from scipy.spatial.distance import cdist
 
 from env.flex_env import FlexEnv
 
 from scipy.spatial import KDTree
-from utils import load_yaml, set_seed, fps_rad, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
+from utils import load_yaml, set_seed, fps_rad_tensor, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
 
 import matplotlib.pyplot as plt
 from dgl.geometry import farthest_point_sampler
@@ -55,7 +56,9 @@ class ParticleDataset(Dataset):
         self.screenWidth = 720
         self.img_channel = 1
 
-        self.cam_params, self.cam_extrinsic = cam
+        self.fps_radius = config.get('fps_radius', 0.03)
+
+        # self.cam_params, self.cam_extrinsic = cam
 
     def __len__(self):
         return self.n_episode * (self.n_timestep - self.n_his - self.n_roll + 1)
@@ -74,122 +77,72 @@ class ParticleDataset(Dataset):
         return particles
 
     def __getitem__(self, idx):
-        particle_r = 0.03; 
-
+        # Calculate which episode and timestep this idx corresponds to
         offset = self.n_timestep - self.n_his - self.n_roll + 1
         idx_episode = idx // offset + self.epi_st_idx
         idx_timestep = idx % offset
 
-        action_path = os.path.join(self.data_dir, '%d/actions.p' % idx_episode)
-        with open(action_path, 'rb') as fp:
-            actions = pickle.load(fp)
-
-        # sample particles to track in the first frame
-        first_depth_path = os.path.join(self.data_dir, '%d/%d_depth.png' % (idx_episode, idx_timestep))
-        first_depth = cv2.imread(first_depth_path, cv2.IMREAD_ANYDEPTH) / (self.global_scale * 1000.0)
-        first_depth_fgpcd = depth2fgpcd(first_depth, (first_depth < 0.599/0.8), self.cam_params) # [N, 3]
-        sampled_pts = fps_rad(first_depth_fgpcd, particle_r) # [particle_num, 3]
-        particle_num = sampled_pts.shape[0]
-        sampled_pts = recenter(first_depth_fgpcd, sampled_pts, r = min(0.02, 0.5 * particle_r)) # [particle_num, 3]
-
-        # find the nearest gt particle to sampled_pts
-        first_particles_path = os.path.join(self.data_dir, '%d/%d_particles.npy' % (idx_episode, idx_timestep))
-        first_particles = self.read_particles(first_particles_path)
-        # print(first_particles)
+        # Pre-allocate tensors for efficiency
+        first_object = torch.load(os.path.join(self.data_dir, '%d/object/x_%d.pt' % (idx_episode, idx_timestep)))
+        first_robot = torch.load(os.path.join(self.data_dir, '%d/robot/x_%d.pt' % (idx_episode, idx_timestep)))
         
-        first_particles_tree = KDTree(first_particles)
-        _, nearest_idx = first_particles_tree.query(sampled_pts, k=1)
+        n_frames = self.n_his + self.n_roll
+        all_frames_object = torch.zeros(n_frames, first_object.shape[0], 3)
+        all_frames_robot = torch.zeros(n_frames, first_robot.shape[0], 3)
         
-        states = np.zeros((self.n_his + self.n_roll, particle_num, 3))
-        # color_imgs = np.zeros((self.n_his + self.n_roll, 720, 720, 3)).astype(np.uint8)
-        states_delta = np.zeros((self.n_his + self.n_roll - 1, particle_num, 3))
-        attrs = np.zeros(states.shape[:2])
-
-        for i in range(idx_timestep, idx_timestep + self.n_his + self.n_roll):
-            particles_path = os.path.join(self.data_dir, '%d/%d_particles.npy' % (idx_episode, i))
-            particles = self.read_particles(particles_path)
-            states[i - idx_timestep] = particles[nearest_idx, :]
-
-            if i < idx_timestep + self.n_his + self.n_roll - 1:
-                s = actions[i, :2]
-                e = actions[i, 2:]
-                h = 0.0
-                pusher_w = 0.8 / 24.0
-
-                # # construct grids for testing
-                # grid_2d = np.mgrid[0:720, 0:720].transpose(2, 1, 0)
-                # grid_2d = grid_2d.reshape(-1, 2)
-                # fx, fy, cx, cy = self.cam_params
-                # grid_3d = np.zeros((720 * 720, 3))
-                # grid_3d[:, 0] = (grid_2d[:, 0] - cx) * 0.75 / fx
-                # grid_3d[:, 1] = (grid_2d[:, 1] - cy) * 0.75 / fy
-                # grid_3d[:, 2] = 0.75
-
-                s_3d = np.array([s[0], h, -s[1]])
-                e_3d = np.array([e[0], h, -e[1]])
-                s_3d_cam = opengl2cam(s_3d[None, :], self.cam_extrinsic, self.global_scale)[0]
-                e_3d_cam = opengl2cam(e_3d[None, :], self.cam_extrinsic, self.global_scale)[0]
-                push_dir_cam = e_3d_cam - s_3d_cam
-                push_l = np.linalg.norm(push_dir_cam)
-                push_dir_cam = push_dir_cam / np.linalg.norm(push_dir_cam)
-                try:
-                    assert abs(push_dir_cam[2]) < 1e-6
-                except:
-                    print(push_dir_cam)
-                    exit(1)
-                push_dir_ortho_cam = np.array([-push_dir_cam[1], push_dir_cam[0], 0.0])
-                pos_diff_cam = particles[nearest_idx, :] - s_3d_cam[None, :] # [particle_num, 3]
-                pos_diff_ortho_proj_cam = (pos_diff_cam * np.tile(push_dir_ortho_cam[None, :], (particle_num, 1))).sum(axis=1) # [particle_num,]
-                pos_diff_proj_cam = (pos_diff_cam * np.tile(push_dir_cam[None, :], (particle_num, 1))).sum(axis=1) # [particle_num,]
-                # pos_diff_cam_grid_test = grid_3d - s_3d_cam[None, :] # [720*720, 3]
-                # pos_diff_ortho_proj_cam_grid_test = (pos_diff_cam_grid_test * np.tile(push_dir_ortho_cam[None, :], (720 * 720, 1))).sum(axis=1) # [720*720,]
-                # pos_diff_proj_cam_grid_test = (pos_diff_cam_grid_test * np.tile(push_dir_cam[None, :], (720 * 720, 1))).sum(axis=1) # [720*720,]
-                # pos_diff_l_mask_grid_test = ((pos_diff_proj_cam_grid_test < push_l) & (pos_diff_proj_cam_grid_test > 0.0)).astype(np.float32) # hard mask
-                # pos_diff_w_mask_grid_test = np.maximum(np.maximum(-pusher_w - pos_diff_ortho_proj_cam_grid_test, 0.), # soft mask
-                #                             np.maximum(pos_diff_ortho_proj_cam_grid_test - pusher_w, 0.))
-                # pos_diff_w_mask_grid_test = np.exp(-pos_diff_w_mask_grid_test / 0.01) # [particle_num,]
-
-                # push_dir = e - s
-                # push_theta = np.arctan2(push_dir[1], push_dir[0])
-                # pusher_s = np.zeros((3, 3))
-                # pusher_s[0, :] = s_3d - 24. * pusher_w * np.array([np.sin(push_theta), 0.0, np.cos(push_theta)])
-                # pusher_s[1, :] = s_3d
-                # pusher_s[2, :] = s_3d + 24. * pusher_w * np.array([np.sin(push_theta), 0.0, np.cos(push_theta)])
-                # pusher_s = self.flex2cam(pusher_s)
-                # pusher_s_2d = self.ptcl2pix(pusher_s)
-                # pusher_e = np.zeros((3, 3))
-                # pusher_e[0, :] = e_3d - 24. * pusher_w * np.array([np.sin(push_theta), 0.0, np.cos(push_theta)])
-                # pusher_e[1, :] = e_3d
-                # pusher_e[2, :] = e_3d + 24. * pusher_w * np.array([np.sin(push_theta), 0.0, np.cos(push_theta)])
-                # pusher_e = self.flex2cam(pusher_e)
-                # pusher_e_2d = self.ptcl2pix(pusher_e)
-
-                # ref_img = np.ones((720, 720, 3)) * 255
-                # for j in range(3):
-                #     ref_img = cv2.circle(ref_img.copy(), (int(pusher_s_2d[j, 0]), int(pusher_s_2d[j, 1])), 5, (255, 0, 0), -1)
-                # for j in range(3):
-                #     ref_img = cv2.circle(ref_img.copy(), (int(pusher_e_2d[j, 0]), int(pusher_e_2d[j, 1])), 5, (0, 255, 0), -1)
-                # ref_img = ref_img.astype(np.uint8)
-                # plt.subplot(1, 3, 1)
-                # plt.imshow(pos_diff_l_mask_grid_test.reshape(720, 720))
-                # plt.subplot(1, 3, 2)
-                # plt.imshow(pos_diff_w_mask_grid_test.reshape(720, 720))
-                # plt.subplot(1, 3, 3)
-                # plt.imshow(ref_img)
-                # plt.show()
-                pos_diff_l_mask = ((pos_diff_proj_cam < push_l) & (pos_diff_proj_cam > 0.0)).astype(np.float32) # hard mask
-                pos_diff_w_mask = np.maximum(np.maximum(-pusher_w - pos_diff_ortho_proj_cam, 0.), # soft mask
-                                            np.maximum(pos_diff_ortho_proj_cam - pusher_w, 0.))
-                pos_diff_w_mask = np.exp(-pos_diff_w_mask / 0.01) # [particle_num,]
-                pos_diff_to_end_cam = (e_3d_cam[None, :] - particles[nearest_idx, :]) # [particle_num, 3]
-                pos_diff_to_end_cam = (pos_diff_to_end_cam * np.tile(push_dir_cam[None, :], (particle_num, 1))).sum(axis=1) # [particle_num,]
-                states_delta[i - idx_timestep] = pos_diff_to_end_cam[:, None] * push_dir_cam[None, :] * pos_diff_l_mask[:, None] * pos_diff_w_mask[:, None]
-            # color_img_path = os.path.join(self.data_dir, '%d/%d_color.png' % (idx_episode, i))
-            # color_img = cv2.imread(color_img_path)
-            # color_imgs[i - idx_timestep, :, :, :] = color_img
-        states = torch.FloatTensor(states)
-        states_delta = torch.FloatTensor(states_delta)
-        attrs = torch.FloatTensor(attrs)
+        # Fill tensors efficiently
+        all_frames_object[0] = first_object
+        all_frames_robot[0] = first_robot
+        
+        for i in range(1, n_frames):
+            frame_idx = idx_timestep + i
+            object_path = os.path.join(self.data_dir, '%d/object/x_%d.pt' % (idx_episode, frame_idx))
+            robot_path = os.path.join(self.data_dir, '%d/robot/x_%d.pt' % (idx_episode, frame_idx))
+            
+            all_frames_object[i] = torch.load(object_path)
+            all_frames_robot[i] = torch.load(robot_path)
+        
+        # FPS sampling using tensor indices directly (no cdist needed!)
+        sampled_object_indices = fps_rad_tensor(first_object, self.fps_radius)
+        sampled_robot_indices = fps_rad_tensor(first_robot, self.fps_radius)
+        
+        n_sampled_object = sampled_object_indices.shape[0]
+        n_sampled_robot = sampled_robot_indices.shape[0]
+        particle_num = n_sampled_object + n_sampled_robot
+        
+        # Create masks for particle types
+        object_mask = torch.zeros(particle_num, dtype=torch.bool)
+        robot_mask = torch.zeros(particle_num, dtype=torch.bool)
+        object_mask[:n_sampled_object] = True
+        robot_mask[n_sampled_object:] = True
+        
+        # Sample particles using tensor indexing (super efficient!)
+        sampled_object_states = all_frames_object[:, sampled_object_indices, :]  # [time, sampled_object, 3]
+        sampled_robot_states = all_frames_robot[:, sampled_robot_indices, :]     # [time, sampled_robot, 3]
+        
+        # Combine sampled particles: [object_particles, robot_particles]
+        states = torch.cat([sampled_object_states, sampled_robot_states], dim=1)  # [time, total_sampled, 3]
+        
+        # Calculate states_delta using tensor operations
+        states_delta = torch.zeros(n_frames - 1, particle_num, 3)
+        
+        # Efficient tensor computation for consecutive frame differences
+        next_states = states[1:]      # [time-1, particles, 3]
+        current_states = states[:-1]  # [time-1, particles, 3]
+        
+        # For object particles: delta = 0 (implicitly, since states_delta is zero-initialized)
+        # For robot particles: delta = next - current
+        states_delta[:, robot_mask, :] = next_states[:, robot_mask, :] - current_states[:, robot_mask, :]
+        
+        # Create attrs tensor
+        attrs = torch.zeros(n_frames, particle_num)
+        attrs[:, robot_mask] = 1.0   # robot particles
+        
+        # Convert to float tensors
+        states = states.float()
+        states_delta = states_delta.float()
+        attrs = attrs.float()
+        
         return states, states_delta, attrs, particle_num
 
 def dataset_test():

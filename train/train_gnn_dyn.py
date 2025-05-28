@@ -50,13 +50,7 @@ def train():
     log_per_iter = config['train']['log_per_iter']
     n_epoch = config['train']['n_epoch']
 
-    env = FlexEnv(config)
-    env.reset()
-    cam = []
-    cam.append(env.get_cam_params())
-    cam.append(env.get_cam_extrinsics())
-    env.close()
-
+    # Note: No longer need camera parameters since we work directly with world coordinates
     set_seed(config['train']['random_seed'])
 
     use_gpu = torch.cuda.is_available()
@@ -79,7 +73,7 @@ def train():
 
     ### dataloaders
     phases = ['train', 'valid']
-    datasets = {phase: ParticleDataset(config['train']['data_root'], config, phase, cam) for phase in phases}
+    datasets = {phase: ParticleDataset(config['train']['data_root'], config, phase) for phase in phases}
 
     dataloaders = {phase: DataLoader(
         datasets[phase],
@@ -132,9 +126,8 @@ def train():
 
                 # states: B x (n_his + n_roll) x (particles_num + pusher_num) x 3
                 # attrs: B x (n_his + n_roll) x (particles_num + pusher_num)
-                # next_pusher: B x (n_his + n_roll - 1) x (pusher_num) X 3
-                # states, next_pusher, attrs, _ = data
-                states, states_delta, attrs, particle_nums, _ = data
+                # states_delta: B x (n_his + n_roll - 1) x (particles_num + pusher_num) x 3
+                states, states_delta, attrs, particle_nums = data
 
                 B, length, n_obj, _ = states.size()
                 assert length == n_rollout + n_history
@@ -142,7 +135,6 @@ def train():
                 if use_gpu:
                     states = states.cuda()
                     attrs = attrs.cuda()
-                    # next_pusher = next_pusher.cuda()
                     states_delta = states_delta.cuda()
 
 
@@ -158,8 +150,6 @@ def train():
                         # s_nxt: B x (particles_num + pusher_num) x 3
                         s_nxt = states[:, idx_step + 1]
 
-                        # act_pusher: B x pusher_num x 3
-                        # act_pusher = next_pusher[:, idx_step]
                         s_delta = states_delta[:, idx_step]
 
                         # s_pred: B x particles_num x 3
