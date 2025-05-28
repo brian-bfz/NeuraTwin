@@ -15,7 +15,7 @@ from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
 from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, get_current_YYYY_MM_DD_hh_mm_ss_ms
 
-from env.flex_env import FlexEnv
+# from env.flex_env import FlexEnv
 
 def collate_fn(data):
     """
