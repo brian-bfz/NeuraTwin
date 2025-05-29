@@ -164,7 +164,7 @@ class ObjectMotionPredictor:
         return errors
     
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
-                               episode_num, save_path):
+                               episode_num, save_path, edge_threshold=0.1):
         """
         Create visualization comparing predicted vs actual object motion
         Uses the existing visualizer pattern
@@ -186,6 +186,19 @@ class ObjectMotionPredictor:
         
         n_frames = min(len(predicted_objects), len(actual_objects))
         print(f"Rendering {n_frames} frames...")
+        
+        def create_edges_for_points(positions, distance_threshold):
+            """Create edges between points within distance threshold"""
+            edges = []
+            n_points = positions.shape[0]
+            
+            for i in range(n_points):
+                for j in range(i + 1, n_points):
+                    distance = np.linalg.norm(positions[i] - positions[j])
+                    if distance <= distance_threshold:
+                        edges.append([i, j])
+            
+            return np.array(edges) if edges else np.empty((0, 2), dtype=int)
         
         for frame_idx in range(n_frames):
             # Get positions for this frame
@@ -210,9 +223,35 @@ class ObjectMotionPredictor:
             
             pcd.colors = o3d.utility.Vector3dVector(colors)
             
+            # Create edges for predicted objects (red)
+            pred_edges = create_edges_for_points(pred_obj_pos, edge_distance_threshold)
+            pred_line_set = o3d.geometry.LineSet()
+            if len(pred_edges) > 0:
+                pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
+                pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
+                # Red color for predicted object edges
+                pred_line_colors = np.tile([1.0, 0.2, 0.2], (len(pred_edges), 1))
+                pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
+            
+            # Create edges for actual objects (blue)
+            actual_edges = create_edges_for_points(actual_obj_pos, edge_distance_threshold)
+            actual_line_set = o3d.geometry.LineSet()
+            if len(actual_edges) > 0:
+                actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
+                actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
+                # Blue color for actual object edges
+                actual_line_colors = np.tile([0.2, 0.6, 1.0], (len(actual_edges), 1))
+                actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
+            
             # Update visualization
             vis.clear_geometries()
             vis.add_geometry(pcd)
+            
+            # Add edge geometries if they exist
+            if len(pred_edges) > 0:
+                vis.add_geometry(pred_line_set)
+            if len(actual_edges) > 0:
+                vis.add_geometry(actual_line_set)
             
             # Set camera view
             view_control = vis.get_view_control()
@@ -237,7 +276,7 @@ class ObjectMotionPredictor:
             
             # Add text overlay with sampling info
             text1 = f'Frame {frame_idx} | Red=Predicted Objects | Blue=Actual Objects | Green=Robot'
-            text2 = f'Sampled particles (FPS radius={self.fps_radius})'
+            text2 = f'Sampled particles (FPS radius={self.fps_radius}) | Edge threshold={edge_distance_threshold}'
             image_bgr = cv2.putText(image_bgr, text1, (10, 30), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             image_bgr = cv2.putText(image_bgr, text2, (10, 60), 
@@ -262,8 +301,13 @@ def main():
     config_path = "config/train/gnn_dyn.yaml"
     data_dir = "../test/PhysTwin/generated_data"
     
+<<<<<<< HEAD
     # Test episodes 
     test_episodes = [0, 1, 2, 3, 4]
+=======
+    # Test episodes (20-24 as you wanted)
+    test_episodes = [20, 21, 22]
+>>>>>>> c8a2c8f2fd18f447ae365d9d4130fb63f45cb39e
     
     # Initialize predictor
     predictor = ObjectMotionPredictor(model_path, config_path)
