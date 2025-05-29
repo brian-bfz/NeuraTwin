@@ -1039,6 +1039,7 @@ class InvPhyTrainerWarp:
         robot_position = np.mean(all_vertices, axis=0)
         translation = start_position.cpu().numpy() - robot_position
         translation = translation.reshape(self.n_ctrl_parts, 3)
+        # print(translation, start_position.cpu().numpy(), robot_position)
         
         # 6. Calculate total movement distance and number of frames needed
         movement_vector = -random_direction.cpu().numpy() * offset_dist * multiplier

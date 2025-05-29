@@ -118,6 +118,8 @@ if __name__ == "__main__":
         sample_robot = RobotPcSampler(
             urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
         )
+        # finger_meshes = sample_robot.get_finger_mesh(1.0)
+
         trainer = InvPhyTrainerWarp(
             data_path=f"{base_path}/{case_name}/final_data.pkl",
             base_dir=base_dir,
