@@ -164,7 +164,7 @@ class ObjectMotionPredictor:
         return errors
     
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
-                               episode_num, save_path="data/video/object_motion_prediction.mp4"):
+                               episode_num, save_path):
         """
         Create visualization comparing predicted vs actual object motion
         Uses the existing visualizer pattern
@@ -175,7 +175,7 @@ class ObjectMotionPredictor:
         # Video parameters
         fps = 10
         width, height = 1280, 720
-        fourcc = cv2.VideoWriter_fourcc(*'mp4')
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  
         
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
@@ -262,8 +262,8 @@ def main():
     config_path = "config/train/gnn_dyn.yaml"
     data_dir = "../test/PhysTwin/generated_data"
     
-    # Test episodes (20-24 as you wanted)
-    test_episodes = [20, 21, 22, 23, 24]
+    # Test episodes 
+    test_episodes = [0, 1, 2, 3, 4]
     
     # Initialize predictor
     predictor = ObjectMotionPredictor(model_path, config_path)
@@ -298,7 +298,7 @@ def main():
             print(f"  Timesteps predicted: {len(errors)}")
             
             # Create visualization
-            video_path = f"data/video/object_prediction_episode_{episode_num}.mp4"
+            video_path = f"data/video/prediction_{episode_num}.mp4"
             predictor.visualize_object_motion(
                 predicted_objects, actual_objects, robot_trajectory, 
                 episode_num, video_path
