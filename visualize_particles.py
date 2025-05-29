@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import open3d as o3d
 import cv2
-from dataset.dataset_gnn_dyn import Dataset_gnn_dyn
+from dataset.dataset_gnn_dyn import ParticleDataset
 import yaml
 
 def load_yaml(path):
@@ -23,7 +23,7 @@ def visualize_particle_dataset(data_dir, config_path, episode_idx=0, output_path
     
     # Load config and create dataset
     config = load_yaml(config_path)
-    dataset = Dataset_gnn_dyn(data_dir, config, phase='train')
+    dataset = ParticleDataset(data_dir, config, phase='train')
     
     # Get first sample to understand dimensions
     sample = dataset[episode_idx]
@@ -32,6 +32,14 @@ def visualize_particle_dataset(data_dir, config_path, episode_idx=0, output_path
     print(f"States shape: {states.shape}")
     print(f"Attrs shape: {attrs.shape}")
     print(f"Particle nums: {particle_nums}")
+    
+    # Analyze particle distribution to set up camera properly
+    all_positions = states.view(-1, 3).numpy()
+    center = np.mean(all_positions, axis=0)
+    extent = np.max(all_positions, axis=0) - np.min(all_positions, axis=0)
+    
+    print(f"Particle center: {center}")
+    print(f"Particle extent: {extent}")
     
     # Video parameters
     fps = 10
@@ -57,6 +65,8 @@ def visualize_particle_dataset(data_dir, config_path, episode_idx=0, output_path
         positions = states[frame_idx].numpy()  # [N, 3]
         frame_attrs = attrs[frame_idx].numpy()  # [N]
         
+        print(positions)  # Debug print
+        
         # Create point cloud
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(positions)
@@ -78,13 +88,14 @@ def visualize_particle_dataset(data_dir, config_path, episode_idx=0, output_path
         vis.clear_geometries()
         vis.add_geometry(pcd)
         
-        # Set camera view (adjust these parameters as needed)
-        if frame_idx == 0:
-            # Set initial camera position
-            view_control.set_lookat([0, 0, 0])
-            view_control.set_up([0, 0, 1])
-            view_control.set_front([1, 1, 1])
-            view_control.set_zoom(0.5)
+        # Set camera view consistently for all frames
+        view_control.set_lookat(center)
+        view_control.set_up([0, 1, 0])  # Z is up
+        view_control.set_front([0, 0, 1])  # Look along Y axis (rotated 90 degrees)
+        
+        # Set zoom based on particle extent
+        zoom_factor = 1.0 / (max(extent) * 2)
+        view_control.set_zoom(zoom_factor)
         
         # Update visualization
         vis.poll_events()
@@ -124,11 +135,11 @@ def visualize_multiple_episodes(data_dir, config_path, num_episodes=3):
 
 if __name__ == "__main__":
     # Example usage
-    data_dir = "data/gnn_dyn"  # Update with your actual data directory
+    data_dir = "data/gnn_dyn_data"  # Update with your actual data directory
     config_path = "config/train/gnn_dyn.yaml"
     
     # Visualize single episode
-    visualize_particle_dataset(data_dir, config_path, episode_idx=0)
+    visualize_particle_dataset(data_dir, config_path, episode_idx=40)
     
     # Optionally visualize multiple episodes
     # visualize_multiple_episodes(data_dir, config_path, num_episodes=3)
