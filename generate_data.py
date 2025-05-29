@@ -73,12 +73,12 @@ if __name__ == "__main__":
     parser.add_argument("--case_name", type=str, default="double_lift_cloth_3")
     parser.add_argument("--n_ctrl_parts", type=int, default=1)
     parser.add_argument("--custom_ctrl_points", type=str, help="Path to directory containing custom control points")
-    parser.add_argument("--n_episodes", type=int)
+    parser.add_argument("--n_episodes", type=int, required=True)
+    parser.add_argument("--start_episode", type=int, default=0)
     args = parser.parse_args()
 
     base_path = args.base_path
     case_name = args.case_name
-    n_episodes = args.n_episodes
 
     if "cloth" in case_name or "package" in case_name:
         cfg.load_from_yaml("configs/cloth.yaml")
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # print(case_name, timestamp, f"{case_name}_{timestamp}")
 
-    for i in range(n_episodes):
+    for i in range(args.start_episode, args.start_episode + args.n_episodes):
         sample_robot = RobotPcSampler(
             urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
         )
