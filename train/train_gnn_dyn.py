@@ -1,3 +1,5 @@
+import multiprocessing as mp
+mp.set_start_method('spawn', force=True)
 import os, sys
 import cv2
 import numpy as np

@@ -1,0 +1,338 @@
+import os
+import numpy as np
+import torch
+import cv2
+import open3d as o3d
+from dataset.dataset_gnn_dyn import ParticleDataset
+from model.gnn_dyn import PropNetDiffDenModel
+from utils import load_yaml, fps_rad_tensor
+
+class ObjectMotionPredictor:
+    def __init__(self, model_path, config_path):
+        """Initialize the object motion predictor"""
+        self.config = load_yaml(config_path)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # CRITICAL: Use same FPS radius as training!
+        self.fps_radius = self.config['train']['fps_radius']  # 0.03
+        print(f"Using FPS radius: {self.fps_radius} (same as training)")
+        
+        # Load trained model
+        self.model = PropNetDiffDenModel(self.config, torch.cuda.is_available())
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.to(self.device)
+        self.model.eval()
+        
+        print(f"Loaded model from: {model_path}")
+        print(f"Using device: {self.device}")
+    
+    def load_episode_data(self, data_dir, episode_num):
+        """
+        Load raw episode data, apply FPS sampling, and separate object/robot particles
+        
+        Returns:
+        - sampled_object_trajectory: [timesteps, N_sampled_obj, 3] - actual object motion (sampled)
+        - sampled_robot_trajectory: [timesteps, N_sampled_robot, 3] - robot motion (sampled)
+        - object_sample_indices: indices of sampled object particles
+        - robot_sample_indices: indices of sampled robot particles
+        """
+        
+        # Find number of timesteps for this episode
+        timestep = 0
+        while os.path.exists(f'{data_dir}/{episode_num}/object/x_{timestep}.pt'):
+            timestep += 1
+        n_timesteps = timestep
+        
+        print(f"Episode {episode_num}: Found {n_timesteps} timesteps")
+        
+        # Load first timestep to determine sampling indices
+        first_object = torch.load(f'{data_dir}/{episode_num}/object/x_0.pt')
+        first_robot = torch.load(f'{data_dir}/{episode_num}/robot/x_0.pt')
+        
+        print(f"Raw particles - Object: {first_object.shape[0]}, Robot: {first_robot.shape[0]}")
+        
+        # CRITICAL FIX: Apply FPS sampling (same as training!)
+        object_sample_indices = fps_rad_tensor(first_object, self.fps_radius)
+        robot_sample_indices = fps_rad_tensor(first_robot, self.fps_radius)
+        
+        n_sampled_obj = object_sample_indices.shape[0]
+        n_sampled_robot = robot_sample_indices.shape[0]
+        
+        print(f"Sampled particles - Object: {n_sampled_obj}, Robot: {n_sampled_robot}")
+        print(f"Sampling ratio - Object: {n_sampled_obj/first_object.shape[0]:.3f}, Robot: {n_sampled_robot/first_robot.shape[0]:.3f}")
+        
+        # Pre-allocate arrays for sampled particles
+        sampled_object_trajectory = torch.zeros(n_timesteps, n_sampled_obj, 3)
+        sampled_robot_trajectory = torch.zeros(n_timesteps, n_sampled_robot, 3)
+        
+        # Load and sample all timesteps
+        for t in range(n_timesteps):
+            # Load full data
+            object_full = torch.load(f'{data_dir}/{episode_num}/object/x_{t}.pt')
+            robot_full = torch.load(f'{data_dir}/{episode_num}/robot/x_{t}.pt')
+            
+            # Apply consistent sampling (same indices for all timesteps)
+            sampled_object_trajectory[t] = object_full[object_sample_indices]
+            sampled_robot_trajectory[t] = robot_full[robot_sample_indices]
+        
+        return sampled_object_trajectory, sampled_robot_trajectory, object_sample_indices, robot_sample_indices
+    
+    def predict_object_response(self, current_object_pos, current_robot_pos, robot_delta):
+        """
+        Predict how objects respond to robot motion
+        
+        Args:
+        - current_object_pos: [N_obj, 3] current object positions
+        - current_robot_pos: [N_robot, 3] current robot positions  
+        - robot_delta: [N_robot, 3] robot motion for this timestep
+        
+        Returns:
+        - next_object_pos: [N_obj, 3] predicted next object positions
+        """
+        
+        N_obj = current_object_pos.shape[0]
+        N_robot = current_robot_pos.shape[0]
+        N_total = N_obj + N_robot
+        
+        # Combine object and robot particles (model expects both)
+        s_cur = torch.cat([current_object_pos, current_robot_pos], dim=0).unsqueeze(0)  # [1, N_total, 3]
+        
+        # Create attributes: 0 for objects, 1 for robot
+        a_cur = torch.zeros(1, N_total, device=self.device)
+        a_cur[0, N_obj:] = 1.0  # Robot particles have attr=1
+        
+        # Create motion deltas: 0 for objects, actual motion for robot
+        s_delta = torch.zeros(1, N_total, 3, device=self.device)
+        s_delta[0, N_obj:] = robot_delta.unsqueeze(0)  # Only robot moves
+        
+        # Move to device
+        s_cur = s_cur.to(self.device)
+        
+        # Predict next positions
+        with torch.no_grad():
+            s_next_pred = self.model.predict_one_step(a_cur, s_cur, s_delta)
+        
+        # Extract only object predictions
+        next_object_pos = s_next_pred[0, :N_obj, :].cpu()  # [N_obj, 3]
+        
+        return next_object_pos
+    
+    def predict_object_motion(self, initial_object_pos, robot_trajectory):
+        """
+        Given initial object positions and robot trajectory, predict object motion over time
+        
+        Args:
+        - initial_object_pos: [N_obj, 3] starting object positions
+        - robot_trajectory: [timesteps, N_robot, 3] robot motion sequence
+        
+        Returns:
+        - object_predictions: [timesteps, N_obj, 3] predicted object motion
+        """
+        
+        object_predictions = [initial_object_pos.clone()]
+        current_object_pos = initial_object_pos.clone()
+        
+        print(f"Predicting object motion for {robot_trajectory.shape[0]-1} timesteps...")
+        
+        for t in range(robot_trajectory.shape[0] - 1):
+            # Robot motion between timesteps
+            current_robot_pos = robot_trajectory[t]
+            next_robot_pos = robot_trajectory[t + 1]
+            robot_delta = next_robot_pos - current_robot_pos
+            
+            # Predict how objects respond to this robot motion
+            next_object_pos = self.predict_object_response(
+                current_object_pos, 
+                current_robot_pos, 
+                robot_delta
+            )
+            
+            object_predictions.append(next_object_pos)
+            current_object_pos = next_object_pos
+            
+            if t % 10 == 0:
+                print(f"  Predicted timestep {t+1}/{robot_trajectory.shape[0]-1}")
+        
+        return torch.stack(object_predictions)
+    
+    def calculate_prediction_error(self, predicted_objects, actual_objects):
+        """Calculate prediction errors"""
+        errors = []
+        for t in range(min(len(predicted_objects), len(actual_objects))):
+            error = torch.nn.functional.mse_loss(predicted_objects[t], actual_objects[t]).item()
+            errors.append(error)
+        return errors
+    
+    def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
+                               episode_num, save_path="data/video/object_motion_prediction.mp4"):
+        """
+        Create visualization comparing predicted vs actual object motion
+        Uses the existing visualizer pattern
+        """
+        
+        print(f"Creating visualization for episode {episode_num}...")
+        
+        # Video parameters
+        fps = 10
+        width, height = 1280, 720
+        fourcc = cv2.VideoWriter_fourcc(*'mp4')
+        
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
+        
+        # Create Open3D visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(width=width, height=height, visible=False)
+        
+        n_frames = min(len(predicted_objects), len(actual_objects))
+        print(f"Rendering {n_frames} frames...")
+        
+        for frame_idx in range(n_frames):
+            # Get positions for this frame
+            pred_obj_pos = predicted_objects[frame_idx].numpy()
+            actual_obj_pos = actual_objects[frame_idx].numpy()
+            robot_pos = robot_trajectory[frame_idx].numpy()
+            
+            # Create combined point cloud
+            all_positions = np.vstack([pred_obj_pos, actual_obj_pos, robot_pos])
+            
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(all_positions)
+            
+            # Color particles: predicted=red, actual=blue, robot=green
+            N_obj = pred_obj_pos.shape[0]
+            N_robot = robot_pos.shape[0]
+            
+            colors = np.zeros((len(all_positions), 3))
+            colors[:N_obj] = [1.0, 0.2, 0.2]  # Predicted objects: red
+            colors[N_obj:2*N_obj] = [0.2, 0.6, 1.0]  # Actual objects: blue  
+            colors[2*N_obj:] = [0.2, 1.0, 0.2]  # Robot: green
+            
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+            
+            # Update visualization
+            vis.clear_geometries()
+            vis.add_geometry(pcd)
+            
+            # Set camera view
+            view_control = vis.get_view_control()
+            center = np.mean(all_positions, axis=0)
+            view_control.set_lookat(center)
+            view_control.set_up([0, 1, 0])
+            view_control.set_front([0, 0, 1])
+            
+            # Auto-zoom based on data extent
+            extent = np.max(all_positions, axis=0) - np.min(all_positions, axis=0)
+            zoom_factor = 0.8 / max(extent)
+            view_control.set_zoom(zoom_factor)
+            
+            # Render frame
+            vis.poll_events()
+            vis.update_renderer()
+            
+            image = vis.capture_screen_float_buffer(do_render=True)
+            image_np = np.asarray(image)
+            image_bgr = (image_np * 255).astype(np.uint8)
+            image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_RGB2BGR)
+            
+            # Add text overlay with sampling info
+            text1 = f'Frame {frame_idx} | Red=Predicted Objects | Blue=Actual Objects | Green=Robot'
+            text2 = f'Sampled particles (FPS radius={self.fps_radius})'
+            image_bgr = cv2.putText(image_bgr, text1, (10, 30), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            image_bgr = cv2.putText(image_bgr, text2, (10, 60), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            
+            video_writer.write(image_bgr)
+            
+            if frame_idx % 10 == 0:
+                print(f"  Rendered frame {frame_idx}/{n_frames}")
+        
+        video_writer.release()
+        vis.destroy_window()
+        
+        print(f"Video saved to: {save_path}")
+        return save_path
+
+def main():
+    """Main function to test object motion prediction"""
+    
+    # Configuration
+    model_path = "data/gnn_dyn_model/2025-05-29-14-52-41-654478/net_best.pth"
+    config_path = "config/train/gnn_dyn.yaml"
+    data_dir = "../test/PhysTwin/generated_data"
+    
+    # Test episodes (20-24 as you wanted)
+    test_episodes = [20, 21, 22, 23, 24]
+    
+    # Initialize predictor
+    predictor = ObjectMotionPredictor(model_path, config_path)
+    
+    print("="*60)
+    print("OBJECT MOTION PREDICTION TEST")
+    print("="*60)
+    
+    all_errors = []
+    
+    for episode_num in test_episodes:
+        print(f"\n{'='*40}")
+        print(f"TESTING EPISODE {episode_num}")
+        print(f"{'='*40}")
+        
+        try:
+            # Load episode data with FPS sampling (FIXED!)
+            actual_objects, robot_trajectory, obj_indices, robot_indices = predictor.load_episode_data(data_dir, episode_num)
+            
+            # Predict object motion starting from initial positions
+            initial_object_pos = actual_objects[0]
+            predicted_objects = predictor.predict_object_motion(initial_object_pos, robot_trajectory)
+            
+            # Calculate prediction errors
+            errors = predictor.calculate_prediction_error(predicted_objects, actual_objects)
+            all_errors.extend(errors)
+            
+            avg_error = np.mean(errors)
+            print(f"\nEpisode {episode_num} Results:")
+            print(f"  Average MSE: {avg_error:.6f}")
+            print(f"  RMSE: {np.sqrt(avg_error):.6f}")
+            print(f"  Timesteps predicted: {len(errors)}")
+            
+            # Create visualization
+            video_path = f"data/video/object_prediction_episode_{episode_num}.mp4"
+            predictor.visualize_object_motion(
+                predicted_objects, actual_objects, robot_trajectory, 
+                episode_num, video_path
+            )
+            
+        except Exception as e:
+            print(f"Error processing episode {episode_num}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+    
+    # Overall results
+    if all_errors:
+        print(f"\n{'='*60}")
+        print("OVERALL RESULTS")
+        print(f"{'='*60}")
+        print(f"Episodes tested: {len(test_episodes)}")
+        print(f"Total timesteps: {len(all_errors)}")
+        print(f"Average MSE: {np.mean(all_errors):.6f}")
+        print(f"RMSE: {np.sqrt(np.mean(all_errors)):.6f}")
+        print(f"Std Dev: {np.std(all_errors):.6f}")
+        
+        # Interpretation
+        rmse = np.sqrt(np.mean(all_errors))
+        if rmse < 0.01:
+            print("🎉 Excellent prediction accuracy!")
+        elif rmse < 0.05:
+            print("✅ Good prediction accuracy!")
+        elif rmse < 0.1:
+            print("⚠️  Moderate prediction accuracy")
+        else:
+            print("❌ Poor prediction accuracy - model needs improvement")
+        
+        print(f"\nVideos saved in 'data/video/' directory")
+
+if __name__ == "__main__":
+    main()
