@@ -105,7 +105,7 @@ if __name__ == "__main__":
         default="./data/bg.png",
     )
     parser.add_argument("--case_name", type=str, required=True)
-    parser.add_argument("--n_episodes", type=int, required=True)
+    parser.add_argument("--n_episodes", type=int, default=1)
     parser.add_argument("--start_episode", type=int, default=0)
     # parser.add_argument("--timestamp", type=str, required=True)
     args = parser.parse_args()
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # )
 
     # Generate video from saved data
-    for i in range(args.start_episode, args.start_episode + args.n_episodes):
+    for i in [1999, 1642, 743, 1526]:
         save_dir = os.path.join("generated_data", f"{i}")
         video_from_data(cfg, save_dir, sample_robot)
     # trainer.video_from_data(
