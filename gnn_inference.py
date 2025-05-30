@@ -46,6 +46,7 @@ class ObjectMotionPredictor:
         Returns:
         - sampled_object_trajectory: [timesteps, N_sampled_obj, 3] - actual object motion (sampled)
         - sampled_robot_trajectory: [timesteps, N_sampled_robot, 3] - robot motion (sampled)
+        - full_object_trajectory: [timesteps, N_full_obj, 3] - full ground truth object motion (no sampling)
         - object_sample_indices: indices of sampled object particles
         - robot_sample_indices: indices of sampled robot particles
         """
@@ -70,13 +71,16 @@ class ObjectMotionPredictor:
         
         n_sampled_obj = object_sample_indices.shape[0]
         n_sampled_robot = robot_sample_indices.shape[0]
+        n_full_obj = first_object.shape[0]
         
         print(f"Sampled particles - Object: {n_sampled_obj}, Robot: {n_sampled_robot}")
-        print(f"Sampling ratio - Object: {n_sampled_obj/first_object.shape[0]:.3f}, Robot: {n_sampled_robot/first_robot.shape[0]:.3f}")
+        print(f"Full GT particles - Object: {n_full_obj}")
+        print(f"Sampling ratio - Object: {n_sampled_obj/n_full_obj:.3f}, Robot: {n_sampled_robot/first_robot.shape[0]:.3f}")
         
-        # Pre-allocate arrays for sampled particles
+        # Pre-allocate arrays for sampled and full particles
         sampled_object_trajectory = torch.zeros(n_timesteps, n_sampled_obj, 3)
         sampled_robot_trajectory = torch.zeros(n_timesteps, n_sampled_robot, 3)
+        full_object_trajectory = torch.zeros(n_timesteps, n_full_obj, 3)
         
         # Load and sample all timesteps
         for t in range(n_timesteps):
@@ -87,8 +91,11 @@ class ObjectMotionPredictor:
             # Apply consistent sampling (same indices for all timesteps)
             sampled_object_trajectory[t] = object_full[object_sample_indices]
             sampled_robot_trajectory[t] = robot_full[robot_sample_indices]
+            
+            # Store full ground truth object data
+            full_object_trajectory[t] = object_full
         
-        return sampled_object_trajectory, sampled_robot_trajectory, object_sample_indices, robot_sample_indices
+        return sampled_object_trajectory, sampled_robot_trajectory, full_object_trajectory, object_sample_indices, robot_sample_indices
     
     def predict_object_response(self, current_object_pos, current_robot_pos, robot_delta):
         """
@@ -177,7 +184,7 @@ class ObjectMotionPredictor:
         return errors
     
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
-                               episode_num, save_path):
+                               full_objects, episode_num, save_path):
         """
         Create visualization comparing predicted vs actual object motion
         Uses the existing visualizer pattern
@@ -213,12 +220,19 @@ class ObjectMotionPredictor:
         robot_pcd = o3d.geometry.PointCloud()
         robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0].numpy())
         robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
+        
+        # Full ground truth object point cloud (yellow in BGR: [0, 1, 1])
+        full_gt_pcd = o3d.geometry.PointCloud()
+        full_gt_pcd.points = o3d.utility.Vector3dVector(full_objects[0].numpy())
+        full_gt_pcd.paint_uniform_color([0.0, 1.0, 1.0])  # Yellow for full GT (BGR)
 
+        # Add full GT first so it appears at the bottom
+        vis.add_geometry(full_gt_pcd)
         vis.add_geometry(pred_pcd)
         vis.add_geometry(actual_pcd)
         vis.add_geometry(robot_pcd)
 
-        n_frames = min(len(predicted_objects), len(actual_objects))
+        n_frames = min(len(predicted_objects), len(actual_objects), len(full_objects))
         print(f"Rendering {n_frames} frames...")
         
         def create_edges_for_points(positions, distance_threshold):
@@ -261,17 +275,22 @@ class ObjectMotionPredictor:
             pred_obj_pos = predicted_objects[frame_idx].numpy()
             actual_obj_pos = actual_objects[frame_idx].numpy()
             robot_pos = robot_trajectory[frame_idx].numpy()
+            full_gt_pos = full_objects[frame_idx].numpy()
             
             if frame_idx == 0:
-                print(robot_pos)
+                print(f"Sampled object particles: {actual_obj_pos.shape[0]}")
+                print(f"Full GT object particles: {full_gt_pos.shape[0]}")
+                print(f"Robot particles: {robot_pos.shape[0]}")
             
             pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
             robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
             actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
+            full_gt_pcd.points = o3d.utility.Vector3dVector(full_gt_pos)
 
             vis.update_geometry(pred_pcd)
             vis.update_geometry(actual_pcd)
             vis.update_geometry(robot_pcd)
+            vis.update_geometry(full_gt_pcd)
 
             # Remove old edges
             if pred_line_set is not None:
@@ -358,7 +377,7 @@ def main():
         
         try:
             # Load episode data with FPS sampling
-            actual_objects, robot_trajectory, obj_indices, robot_indices = predictor.load_episode_data(data_dir, episode_num)
+            actual_objects, robot_trajectory, full_object_trajectory, obj_indices, robot_indices = predictor.load_episode_data(data_dir, episode_num)
             
             # Predict object motion starting from initial positions
             initial_object_pos = actual_objects[0]
@@ -378,7 +397,7 @@ def main():
             video_path = f"data/video/prediction_{episode_num}.mp4"
             predictor.visualize_object_motion(
                 predicted_objects, actual_objects, robot_trajectory, 
-                episode_num, video_path
+                full_object_trajectory, episode_num, video_path
             )
             
         except Exception as e:
