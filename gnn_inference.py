@@ -15,7 +15,7 @@ class ObjectMotionPredictor:
         
         # CRITICAL: Use same FPS radius as training!
         self.fps_radius = self.config['train']['fps_radius']  # 0.03
-        print(f"Using FPS radius: {self.fps_radius} (same as training)")
+        self.adj_thresh = self.config['train']['particle']['adj_thresh']
         
         # Load trained model
         self.model = PropNetDiffDenModel(self.config, torch.cuda.is_available())
@@ -164,7 +164,7 @@ class ObjectMotionPredictor:
         return errors
     
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
-                               episode_num, save_path, edge_threshold=0.1):
+                               episode_num, save_path):
         """
         Create visualization comparing predicted vs actual object motion
         Uses the existing visualizer pattern
@@ -224,7 +224,7 @@ class ObjectMotionPredictor:
             pcd.colors = o3d.utility.Vector3dVector(colors)
             
             # Create edges for predicted objects (red)
-            pred_edges = create_edges_for_points(pred_obj_pos, edge_threshold)
+            pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
             pred_line_set = o3d.geometry.LineSet()
             if len(pred_edges) > 0:
                 pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
@@ -234,7 +234,7 @@ class ObjectMotionPredictor:
                 pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
             
             # Create edges for actual objects (blue)
-            actual_edges = create_edges_for_points(actual_obj_pos, edge_threshold)
+            actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
             actual_line_set = o3d.geometry.LineSet()
             if len(actual_edges) > 0:
                 actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
@@ -276,7 +276,7 @@ class ObjectMotionPredictor:
             
             # Add text overlay with sampling info
             text1 = f'Frame {frame_idx} | Red=Predicted Objects | Blue=Actual Objects | Green=Robot'
-            text2 = f'Sampled particles (FPS radius={self.fps_radius}) | Edge threshold={edge_threshold}'
+            text2 = f'Sampled particles (FPS radius={self.fps_radius}) | Edge threshold={self.adj_thresh}'
             image_bgr = cv2.putText(image_bgr, text1, (10, 30), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             image_bgr = cv2.putText(image_bgr, text2, (10, 60), 
