@@ -1148,15 +1148,19 @@ class InvPhyTrainerWarp:
 
         # prev_target = current_target
 
-        gaussians = GaussianModel(sh_degree=3)
-        gaussians.load_ply(gs_path)
-        gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
-        gaussians.isotropic = True
-        current_pos = gaussians.get_xyz
-        current_rot = gaussians.get_rotation
-        prev_x = None
-        relations = None
-        weights = None
+        if self.include_gaussian:
+            gaussians = GaussianModel(sh_degree=3)
+            gaussians.load_ply(gs_path)
+            gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
+            gaussians.isotropic = True
+            current_pos = gaussians.get_xyz
+            current_rot = gaussians.get_rotation
+            prev_x = None
+            relations = None
+            weights = None
+        else:
+            gaussians = None
+            prev_x = None
 
         # Initialize key mappings for target movement
         # self.key_mappings = {
@@ -1260,7 +1264,8 @@ class InvPhyTrainerWarp:
                     gaussians._xyz = current_pos
                     gaussians._rotation = current_rot
 
-            prev_x = x.clone()
+            if self.include_gaussian:
+                prev_x = x.clone()
             # prev_target = current_target
 
             # =====================robot stuff=====================

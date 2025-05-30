@@ -54,7 +54,7 @@ def video_from_data(cfg, save_dir, robot):
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
 
-        for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
+        for frame_count in range(len(os.listdir(os.path.join(save_dir, "object")))):
             x = torch.load(os.path.join(save_dir, "object", f"x_{frame_count}.pt"), weights_only=True)
             x_robot = torch.load(os.path.join(save_dir, "robot", f"x_{frame_count}.pt"), weights_only=True)
             object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
