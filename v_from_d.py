@@ -28,6 +28,12 @@ def video_from_data(cfg, save_dir, robot):
         for dynamic_mesh in dynamic_meshes:
             vis.add_geometry(dynamic_mesh)
 
+        # Print camera parameters for debugging
+        print("[v_from_d] Camera intrinsic:")
+        print(intrinsic)
+        print("[v_from_d] Camera extrinsic (w2c):")
+        print(w2c)
+
         x = torch.load(os.path.join(save_dir, "object", "x_0.pt"), weights_only=True)
         object_pcd = o3d.geometry.PointCloud()
         object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
@@ -68,6 +74,9 @@ def video_from_data(cfg, save_dir, robot):
 
             for i, dynamic_mesh in enumerate(dynamic_meshes):
                 vis.update_geometry(dynamic_mesh)
+
+            if frame_count == 0:
+                print(x_robot.cpu().numpy())
 
             vis.poll_events()
             vis.update_renderer()
@@ -156,7 +165,7 @@ if __name__ == "__main__":
     # )
 
     # Generate video from saved data
-    for i in [1999, 1642, 743, 1526]:
+    for i in [0]:
         save_dir = os.path.join("generated_data", f"{i}")
         video_from_data(cfg, save_dir, sample_robot)
     # trainer.video_from_data(
