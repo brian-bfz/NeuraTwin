@@ -75,6 +75,7 @@ if __name__ == "__main__":
     parser.add_argument("--custom_ctrl_points", type=str, help="Path to directory containing custom control points")
     parser.add_argument("--n_episodes", type=int, required=True)
     parser.add_argument("--start_episode", type=int, default=0)
+    parser.add_argument("--include_gaussian", action="store_true")
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -113,25 +114,25 @@ if __name__ == "__main__":
     best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
     
     # Create timestamped folder for this simulation run
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # print(case_name, timestamp, f"{case_name}_{timestamp}")
+    sample_robot = RobotPcSampler(
+        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+    )
+    trainer = InvPhyTrainerWarp(
+        data_path=f"{base_path}/{case_name}/final_data.pkl",
+        base_dir=base_dir,
+        pure_inference_mode=True,
+        static_meshes=[],
+        robot=sample_robot,
+        include_gaussian=args.include_gaussian,
+    )
 
     for i in range(args.start_episode, args.start_episode + args.n_episodes):
-        sample_robot = RobotPcSampler(
-            urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
-        )
-        # finger_meshes = sample_robot.get_finger_mesh(1.0)
-
-        trainer = InvPhyTrainerWarp(
-            data_path=f"{base_path}/{case_name}/final_data.pkl",
-            base_dir=base_dir,
-            pure_inference_mode=True,
-            static_meshes=[],
-            robot=sample_robot,
-        )
         save_dir = os.path.join("generated_data", f"{i}")
         os.makedirs(os.path.join(save_dir, "object"), exist_ok=True)
-        os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
+        if args.include_gaussian:
+            os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
         os.makedirs(os.path.join(save_dir, "robot"), exist_ok=True)
         trainer.generate_data(
             best_model_path, 

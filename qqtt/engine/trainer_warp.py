@@ -53,6 +53,7 @@ class InvPhyTrainerWarp:
         device="cuda:0",
         static_meshes=None,
         robot=None,
+        include_gaussian=False,
     ):
         cfg.data_path = data_path
         cfg.base_dir = base_dir
@@ -62,6 +63,7 @@ class InvPhyTrainerWarp:
 
         self.init_masks = None
         self.init_velocities = None
+        self.include_gaussian = include_gaussian
         # Load the data
         if cfg.data_type == "real":
             self.dataset = RealData(visualize=False, save_gt=False)
@@ -131,35 +133,7 @@ class InvPhyTrainerWarp:
                 self.dynamic_meshes = []
                 self.dynamic_points = None
 
-        self.simulator = SpringMassSystemWarp(
-            self.init_vertices,
-            self.init_springs,
-            self.init_rest_lengths,
-            self.init_masses,
-            dt=cfg.dt,
-            num_substeps=cfg.num_substeps,
-            spring_Y=cfg.init_spring_Y,
-            collide_elas=cfg.collide_elas,
-            collide_fric=cfg.collide_fric,
-            dashpot_damping=cfg.dashpot_damping,
-            drag_damping=cfg.drag_damping,
-            collide_object_elas=cfg.collide_object_elas,
-            collide_object_fric=cfg.collide_object_fric,
-            init_masks=self.init_masks,
-            collision_dist=cfg.collision_dist,
-            init_velocities=self.init_velocities,
-            num_object_points=self.num_all_points,
-            num_surface_points=self.num_surface_points,
-            num_original_points=self.num_original_points,
-            controller_points=self.controller_points,
-            reverse_z=cfg.reverse_z,
-            spring_Y_min=cfg.spring_Y_min,
-            spring_Y_max=cfg.spring_Y_max,
-            gt_object_points=self.object_points,
-            gt_object_visibilities=self.object_visibilities,
-            gt_object_motions_valid=self.object_motions_valid,
-            self_collision=cfg.self_collision,
-        )
+        self.simulator = None  # Will be initialized in initialize_simulator
 
         if not pure_inference_mode:
             self.optimizer = torch.optim.Adam(
@@ -191,6 +165,63 @@ class InvPhyTrainerWarp:
             if not os.path.exists(f"{cfg.base_dir}/train"):
                 # Create directory if it doesn't exist
                 os.makedirs(f"{cfg.base_dir}/train")
+
+    def initialize_simulator(self, model_path):
+        """One-time initialization of the simulator with correct spring configuration"""
+        # Load the model parameters
+        logger.info(f"Load model from {model_path}")
+        checkpoint = torch.load(model_path, map_location=cfg.device)
+        spring_Y = checkpoint["spring_Y"]
+        collide_elas = checkpoint["collide_elas"]
+        collide_fric = checkpoint["collide_fric"]
+        collide_object_elas = checkpoint["collide_object_elas"]
+        collide_object_fric = checkpoint["collide_object_fric"]
+
+        spring_Y = spring_Y[: self.num_object_springs]
+        self.init_springs = self.init_springs[: self.num_object_springs]
+        self.init_rest_lengths = self.init_rest_lengths[: self.num_object_springs]
+        self.init_vertices = self.init_vertices[: self.num_all_points]
+        self.init_masses = self.init_masses[: self.num_all_points]
+        self.controller_points = None
+
+        
+        # Create simulator with full spring configuration
+        self.simulator = SpringMassSystemWarp(
+            self.init_vertices,
+            self.init_springs,
+            self.init_rest_lengths,
+            self.init_masses,
+            dt=cfg.dt,
+            num_substeps=cfg.num_substeps,
+            spring_Y=cfg.init_spring_Y,
+            collide_elas=cfg.collide_elas,
+            collide_fric=cfg.collide_fric,
+            dashpot_damping=cfg.dashpot_damping,
+            drag_damping=cfg.drag_damping,
+            collide_object_elas=cfg.collide_object_elas,
+            collide_object_fric=cfg.collide_object_fric,
+            init_masks=self.init_masks,
+            collision_dist=cfg.collision_dist,
+            init_velocities=self.init_velocities,
+            num_object_points=self.num_all_points,
+            num_surface_points=self.num_surface_points,
+            num_original_points=self.num_original_points,
+            controller_points=None,  # Will be set during simulation
+            reverse_z=cfg.reverse_z,
+            spring_Y_min=cfg.spring_Y_min,
+            spring_Y_max=cfg.spring_Y_max,
+            gt_object_points=self.object_points,
+            gt_object_visibilities=self.object_visibilities,
+            gt_object_motions_valid=self.object_motions_valid,
+            self_collision=cfg.self_collision,
+            static_meshes=self.dynamic_meshes + self.static_meshes,
+            dynamic_points=self.dynamic_points,
+        )
+        
+        # Set the optimized parameters
+        self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
+        self.simulator.set_collide(collide_elas.detach().clone(), collide_fric.detach().clone())
+        self.simulator.set_collide_object(collide_object_elas.detach().clone(), collide_object_fric.detach().clone())
 
     def reset_robot(self):
                 finger_meshes = self.robot.get_finger_mesh(0.0)
@@ -1054,29 +1085,19 @@ class InvPhyTrainerWarp:
                 
         return translation.astype(np.float32), target_changes.astype(np.float32)
     
-    def save_data(self, save_dir, frame_count, x, gaussians, robot):
+    def save_data(self, save_dir, frame_count, x, robot, gaussians=None):
         torch.save(x, os.path.join(save_dir, "object", f"x_{frame_count}.pt"))
-        torch.save({
-            'xyz': gaussians._xyz,
-            'rotation': gaussians._rotation,
-            'frame_count': frame_count
-        }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
         torch.save(robot, os.path.join(save_dir, "robot", f"x_{frame_count}.pt"))
+        if self.include_gaussian:
+            torch.save({
+                'xyz': gaussians._xyz,
+                'rotation': gaussians._rotation,
+                'frame_count': frame_count
+            }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
 
     def generate_data(
         self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, custom_control_points=None, 
     ):
-        # Load the model
-        logger.info(f"Load model from {model_path}")
-        checkpoint = torch.load(model_path, map_location=cfg.device)
-
-        spring_Y = checkpoint["spring_Y"]
-        collide_elas = checkpoint["collide_elas"]
-        collide_fric = checkpoint["collide_fric"]
-        collide_object_elas = checkpoint["collide_object_elas"]
-        collide_object_fric = checkpoint["collide_object_fric"]
-        # num_object_springs = checkpoint["num_object_springs"]
-
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
         # if n_ctrl_parts > 1:
@@ -1090,8 +1111,17 @@ class InvPhyTrainerWarp:
         # else:
         #     self.mask_ctrl_pts = None
 
+        # Initialize simulator if not done
+        if self.simulator is None:
+            self.initialize_simulator(model_path)
+            
+        # Reset simulator state
+        self.simulator.set_init_state(
+            self.simulator.wp_init_vertices,
+            self.simulator.wp_init_velocities
+        )
+        
         # set robot position and movement parameters
-
         translation, target_changes = self.robot_translation(offset_dist=0.2, keep_off=0.05, multiplier=2.0, speed=0.005)
         n_frames = target_changes.shape[0]
         current_finger = 0.0
@@ -1101,65 +1131,9 @@ class InvPhyTrainerWarp:
         rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
         self.robot.change_init_pose(translation)
         self.reset_robot()
-
-        assert (
-            len(spring_Y) == self.simulator.n_springs
-        ), "Check if the loaded checkpoint match the config file to connect the springs"
-
-        spring_Y = spring_Y[: self.num_object_springs]
-        self.init_springs = self.init_springs[: self.num_object_springs]
-        self.init_rest_lengths = self.init_rest_lengths[: self.num_object_springs]
-        self.init_vertices = self.init_vertices[: self.num_all_points]
-        self.init_masses = self.init_masses[: self.num_all_points]
-        self.controller_points = None
-
-        self.simulator = SpringMassSystemWarp(
-            self.init_vertices,
-            self.init_springs,
-            self.init_rest_lengths,
-            self.init_masses,
-            dt=cfg.dt,
-            num_substeps=cfg.num_substeps,
-            spring_Y=cfg.init_spring_Y,
-            collide_elas=cfg.collide_elas,
-            collide_fric=cfg.collide_fric,
-            dashpot_damping=cfg.dashpot_damping,
-            drag_damping=cfg.drag_damping,
-            collide_object_elas=cfg.collide_object_elas,
-            collide_object_fric=cfg.collide_object_fric,
-            init_masks=self.init_masks,
-            collision_dist=cfg.collision_dist,
-            init_velocities=self.init_velocities,
-            num_object_points=self.num_all_points,
-            num_surface_points=self.num_surface_points,
-            num_original_points=self.num_original_points,
-            controller_points=self.controller_points,
-            reverse_z=cfg.reverse_z,
-            spring_Y_min=cfg.spring_Y_min,
-            spring_Y_max=cfg.spring_Y_max,
-            gt_object_points=self.object_points,
-            gt_object_visibilities=self.object_visibilities,
-            gt_object_motions_valid=self.object_motions_valid,
-            self_collision=cfg.self_collision,
-            static_meshes=self.dynamic_meshes + self.static_meshes,
-            dynamic_points=self.dynamic_points,
-        )
-
-        self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
-        self.simulator.set_collide(
-            collide_elas.detach().clone(), collide_fric.detach().clone()
-        )
-        self.simulator.set_collide_object(
-            collide_object_elas.detach().clone(),
-            collide_object_fric.detach().clone(),
-        )
-
-        ###########################################################################
-
+        
         logger.info("Starting data generation")
-        self.simulator.set_init_state(
-            self.simulator.wp_init_vertices, self.simulator.wp_init_velocities
-        )
+
         # prev_x = wp.to_torch(
         #     self.simulator.wp_states[0].wp_x, requires_grad=False
         # ).clone()
@@ -1250,7 +1224,7 @@ class InvPhyTrainerWarp:
             )
 
             if frame_count == 0:
-                self.save_data(save_dir, frame_count, x, gaussians, current_trans_dynamic_points)
+                self.save_data(save_dir, frame_count, x, current_trans_dynamic_points, gaussians)
 
             if prev_x is not None:
                 with torch.no_grad():
@@ -1382,388 +1356,7 @@ class InvPhyTrainerWarp:
             )
             frame_count += 1
 
-            self.save_data(save_dir, frame_count, x, gaussians, interpolated_dynamic_points[-1])
-
-    def video_from_data(
-        self, gs_path, save_dir
-    ):
-        logger.info("Starting video generation")
-
-        vis_cam_idx = 0
-        width, height = cfg.WH
-        intrinsic = cfg.intrinsics[vis_cam_idx]
-        w2c = cfg.w2cs[vis_cam_idx]
-
-        # gaussians = GaussianModel(sh_degree=3)
-        # gaussians.load_ply(gs_path)
-        # gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
-        # gaussians.isotropic = True
-        # current_pos = gaussians.get_xyz
-        # current_rot = gaussians.get_rotation
-        # use_white_background = True  # set to True for white background
-        # bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
-        # background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-        # view = self._create_gs_view(w2c, intrinsic, height, width)
-        # prev_x = None
-        # relations = None
-        # weights = None
-        # image_path = cfg.bg_img_path
-        # overlay = cv2.imread(image_path)
-        # overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-        # overlay = torch.tensor(overlay, dtype=torch.float32, device=cfg.device)
-
-        # Render mesh 
-        vis = o3d.visualization.Visualizer()
-        vis.create_window(visible=False, width=width, height=height)
-        render_option = vis.get_render_option()
-        render_option.point_size = 10.0
-        for static_mesh in self.static_meshes:
-            vis.add_geometry(static_mesh)
-
-        for dynamic_mesh in self.dynamic_meshes:
-            vis.add_geometry(dynamic_mesh)
-
-        x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"), weights_only=True)
-        x_vis = x.clone()
-        object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
-        object_pcd.paint_uniform_color([0, 0, 1])
-        # object_pcd.paint_uniform_color([1, 1, 1])
-        vis.add_geometry(object_pcd)
-
-        view_control = vis.get_view_control()
-        camera_params = o3d.camera.PinholeCameraParameters()
-        intrinsic_parameter = o3d.camera.PinholeCameraIntrinsic(
-            width, height, intrinsic
-        )
-        camera_params.intrinsic = intrinsic_parameter
-        camera_params.extrinsic = w2c
-        view_control.convert_from_pinhole_camera_parameters(
-            camera_params, allow_arbitrary=True
-        )
-
-        # Initialize video writer
-        # Determine case_name and timestamp from save_dir
-        case_name_timestamp = os.path.basename(save_dir.rstrip('/'))
-        videos_dir = os.path.join(os.path.dirname(save_dir), "videos")
-        os.makedirs(videos_dir, exist_ok=True)
-        output_path = os.path.join(videos_dir, f"{case_name_timestamp}.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
-
-        for frame_count in range(len(os.listdir(os.path.join(save_dir, "gaussians")))):
-            # 1. Load x, gaussians, and mesh
-            x = torch.load(os.path.join(save_dir, "x", f"x_{frame_count}.pt"), weights_only=True)
-            # gaussians_data = torch.load(os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
-            # gaussians._xyz = gaussians_data['xyz']
-            # gaussians._rotation = gaussians_data['rotation']
-
-            # Load saved vertices and update dynamic_meshes
-            mesh_dir = os.path.join(save_dir, "meshes")
-            for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                vertices_path = os.path.join(mesh_dir, f"finger_{i}_frame_{frame_count}.npy")
-                vertices = np.load(vertices_path)
-                # Update vertices while preserving mesh topology
-                dynamic_mesh.vertices = o3d.utility.Vector3dVector(vertices)
-                # Update normals after changing vertices
-                dynamic_mesh.compute_vertex_normals()
-
-            # 2. Frame initialization and setup
-            # frame = overlay.clone()
-
-            # 3. Rendering
-            # render with gaussians and paste the image on top of the frame
-            # results = render_gaussian(view, gaussians, None, background)
-            # rendering = results["render"]  # (4, H, W)
-            # image = rendering.permute(1, 2, 0).detach()
-
-            # Continue frame compositing
-            # composition code from Hanxiao
-            # image = image.clamp(0, 1)
-            # if use_white_background:
-            #     image_mask = torch.logical_and(
-            #         (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
-            #     )
-            # else:
-            #     image_mask = torch.logical_and(
-            #         (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
-            #     )
-            # image[..., 3].masked_fill_(~image_mask, 0.0)
-
-            # alpha = image[..., 3:4]
-            # rgb = image[..., :3] * 255
-            # frame = alpha * rgb + (1 - alpha) * frame
-            # frame = frame.cpu().numpy()
-            # image_mask = image_mask.cpu().numpy()
-            # frame = frame.astype(np.uint8)
-
-            # render robot and object
-            x_vis = x.clone()
-            object_pcd.points = o3d.utility.Vector3dVector(x_vis.cpu().numpy())
-            vis.update_geometry(object_pcd)
-
-            for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                vis.update_geometry(dynamic_mesh)
-            vis.poll_events()
-            vis.update_renderer()
-            static_image = np.asarray(
-                vis.capture_screen_float_buffer(do_render=True)
-            )
-            static_image = (static_image * 255).astype(np.uint8)
-            # static_vis_mask = np.all(static_image == [255, 255, 255], axis=-1)
-            # frame[~static_vis_mask] = static_image[~static_vis_mask]
-
-            # Add shadows
-            # final_shadow = get_simple_shadow(
-            #     x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
-            # )
-            # frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
-            # final_shadow = get_simple_shadow(
-            #     x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
-            # )
-            # frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
-            # final_shadow = get_simple_shadow(
-            #     x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
-            # )
-            # frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
-
-            # Convert frame to BGR before drawing circles
-            # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-            # Write frame to video file
-            # out.write(frame)
-            out.write(static_image)
-
-            # Display frame
-            # cv2.imshow("Generated Video", frame)
-            cv2.imshow("Generated Video", static_image)
-            cv2.waitKey(1)
-
-        # Release video writer
-        out.release()
-        cv2.destroyAllWindows()
-        logger.info(f"Video saved to {output_path}")
-
-    def select_control_points(self, model_path, gs_path, n_ctrl_parts):
-        # Load the model
-        logger.info(f"Load model from {model_path}")
-        checkpoint = torch.load(model_path, map_location=cfg.device)
-
-        spring_Y = checkpoint["spring_Y"]
-        collide_elas = checkpoint["collide_elas"]
-        collide_fric = checkpoint["collide_fric"]
-        collide_object_elas = checkpoint["collide_object_elas"]
-        collide_object_fric = checkpoint["collide_object_fric"]
-
-        assert (
-            len(spring_Y) == self.simulator.n_springs
-        ), "Check if the loaded checkpoint match the config file to connect the springs"
-
-        self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
-        self.simulator.set_collide(
-            collide_elas.detach().clone(), collide_fric.detach().clone()
-        )
-        self.simulator.set_collide_object(
-            collide_object_elas.detach().clone(),
-            collide_object_fric.detach().clone(),
-        )
-
-        # Get initial state
-        self.simulator.set_init_state(
-            self.simulator.wp_init_vertices, self.simulator.wp_init_velocities
-        )
-        # Run one step to initialize the states
-        self.simulator.step()
-        x = wp.to_torch(self.simulator.wp_states[-1].wp_x, requires_grad=False)
-        print("Initial state shape:", x.shape)
-        print("Initial state values:", x)
-
-        # Setup visualization
-        vis_cam_idx = 0
-        width, height = cfg.WH
-        intrinsic = cfg.intrinsics[vis_cam_idx]
-        w2c = cfg.w2cs[vis_cam_idx]
-
-        # Load and setup gaussians
-        gaussians = GaussianModel(sh_degree=3)
-        gaussians.load_ply(gs_path)
-        gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
-        gaussians.isotropic = True
-
-        # Setup rendering
-        use_white_background = True
-        bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
-        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-        view = self._create_gs_view(w2c, intrinsic, height, width)
-        
-        # Load background image
-        image_path = cfg.bg_img_path
-        overlay = cv2.imread(image_path)
-        overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-
-        # Initialize control parts
-        self.n_ctrl_parts = n_ctrl_parts
-        self.scale_factors = 1.0
-        assert self.n_ctrl_parts <= 2, "Only support 1 or 2 control parts"
-        self.w2c = w2c
-        self.intrinsic = intrinsic
-
-        def generate_frame(x, control_points):
-            frame = overlay.copy()
-            results = render_gaussian(view, gaussians, None, background)
-            rendering = results["render"]  # (4, H, W)
-            image = rendering.permute(1, 2, 0).detach().cpu().numpy()
-
-            # Composite rendering with background
-            image = image.clip(0, 1)
-            if use_white_background:
-                image_mask = np.logical_and(
-                    (image != 1.0).any(axis=2), image[:, :, 3] > 100 / 255
-                )
-            else:
-                image_mask = np.logical_and(
-                    (image != 0.0).any(axis=2), image[:, :, 3] > 100 / 255
-                )
-            image[~image_mask, 3] = 0
-
-            alpha = image[..., 3:4]
-            rgb = image[..., :3] * 255
-            frame = alpha * rgb + (1 - alpha) * frame
-            frame = frame.astype(np.uint8)
-
-            # Add shadows
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[0, 0, -3]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.95).astype(np.uint8)
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[1, 0.5, -2]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.97).astype(np.uint8)
-            final_shadow = get_simple_shadow(
-                x, intrinsic, w2c, width, height, image_mask, light_point=[-3, -0.5, -5]
-            )
-            frame[final_shadow] = (frame[final_shadow] * 0.98).astype(np.uint8)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-            # Draw control points if they exist
-            for i, points in enumerate(control_points):
-                points_homogeneous = np.hstack([points.cpu().numpy(), np.ones((points.shape[0], 1))])
-                points_camera = (w2c @ points_homogeneous.T).T
-                points_pixels = (intrinsic @ points_camera[:, :3].T).T
-                points_pixels = points_pixels[:, :2] / points_pixels[:, 2:3]
-                pixel_coords = points_pixels.astype(int)
-
-                # Filter points that are within the image bounds
-                valid_mask = (
-                    (pixel_coords[:, 0] >= 0) & (pixel_coords[:, 0] < width) &
-                    (pixel_coords[:, 1] >= 0) & (pixel_coords[:, 1] < height)
-                )
-                valid_pixel_coords = pixel_coords[valid_mask]
-
-                # Draw circles for control points (red for first set, green for second set)
-                color = (0, 0, 255) if i == 0 else (0, 255, 0)
-                for x, y in valid_pixel_coords:
-                    cv2.circle(frame, (x, y), 3, color, -1)
-
-            return frame, image
-
-        # Local variables that will be modified by the click handler
-        count = 0
-        control_points = []
-        
-        def click_handler(event, x1, y1, flags, param):
-            nonlocal count, control_points
-            if event == cv2.EVENT_LBUTTONDOWN:
-                # Convert 2D pixel coordinates to a ray in 3D camera space
-                pixel_coords = np.array([x1, y1, 1])
-                camera_ray = np.linalg.inv(intrinsic) @ pixel_coords
-                camera_ray = camera_ray / np.linalg.norm(camera_ray)
-                
-                # Transform ray to world space
-                world_ray = np.linalg.inv(w2c[:3, :3]) @ camera_ray
-                camera_center = -np.linalg.inv(w2c[:3, :3]) @ w2c[:3, 3]
-                
-                # Find intersection with object points
-                distances = []
-                for point in x.cpu().numpy():
-                    # Vector from camera center to point
-                    v = point - camera_center
-                    # Project this vector onto the ray direction
-                    t = np.dot(v, world_ray)
-                    # If t < 0, point is behind camera
-                    if t < 0:
-                        continue
-                    # Calculate perpendicular distance from point to ray
-                    perp_dist = np.linalg.norm(v - t * world_ray)
-                    # If point is close enough to ray, consider it a potential intersection
-                    if perp_dist < 0.01: # threshold in world units
-                        distances.append((t, perp_dist))
-                
-                if not distances:
-                    print("No valid intersection found")
-                    return
-                    
-                # Use the closest intersection point (minimum perpendicular distance)
-                depth, perp_dist = min(distances, key=lambda x: x[1])
-                world_coords = camera_center + depth * world_ray
-                
-                count += 1
-                print(f"Selected control point {count}: {world_coords}")
-                
-                # Convert to tensor and store
-                new_point = torch.tensor([world_coords], dtype=torch.float32, device=cfg.device)
-                control_points.append(new_point)
-
-        # Create the window first
-        cv2.namedWindow("Select Control Points")
-        cv2.setMouseCallback("Select Control Points", click_handler)
-
-        # Main loop for frame generation and display
-        while count < self.n_ctrl_parts:
-            frame, image = generate_frame(x, control_points)
-            cv2.imshow("Select Control Points", frame)
-            cv2.waitKey(1)
-        
-        cv2.destroyAllWindows()
-        
-        return control_points
-
-    def visualize_control_points(self, control_points, x):
-        """Visualize object points and new control points using Open3D."""
-        # Create point clouds for visualization
-        object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
-        object_pcd.paint_uniform_color([0.5, 0.5, 0.5])  # Gray for object points
-        
-        # Create coordinate frame
-        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-        
-        # Create visualizer
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-        
-        # Add geometries
-        vis.add_geometry(object_pcd)
-        vis.add_geometry(coordinate_frame)
-        
-        # Add control points with different colors
-        for i, points in enumerate(control_points):
-            ctrl_pcd = o3d.geometry.PointCloud()
-            ctrl_pcd.points = o3d.utility.Vector3dVector(points.cpu().numpy())
-            # Use red for first set, green for second set
-            ctrl_pcd.paint_uniform_color([1, 0, 0] if i == 0 else [0, 1, 0])
-            vis.add_geometry(ctrl_pcd)
-        
-        # Set default camera view
-        view_control = vis.get_view_control()
-        view_control.set_front([1, 0, -2])
-        view_control.set_up([0, 0, -1])
-        view_control.set_zoom(0.5)
-        
-        # Run visualization
-        vis.run()
-        vis.destroy_window()
+            self.save_data(save_dir, frame_count, x, interpolated_dynamic_points[-1], gaussians)
 
     def interactive_playground(
         self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False
@@ -3322,7 +2915,6 @@ class InvPhyTrainerWarp:
                 print(f"Energy: {total_energy:.2f}")
 
         listener.stop()
-
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
 
