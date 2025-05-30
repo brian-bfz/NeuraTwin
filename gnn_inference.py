@@ -191,7 +191,7 @@ class ObjectMotionPredictor:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
         
         # Create Open3D visualizer
         vis = o3d.visualization.Visualizer()
@@ -201,6 +201,23 @@ class ObjectMotionPredictor:
         render_option = vis.get_render_option()
         render_option.point_size = 10.0
         
+        # Create point clouds
+        pred_pcd = o3d.geometry.PointCloud()
+        pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0].numpy())
+        pred_pcd.paint_uniform_color([1.0, 0.2, 0.2])  # Red for predicted
+            
+        actual_pcd = o3d.geometry.PointCloud()
+        actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0].numpy())
+        actual_pcd.paint_uniform_color([0.2, 0.6, 1.0])  # Blue for actual
+            
+        robot_pcd = o3d.geometry.PointCloud()
+        robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0].numpy())
+        robot_pcd.paint_uniform_color([0.2, 1.0, 0.2])  # Green for robot
+
+        vis.add_geometry(pred_pcd)
+        vis.add_geometry(actual_pcd)
+        vis.add_geometry(robot_pcd)
+
         n_frames = min(len(predicted_objects), len(actual_objects))
         print(f"Rendering {n_frames} frames...")
         
@@ -245,70 +262,42 @@ class ObjectMotionPredictor:
             if frame_idx == 0:
                 print(robot_pos)
             
-            # Create point clouds
-            pred_pcd = o3d.geometry.PointCloud()
             pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
-            pred_pcd.paint_uniform_color([1.0, 0.2, 0.2])  # Red for predicted
-            
-            actual_pcd = o3d.geometry.PointCloud()
-            actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
-            actual_pcd.paint_uniform_color([0.2, 0.6, 1.0])  # Blue for actual
-            
-            robot_pcd = o3d.geometry.PointCloud()
             robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
-            robot_pcd.paint_uniform_color([0.2, 1.0, 0.2])  # Green for robot
+            actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
+
+            vis.update_geometry(pred_pcd)
+            vis.update_geometry(actual_pcd)
+            vis.update_geometry(robot_pcd)
+
+            # # Create edges for predicted objects
+            # pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
+            # pred_line_set = o3d.geometry.LineSet()
+            # if len(pred_edges) > 0:
+            #     pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
+            #     pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
+            #     pred_line_colors = np.tile([1.0, 0.2, 0.2], (len(pred_edges), 1))
+            #     pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
             
-            # Create edges for predicted objects
-            pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
-            pred_line_set = o3d.geometry.LineSet()
-            if len(pred_edges) > 0:
-                pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
-                pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
-                pred_line_colors = np.tile([1.0, 0.2, 0.2], (len(pred_edges), 1))
-                pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
-            
-            # Create edges for actual objects (blue)
-            actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
-            actual_line_set = o3d.geometry.LineSet()
-            if len(actual_edges) > 0:
-                actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
-                actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
-                actual_line_colors = np.tile([0.2, 0.6, 1.0], (len(actual_edges), 1))
-                actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
-            
-            # Update visualization
-            vis.clear_geometries()
-            vis.add_geometry(pred_pcd)
-            vis.add_geometry(actual_pcd)
-            vis.add_geometry(robot_pcd)
-            
-            if len(pred_edges) > 0:
-                vis.add_geometry(pred_line_set)
-            if len(actual_edges) > 0:
-                vis.add_geometry(actual_line_set)
-            
-            # If no camera calibration, use default view
-            if self.w2cs is None:
-                view_control = vis.get_view_control()
-                center = np.mean(np.vstack([pred_obj_pos, actual_obj_pos, robot_pos]), axis=0)
-                view_control.set_lookat(center)
-                view_control.set_up([0, 1, 0])
-                view_control.set_front([0, 0, 1])
-                
-                # Auto-zoom based on data extent
-                extent = np.max(np.vstack([pred_obj_pos, actual_obj_pos, robot_pos]), axis=0) - \
-                        np.min(np.vstack([pred_obj_pos, actual_obj_pos, robot_pos]), axis=0)
-                zoom_factor = 0.8 / max(extent)
-                view_control.set_zoom(zoom_factor)
-            
+            # # Create edges for actual objects (blue)
+            # actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
+            # actual_line_set = o3d.geometry.LineSet()
+            # if len(actual_edges) > 0:
+            #     actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
+            #     actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
+            #     actual_line_colors = np.tile([0.2, 0.6, 1.0], (len(actual_edges), 1))
+            #     actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
+                        
             # Render frame
             vis.poll_events()
             vis.update_renderer()
             
-            image = vis.capture_screen_float_buffer(do_render=True)
-            image_np = np.asarray(image)
-            image_bgr = (image_np * 255).astype(np.uint8)
-            image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_RGB2BGR)
+            static_image = np.asarray(
+                vis.capture_screen_float_buffer(do_render=True)
+            )
+            static_image = (static_image * 255).astype(np.uint8)
+
+            out.write(static_image)
             
             # # Add text overlay with sampling info
             # text1 = f'Frame {frame_idx} | Red=Predicted Objects | Blue=Actual Objects | Green=Robot'
@@ -317,13 +306,11 @@ class ObjectMotionPredictor:
             #                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             # image_bgr = cv2.putText(image_bgr, text2, (10, 60), 
             #                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-            
-            video_writer.write(image_bgr)
-            
+                        
             if frame_idx % 10 == 0:
                 print(f"  Rendered frame {frame_idx}/{n_frames}")
         
-        video_writer.release()
+        out.release()
         vis.destroy_window()
         
         print(f"Video saved to: {save_path}")

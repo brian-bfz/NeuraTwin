@@ -40,9 +40,9 @@ def video_from_data(cfg, save_dir, robot):
         object_pcd.paint_uniform_color([0, 0, 1])
         vis.add_geometry(object_pcd)
 
-        # Print center of geometry for first frame
-        center_geom = np.mean(x.cpu().numpy(), axis=0)
-        print(f"[v_from_d] Center of geometry (frame 0): {center_geom}")
+        # # Print center of geometry for first frame
+        # center_geom = np.mean(x.cpu().numpy(), axis=0)
+        # print(f"[v_from_d] Center of geometry (frame 0): {center_geom}")
 
         view_control = vis.get_view_control()
         camera_params = o3d.camera.PinholeCameraParameters()
