@@ -204,15 +204,15 @@ class ObjectMotionPredictor:
         # Create point clouds
         pred_pcd = o3d.geometry.PointCloud()
         pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0].numpy())
-        pred_pcd.paint_uniform_color([1.0, 0.2, 0.2])  # Red for predicted
+        pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Red for predicted
             
         actual_pcd = o3d.geometry.PointCloud()
         actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0].numpy())
-        actual_pcd.paint_uniform_color([0.2, 0.6, 1.0])  # Blue for actual
+        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
             
         robot_pcd = o3d.geometry.PointCloud()
         robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0].numpy())
-        robot_pcd.paint_uniform_color([0.2, 1.0, 0.2])  # Green for robot
+        robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
 
         vis.add_geometry(pred_pcd)
         vis.add_geometry(actual_pcd)
@@ -252,6 +252,9 @@ class ObjectMotionPredictor:
         print("[gnn_inference] Camera extrinsic (w2c):")
         print(self.w2cs[0])
 
+        pred_line_set = None
+        actual_line_set = None
+
         
         for frame_idx in range(n_frames):
             # Get positions for this frame
@@ -270,23 +273,34 @@ class ObjectMotionPredictor:
             vis.update_geometry(actual_pcd)
             vis.update_geometry(robot_pcd)
 
-            # # Create edges for predicted objects
-            # pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
-            # pred_line_set = o3d.geometry.LineSet()
-            # if len(pred_edges) > 0:
-            #     pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
-            #     pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
-            #     pred_line_colors = np.tile([1.0, 0.2, 0.2], (len(pred_edges), 1))
-            #     pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
-            
-            # # Create edges for actual objects (blue)
-            # actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
-            # actual_line_set = o3d.geometry.LineSet()
-            # if len(actual_edges) > 0:
-            #     actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
-            #     actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
-            #     actual_line_colors = np.tile([0.2, 0.6, 1.0], (len(actual_edges), 1))
-            #     actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
+            # Remove old edges
+            if pred_line_set is not None:
+                vis.remove_geometry(pred_line_set, reset_bounding_box=False)
+            if actual_line_set is not None:
+                vis.remove_geometry(actual_line_set, reset_bounding_box=False)
+    
+            # Create new edges
+            pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
+            if len(pred_edges) > 0:
+                pred_line_set = o3d.geometry.LineSet()
+                pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
+                pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
+                pred_line_colors = np.tile([1.0, 0.0, 0.0], (len(pred_edges), 1))
+                pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
+                vis.add_geometry(pred_line_set, reset_bounding_box=False)   
+            else:
+                pred_line_set = None            
+
+            actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
+            if len(actual_edges) > 0:
+                actual_line_set = o3d.geometry.LineSet()
+                actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
+                actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
+                actual_line_colors = np.tile([0.0, 0.0, 1.0], (len(actual_edges), 1))
+                actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
+                vis.add_geometry(actual_line_set, reset_bounding_box=False)
+            else:
+                actual_line_set = None
                         
             # Render frame
             vis.poll_events()
@@ -326,7 +340,7 @@ def main():
     camera_calib_path = "data/single_push_rope"  # Path to camera calibration data
     
     # Test episodes 
-    test_episodes = [0, 1, 2]
+    test_episodes = [1, 2, 3]
     
     # Initialize predictor with camera calibration
     predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path)
