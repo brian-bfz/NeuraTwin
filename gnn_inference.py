@@ -3,15 +3,28 @@ import numpy as np
 import torch
 import cv2
 import open3d as o3d
+import pickle
+import json
 from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
 from utils import load_yaml, fps_rad_tensor
 
 class ObjectMotionPredictor:
-    def __init__(self, model_path, config_path):
+    def __init__(self, model_path, config_path, camera_calib_path):
         """Initialize the object motion predictor"""
         self.config = load_yaml(config_path)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Load camera calibration
+        with open(os.path.join(camera_calib_path, "calibrate.pkl"), "rb") as f:
+            self.c2ws = pickle.load(f)
+        self.w2cs = [np.linalg.inv(c2w) for c2w in self.c2ws]
+            
+        with open(os.path.join(camera_calib_path, "metadata.json"), "r") as f:
+            data = json.load(f)
+        self.intrinsics = np.array(data["intrinsics"])
+        self.WH = data["WH"]
+        self.FPS = data["fps"]
         
         # CRITICAL: Use same FPS radius as training!
         self.fps_radius = self.config['train']['fps_radius']  # 0.03
@@ -173,9 +186,9 @@ class ObjectMotionPredictor:
         print(f"Creating visualization for episode {episode_num}...")
         
         # Video parameters
-        fps = 10
-        width, height = 1280, 720
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  
+        width, height = self.WH
+        fps = self.FPS
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
@@ -183,6 +196,10 @@ class ObjectMotionPredictor:
         # Create Open3D visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window(width=width, height=height, visible=False)
+        
+        # Set render options
+        render_option = vis.get_render_option()
+        render_option.point_size = 10.0
         
         n_frames = min(len(predicted_objects), len(actual_objects))
         print(f"Rendering {n_frames} frames...")
@@ -200,36 +217,53 @@ class ObjectMotionPredictor:
             
             return np.array(edges) if edges else np.empty((0, 2), dtype=int)
         
+                # Set up camera parameters if available
+        if self.w2cs is not None:
+            view_control = vis.get_view_control()
+            camera_params = o3d.camera.PinholeCameraParameters()
+            intrinsic_parameter = o3d.camera.PinholeCameraIntrinsic(
+                width, height, self.intrinsics[0]  # Using first camera
+            )
+            camera_params.intrinsic = intrinsic_parameter
+            camera_params.extrinsic = self.w2cs[0]  # Using first camera
+            view_control.convert_from_pinhole_camera_parameters(
+                camera_params, allow_arbitrary=True
+            )
+        # Print camera parameters for debugging
+        print("[gnn_inference] Camera intrinsic:")
+        print(self.intrinsics[0])
+        print("[gnn_inference] Camera extrinsic (w2c):")
+        print(self.w2cs[0])
+
+        
         for frame_idx in range(n_frames):
             # Get positions for this frame
             pred_obj_pos = predicted_objects[frame_idx].numpy()
             actual_obj_pos = actual_objects[frame_idx].numpy()
             robot_pos = robot_trajectory[frame_idx].numpy()
             
-            # Create combined point cloud
-            all_positions = np.vstack([pred_obj_pos, actual_obj_pos, robot_pos])
+            if frame_idx == 0:
+                print(robot_pos)
             
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(all_positions)
+            # Create point clouds
+            pred_pcd = o3d.geometry.PointCloud()
+            pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
+            pred_pcd.paint_uniform_color([1.0, 0.2, 0.2])  # Red for predicted
             
-            # Color particles: predicted=red, actual=blue, robot=green
-            N_obj = pred_obj_pos.shape[0]
-            N_robot = robot_pos.shape[0]
+            actual_pcd = o3d.geometry.PointCloud()
+            actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
+            actual_pcd.paint_uniform_color([0.2, 0.6, 1.0])  # Blue for actual
             
-            colors = np.zeros((len(all_positions), 3))
-            colors[:N_obj] = [1.0, 0.2, 0.2]  # Predicted objects: red
-            colors[N_obj:2*N_obj] = [0.2, 0.6, 1.0]  # Actual objects: blue  
-            colors[2*N_obj:] = [0.2, 1.0, 0.2]  # Robot: green
+            robot_pcd = o3d.geometry.PointCloud()
+            robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
+            robot_pcd.paint_uniform_color([0.2, 1.0, 0.2])  # Green for robot
             
-            pcd.colors = o3d.utility.Vector3dVector(colors)
-            
-            # Create edges for predicted objects (red)
+            # Create edges for predicted objects
             pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
             pred_line_set = o3d.geometry.LineSet()
             if len(pred_edges) > 0:
                 pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
                 pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
-                # Red color for predicted object edges
                 pred_line_colors = np.tile([1.0, 0.2, 0.2], (len(pred_edges), 1))
                 pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
             
@@ -239,31 +273,33 @@ class ObjectMotionPredictor:
             if len(actual_edges) > 0:
                 actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
                 actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
-                # Blue color for actual object edges
                 actual_line_colors = np.tile([0.2, 0.6, 1.0], (len(actual_edges), 1))
                 actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
             
             # Update visualization
             vis.clear_geometries()
-            vis.add_geometry(pcd)
+            vis.add_geometry(pred_pcd)
+            vis.add_geometry(actual_pcd)
+            vis.add_geometry(robot_pcd)
             
-            # Add edge geometries if they exist
             if len(pred_edges) > 0:
                 vis.add_geometry(pred_line_set)
             if len(actual_edges) > 0:
                 vis.add_geometry(actual_line_set)
             
-            # Set camera view
-            view_control = vis.get_view_control()
-            center = np.mean(all_positions, axis=0)
-            view_control.set_lookat(center)
-            view_control.set_up([0, 1, 0])
-            view_control.set_front([0, 0, 1])
-            
-            # Auto-zoom based on data extent
-            extent = np.max(all_positions, axis=0) - np.min(all_positions, axis=0)
-            zoom_factor = 0.8 / max(extent)
-            view_control.set_zoom(zoom_factor)
+            # If no camera calibration, use default view
+            if self.w2cs is None:
+                view_control = vis.get_view_control()
+                center = np.mean(np.vstack([pred_obj_pos, actual_obj_pos, robot_pos]), axis=0)
+                view_control.set_lookat(center)
+                view_control.set_up([0, 1, 0])
+                view_control.set_front([0, 0, 1])
+                
+                # Auto-zoom based on data extent
+                extent = np.max(np.vstack([pred_obj_pos, actual_obj_pos, robot_pos]), axis=0) - \
+                        np.min(np.vstack([pred_obj_pos, actual_obj_pos, robot_pos]), axis=0)
+                zoom_factor = 0.8 / max(extent)
+                view_control.set_zoom(zoom_factor)
             
             # Render frame
             vis.poll_events()
@@ -274,13 +310,13 @@ class ObjectMotionPredictor:
             image_bgr = (image_np * 255).astype(np.uint8)
             image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_RGB2BGR)
             
-            # Add text overlay with sampling info
-            text1 = f'Frame {frame_idx} | Red=Predicted Objects | Blue=Actual Objects | Green=Robot'
-            text2 = f'Sampled particles (FPS radius={self.fps_radius}) | Edge threshold={self.adj_thresh}'
-            image_bgr = cv2.putText(image_bgr, text1, (10, 30), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            image_bgr = cv2.putText(image_bgr, text2, (10, 60), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            # # Add text overlay with sampling info
+            # text1 = f'Frame {frame_idx} | Red=Predicted Objects | Blue=Actual Objects | Green=Robot'
+            # text2 = f'Sampled particles (FPS radius={self.fps_radius}) | Edge threshold={self.adj_thresh}'
+            # image_bgr = cv2.putText(image_bgr, text1, (10, 30), 
+            #                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            # image_bgr = cv2.putText(image_bgr, text2, (10, 60), 
+            #                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
             
             video_writer.write(image_bgr)
             
@@ -300,12 +336,13 @@ def main():
     model_path = "data/gnn_dyn_model/2025-05-29-14-52-41-654478/net_best.pth"
     config_path = "config/train/gnn_dyn.yaml"
     data_dir = "../test/PhysTwin/generated_data"
+    camera_calib_path = "data/single_push_rope"  # Path to camera calibration data
     
     # Test episodes 
-    test_episodes = [20, 21, 22]
+    test_episodes = [0, 1, 2]
     
-    # Initialize predictor
-    predictor = ObjectMotionPredictor(model_path, config_path)
+    # Initialize predictor with camera calibration
+    predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path)
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")
@@ -319,7 +356,7 @@ def main():
         print(f"{'='*40}")
         
         try:
-            # Load episode data with FPS sampling (FIXED!)
+            # Load episode data with FPS sampling
             actual_objects, robot_trajectory, obj_indices, robot_indices = predictor.load_episode_data(data_dir, episode_num)
             
             # Predict object motion starting from initial positions
