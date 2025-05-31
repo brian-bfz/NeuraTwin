@@ -211,11 +211,11 @@ class ObjectMotionPredictor:
         # Create point clouds
         pred_pcd = o3d.geometry.PointCloud()
         pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0].numpy())
-        pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Red for predicted
+        pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Blue for predicted
             
         actual_pcd = o3d.geometry.PointCloud()
         actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0].numpy())
-        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
+        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Red for actual
             
         robot_pcd = o3d.geometry.PointCloud()
         robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0].numpy())
@@ -304,7 +304,7 @@ class ObjectMotionPredictor:
                 pred_line_set = o3d.geometry.LineSet()
                 pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
                 pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
-                pred_line_colors = np.tile([1.0, 0.0, 0.0], (len(pred_edges), 1))
+                pred_line_colors = np.tile([1.0, 0.0, 0.0], (len(pred_edges), 1)) # Blue for predicted
                 pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
                 vis.add_geometry(pred_line_set, reset_bounding_box=False)   
             else:
@@ -315,7 +315,7 @@ class ObjectMotionPredictor:
                 actual_line_set = o3d.geometry.LineSet()
                 actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
                 actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
-                actual_line_colors = np.tile([0.0, 0.0, 1.0], (len(actual_edges), 1))
+                actual_line_colors = np.tile([0.0, 0.0, 1.0], (len(actual_edges), 1)) # Red for actual
                 actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
                 vis.add_geometry(actual_line_set, reset_bounding_box=False)
             else:
