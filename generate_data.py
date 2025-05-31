@@ -130,10 +130,9 @@ if __name__ == "__main__":
 
     for i in range(args.start_episode, args.start_episode + args.n_episodes):
         save_dir = os.path.join("generated_data", f"{i}")
-        os.makedirs(os.path.join(save_dir, "object"), exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
         if args.include_gaussian:
             os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
-        os.makedirs(os.path.join(save_dir, "robot"), exist_ok=True)
         trainer.generate_data(
             best_model_path, 
             gaussians_path, 

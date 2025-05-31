@@ -39,6 +39,8 @@ import copy
 import time
 import threading
 import time
+import h5py
+from datetime import datetime
 
 
 class InvPhyTrainerWarp:
@@ -1085,31 +1087,56 @@ class InvPhyTrainerWarp:
                 
         return translation.astype(np.float32), target_changes.astype(np.float32)
     
-    def save_data(self, save_dir, frame_count, x, robot, gaussians=None):
-        torch.save(x, os.path.join(save_dir, "object", f"x_{frame_count}.pt"))
-        torch.save(robot, os.path.join(save_dir, "robot", f"x_{frame_count}.pt"))
-        if self.include_gaussian:
-            torch.save({
-                'xyz': gaussians._xyz,
-                'rotation': gaussians._rotation,
-                'frame_count': frame_count
-            }, os.path.join(save_dir, "gaussians", f"gaussians_{frame_count}.pt"))
+    def save_episode_data(self, save_dir, object_data, robot_data, gaussians_data=None):
+        """Save complete episode data as compressed numpy arrays"""
+        # Convert to numpy and save as compressed arrays
+        object_array = np.array([x.detach().cpu().numpy() for x in object_data])
+        robot_array = np.array([x.detach().cpu().numpy() for x in robot_data])
+        
+        # Create HDF5 file
+        episode_file = os.path.join(save_dir, "data.h5")
+        with h5py.File(episode_file, 'w') as f:
+            points = f.create_group('points')
+            points.create_dataset('object', data=object_array, compression='gzip', compression_opts=9)
+            points.create_dataset('robot', data=robot_array, compression='gzip', compression_opts=9)
+            
+            # Gaussians data (if available)
+            if self.include_gaussian and gaussians_data:
+                gaussians = f.create_group('gaussians')
+                
+                # Extract arrays from gaussians data
+                xyz_arrays = []
+                rotation_arrays = []
+                frame_counts = []
+                for gaussians in gaussians_data:
+                    xyz_arrays.append(gaussians['xyz'].detach().cpu().numpy())
+                    rotation_arrays.append(gaussians['rotation'].detach().cpu().numpy())
+                    frame_counts.append(gaussians['frame_count'])
+                
+                xyz_data = np.array(xyz_arrays)
+                rotation_data = np.array(rotation_arrays)
+                frame_counts_data = np.array(frame_counts)
+                
+                gaussians.create_dataset('xyz', data=xyz_data, compression='gzip', compression_opts=9)
+                gaussians.create_dataset('rotation', data=rotation_data, compression='gzip', compression_opts=9)
+                gaussians.create_dataset('frame_counts', data=frame_counts_data, compression='gzip', compression_opts=9)
+            
+            # Metadata
+            metadata = f.create_group('metadata')
+            metadata.attrs['n_frames'] = len(object_data)
+            metadata.attrs['object_particles'] = object_array.shape[1]
+            metadata.attrs['robot_particles'] = robot_array.shape[1]
+            metadata.attrs['episode_id'] = os.path.basename(save_dir)
+            metadata.attrs['timestamp'] = datetime.now().isoformat()
+            metadata.attrs['include_gaussian'] = self.include_gaussian
+        
+        print(f"Saved episode data to {episode_file}: object {object_array.shape}, robot {robot_array.shape}")
 
     def generate_data(
         self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, custom_control_points=None, 
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
-        # if n_ctrl_parts > 1:
-        #     kmeans = KMeans(n_clusters=n_ctrl_parts, random_state=0, n_init=10)
-        #     cluster_labels = kmeans.fit_predict(current_target.cpu().numpy())
-        #     masks_ctrl_pts = []
-        #     for i in range(n_ctrl_parts):
-        #         mask = cluster_labels == i
-        #         masks_ctrl_pts.append(torch.from_numpy(mask))
-        #     self.mask_ctrl_pts = masks_ctrl_pts
-        # else:
-        #     self.mask_ctrl_pts = None
 
         # Initialize simulator if not done
         if self.simulator is None:
@@ -1134,20 +1161,6 @@ class InvPhyTrainerWarp:
         
         logger.info("Starting data generation")
 
-        # prev_x = wp.to_torch(
-        #     self.simulator.wp_states[0].wp_x, requires_grad=False
-        # ).clone()
-
-        # if custom_control_points is not None:
-        #     current_target = custom_control_points
-        #     # TODO: change current_target to the points selected by select_cp.py
-        #     # TODO: delete old connections between controller points and object points
-        #     # TODO: add new connections between the new controller points and object points using code from outdomain_inference
-        # else:   
-        #     current_target = self.simulator.controller_points[0]
-
-        # prev_target = current_target
-
         if self.include_gaussian:
             gaussians = GaussianModel(sh_degree=3)
             gaussians.load_ply(gs_path)
@@ -1162,33 +1175,6 @@ class InvPhyTrainerWarp:
             gaussians = None
             prev_x = None
 
-        # Initialize key mappings for target movement
-        # self.key_mappings = {
-        #     # Set 1 controls
-        #     "w": (0, np.array([0.005, 0, 0])),
-        #     "s": (0, np.array([-0.005, 0, 0])),
-        #     "a": (0, np.array([0, -0.005, 0])),
-        #     "d": (0, np.array([0, 0.005, 0])),
-        #     "e": (0, np.array([0, 0, 0.005])),
-        #     "q": (0, np.array([0, 0, -0.005])),
-        #     # Set 2 controls
-        #     "i": (1, np.array([0.005, 0, 0])),
-        #     "k": (1, np.array([-0.005, 0, 0])),
-        #     "j": (1, np.array([0, -0.005, 0])),
-        #     "l": (1, np.array([0, 0.005, 0])),
-        #     "o": (1, np.array([0, 0, 0.005])),
-        #     "u": (1, np.array([0, 0, -0.005])),
-        #     # Set the finger
-        #     "n": 0.05,
-        #     "m": -0.05,
-        #     # Set the rotation
-        #     "z": [0, 0, 2.0 / 180 * np.pi],
-        #     "x": [0, 0, -2.0 / 180 * np.pi],
-        #     "c": [2.0 / 180 * np.pi, 0, 0],
-        #     "v": [-2.0 / 180 * np.pi, 0, 0],
-        # }
-        # self.pressed_keys = set()
-
         frame_count = 0
 
         origin_force_judge = torch.tensor(
@@ -1196,30 +1182,18 @@ class InvPhyTrainerWarp:
         )
         current_force_judge = origin_force_judge.clone()
         current_trans_dynamic_points = self.dynamic_points
-        # close_flag = False
-        # is_closing = True
 
+        # Initialize storage for all frames
+        object_frames = []
+        robot_frames = []
+        gaussians_frames = [] if self.include_gaussian else None
 
         for i in range(n_frames):
-            # self.pressed_keys.clear()
-            # for key in pressed_keys:
-            #     self.pressed_keys.add(key)
-
             # 1. Simulator step
             if self.simulator.object_collision_flag:
                 self.simulator.update_collision_graph()
             wp.capture_launch(self.simulator.forward_graph)
             x = wp.to_torch(self.simulator.wp_states[-1].wp_x, requires_grad=False)
-            # collision_forces = wp.to_torch(
-            #     self.simulator.collision_forces, requires_grad=False
-            # )[: self.num_dynamic]
-            # filter_forces = torch.einsum(
-            #     "ij,ij->i", collision_forces, current_force_judge
-            # )
-            # if torch.all(filter_forces > 3e4):
-            #     close_flag = False
-            # else:
-            #     close_flag = True
 
             # Set the intial state for the next step
             self.simulator.set_init_state(
@@ -1227,8 +1201,16 @@ class InvPhyTrainerWarp:
                 self.simulator.wp_states[-1].wp_v,
             )
 
+            # Store first frame data
             if frame_count == 0:
-                self.save_data(save_dir, frame_count, x, current_trans_dynamic_points, gaussians)
+                object_frames.append(x.detach().cpu())
+                robot_frames.append(current_trans_dynamic_points.detach().cpu())
+                if self.include_gaussian:
+                    gaussians_frames.append({
+                        'xyz': gaussians._xyz,
+                        'rotation': gaussians._rotation,
+                        'frame_count': frame_count
+                    })
 
             if prev_x is not None:
                 with torch.no_grad():
@@ -1266,28 +1248,8 @@ class InvPhyTrainerWarp:
 
             if self.include_gaussian:
                 prev_x = x.clone()
-            # prev_target = current_target
 
             # =====================robot stuff=====================
-            # Update the changes
-            # target_change = self.get_target_change()
-            # finger_change = self.get_finger_change()
-            # rot_change = self.get_rot_change()
-
-            # Calculate the substep vertices
-            # if finger_change > 0:
-            #     is_closing = False
-            # elif finger_change < 0:
-            #     is_closing = True
-                
-            # if is_closing:
-            #     if close_flag == True:
-            #         finger_change = -0.05
-            #     else:
-            #         finger_change = 0.0
-            # else:
-            #     finger_change = 0.05
-
             current_finger += finger_changes[i]
             current_finger = max(0.0, min(1.0, current_finger))
 
@@ -1329,12 +1291,6 @@ class InvPhyTrainerWarp:
             interpolated_dynamic_points = (
                 interpolated_trans_dynamic_points - interpolated_center.unsqueeze(1)
             ) @ interpolated_rot_mat.permute(0, 2, 1) + interpolated_center.unsqueeze(1)
-            # self.dynamic_vertices = (
-            #     interpolated_dynamic_points[-1]
-            #     .reshape([-1] + list(self.dynamic_vertices[0].shape))
-            #     .cpu()
-            #     .numpy()
-            # )
 
             # Calculate the velocity and omega for calculating relative velocity
             dynamic_velocity = torch.tensor(
@@ -1347,7 +1303,6 @@ class InvPhyTrainerWarp:
                 dtype=torch.float32,
                 device=cfg.device,
             )
-            # print(dynamic_omega)
 
             # Update the force judge direction
             current_force_judge = origin_force_judge.clone() @ interpolated_rot_mat[-1]
@@ -1361,7 +1316,18 @@ class InvPhyTrainerWarp:
             )
             frame_count += 1
 
-            self.save_data(save_dir, frame_count, x, interpolated_dynamic_points[-1], gaussians)
+            # Store frame data
+            object_frames.append(x.detach().cpu())
+            robot_frames.append(interpolated_dynamic_points[-1].detach().cpu())
+            if self.include_gaussian:
+                gaussians_frames.append({
+                    'xyz': gaussians._xyz,
+                    'rotation': gaussians._rotation,
+                    'frame_count': frame_count
+                })
+
+        # Save all collected data as compressed numpy arrays
+        self.save_episode_data(save_dir, object_frames, robot_frames, gaussians_frames)
 
     def interactive_playground(
         self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False

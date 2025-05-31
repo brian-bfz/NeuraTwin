@@ -8,6 +8,7 @@ import pickle
 import json
 import cv2
 import open3d as o3d
+import h5py
 
 def video_from_data(cfg, save_dir, robot):
         logger.info("Starting video generation")
@@ -28,15 +29,23 @@ def video_from_data(cfg, save_dir, robot):
         for dynamic_mesh in dynamic_meshes:
             vis.add_geometry(dynamic_mesh)
 
-        # Print camera parameters for debugging
-        print("[v_from_d] Camera intrinsic:")
-        print(intrinsic)
-        print("[v_from_d] Camera extrinsic (w2c):")
-        print(w2c)
+        # Load data from HDF5 file
+        episode_file = os.path.join(save_dir, "data.h5")
+        
+        with h5py.File(episode_file, 'r') as f:
+            object_data = f['points/object'][:]
+            robot_data = f['points/robot'][:]
+            
+            # Print episode metadata
+            metadata = f['metadata']
+            print(f"Episode {metadata.attrs['episode_id']}: {metadata.attrs['n_frames']} frames")
+            print(f"Object particles: {metadata.attrs['object_particles']}, Robot particles: {metadata.attrs['robot_particles']}")
+            print(f"Timestamp: {metadata.attrs['timestamp']}")
 
-        x = torch.load(os.path.join(save_dir, "object", "x_0.pt"), weights_only=True)
+        # Initialize with first frame
+        x = object_data[0]
         object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
+        object_pcd.points = o3d.utility.Vector3dVector(x)
         object_pcd.paint_uniform_color([0, 0, 1])
         vis.add_geometry(object_pcd)
 
@@ -60,23 +69,21 @@ def video_from_data(cfg, save_dir, robot):
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
 
-        for frame_count in range(len(os.listdir(os.path.join(save_dir, "object")))):
-            x = torch.load(os.path.join(save_dir, "object", f"x_{frame_count}.pt"), weights_only=True)
-            x_robot = torch.load(os.path.join(save_dir, "robot", f"x_{frame_count}.pt"), weights_only=True)
-            object_pcd.points = o3d.utility.Vector3dVector(x.cpu().numpy())
+        n_frames = len(object_data)
+        for frame_count in range(n_frames):
+            x = object_data[frame_count]
+            x_robot = robot_data[frame_count]
+            object_pcd.points = o3d.utility.Vector3dVector(x)
             vis.update_geometry(object_pcd) 
 
             cnt = 0
             for i, dynamic_mesh in enumerate(dynamic_meshes):
-                vertices = x_robot[cnt : cnt + finger_vertex_counts[i]].cpu().numpy()
+                vertices = x_robot[cnt : cnt + finger_vertex_counts[i]]
                 dynamic_mesh.vertices = o3d.utility.Vector3dVector(vertices)
                 cnt += finger_vertex_counts[i]
 
             for i, dynamic_mesh in enumerate(dynamic_meshes):
                 vis.update_geometry(dynamic_mesh)
-
-            if frame_count == 0:
-                print(x_robot.cpu().numpy())
 
             vis.poll_events()
             vis.update_renderer()
@@ -165,7 +172,7 @@ if __name__ == "__main__":
     # )
 
     # Generate video from saved data
-    for i in [0]:
+    for i in [2000, 2001, 2002, 2003]:
         save_dir = os.path.join("generated_data", f"{i}")
         video_from_data(cfg, save_dir, sample_robot)
     # trainer.video_from_data(
