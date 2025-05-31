@@ -73,9 +73,9 @@ class ObjectMotionPredictor:
         n_sampled_robot = robot_sample_indices.shape[0]
         n_full_obj = first_object.shape[0]
         
-        print(f"Sampled particles - Object: {n_sampled_obj}, Robot: {n_sampled_robot}")
-        print(f"Full GT particles - Object: {n_full_obj}")
-        print(f"Sampling ratio - Object: {n_sampled_obj/n_full_obj:.3f}, Robot: {n_sampled_robot/first_robot.shape[0]:.3f}")
+        # print(f"Sampled particles - Object: {n_sampled_obj}, Robot: {n_sampled_robot}")
+        # print(f"Full GT particles - Object: {n_full_obj}")
+        # print(f"Sampling ratio - Object: {n_sampled_obj/n_full_obj:.3f}, Robot: {n_sampled_robot/first_robot.shape[0]:.3f}")
         
         # Pre-allocate arrays for sampled and full particles
         sampled_object_trajectory = torch.zeros(n_timesteps, n_sampled_obj, 3)
@@ -195,7 +195,7 @@ class ObjectMotionPredictor:
         # Video parameters
         width, height = self.WH
         fps = self.FPS
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # Same as v_from_d.py
         
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
@@ -222,12 +222,12 @@ class ObjectMotionPredictor:
         robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
         
         # Full ground truth object point cloud (yellow in BGR: [0, 1, 1])
-        full_gt_pcd = o3d.geometry.PointCloud()
-        full_gt_pcd.points = o3d.utility.Vector3dVector(full_objects[0].numpy())
-        full_gt_pcd.paint_uniform_color([0.0, 1.0, 1.0])  # Yellow for full GT (BGR)
+        # full_gt_pcd = o3d.geometry.PointCloud()
+        # full_gt_pcd.points = o3d.utility.Vector3dVector(full_objects[0].numpy())
+        # full_gt_pcd.paint_uniform_color([0.0, 1.0, 1.0])  # Yellow for full GT (BGR)
 
         # Add full GT first so it appears at the bottom
-        vis.add_geometry(full_gt_pcd)
+        # vis.add_geometry(full_gt_pcd)
         vis.add_geometry(pred_pcd)
         vis.add_geometry(actual_pcd)
         vis.add_geometry(robot_pcd)
@@ -275,22 +275,22 @@ class ObjectMotionPredictor:
             pred_obj_pos = predicted_objects[frame_idx].numpy()
             actual_obj_pos = actual_objects[frame_idx].numpy()
             robot_pos = robot_trajectory[frame_idx].numpy()
-            full_gt_pos = full_objects[frame_idx].numpy()
+            # full_gt_pos = full_objects[frame_idx].numpy()
             
             if frame_idx == 0:
                 print(f"Sampled object particles: {actual_obj_pos.shape[0]}")
-                print(f"Full GT object particles: {full_gt_pos.shape[0]}")
+                # print(f"Full GT object particles: {full_gt_pos.shape[0]}")
                 print(f"Robot particles: {robot_pos.shape[0]}")
             
             pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
             robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
             actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
-            full_gt_pcd.points = o3d.utility.Vector3dVector(full_gt_pos)
+            # full_gt_pcd.points = o3d.utility.Vector3dVector(full_gt_pos)
 
             vis.update_geometry(pred_pcd)
             vis.update_geometry(actual_pcd)
             vis.update_geometry(robot_pcd)
-            vis.update_geometry(full_gt_pcd)
+            # vis.update_geometry(full_gt_pcd)
 
             # Remove old edges
             if pred_line_set is not None:
@@ -359,7 +359,7 @@ def main():
     camera_calib_path = "data/single_push_rope"  # Path to camera calibration data
     
     # Test episodes 
-    test_episodes = [1, 2, 3]
+    test_episodes = [0, 1, 2, 3, 4, 20, 21, 22, 23, 24]
     
     # Initialize predictor with camera calibration
     predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path)
