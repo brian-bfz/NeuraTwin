@@ -8,9 +8,10 @@ import json
 from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
 from utils import load_yaml, fps_rad_tensor
+import argparse
 
 class ObjectMotionPredictor:
-    def __init__(self, model_path, config_path, camera_calib_path):
+    def __init__(self, model_path, config_path, camera_calib_path, data_root):
         """Initialize the object motion predictor"""
         self.config = load_yaml(config_path)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,7 +27,10 @@ class ObjectMotionPredictor:
         self.WH = data["WH"]
         self.FPS = data["fps"]
         
-        # CRITICAL: Use same FPS radius as training!
+        # Initialize dataset for consistent data loading
+        self.dataset = ParticleDataset(data_root, self.config, 'train')  # Use train to access all episodes
+        
+        # CRITICAL: Use same parameters as training!
         self.fps_radius = self.config['train']['fps_radius']  # 0.03
         self.adj_thresh = self.config['train']['particle']['adj_thresh']
         
@@ -38,65 +42,8 @@ class ObjectMotionPredictor:
         
         print(f"Loaded model from: {model_path}")
         print(f"Using device: {self.device}")
-    
-    def load_episode_data(self, data_dir, episode_num):
-        """
-        Load raw episode data, apply FPS sampling, and separate object/robot particles
+        print(f"Dataset initialized with {self.dataset.n_episode} episodes")
         
-        Returns:
-        - sampled_object_trajectory: [timesteps, N_sampled_obj, 3] - actual object motion (sampled)
-        - sampled_robot_trajectory: [timesteps, N_sampled_robot, 3] - robot motion (sampled)
-        - full_object_trajectory: [timesteps, N_full_obj, 3] - full ground truth object motion (no sampling)
-        - object_sample_indices: indices of sampled object particles
-        - robot_sample_indices: indices of sampled robot particles
-        """
-        
-        # Find number of timesteps for this episode
-        timestep = 0
-        while os.path.exists(f'{data_dir}/{episode_num}/object/x_{timestep}.pt'):
-            timestep += 1
-        n_timesteps = timestep
-        
-        print(f"Episode {episode_num}: Found {n_timesteps} timesteps")
-        
-        # Load first timestep to determine sampling indices
-        first_object = torch.load(f'{data_dir}/{episode_num}/object/x_0.pt')
-        first_robot = torch.load(f'{data_dir}/{episode_num}/robot/x_0.pt')
-        
-        print(f"Raw particles - Object: {first_object.shape[0]}, Robot: {first_robot.shape[0]}")
-        
-        # CRITICAL FIX: Apply FPS sampling (same as training!)
-        object_sample_indices = fps_rad_tensor(first_object, self.fps_radius)
-        robot_sample_indices = fps_rad_tensor(first_robot, self.fps_radius)
-        
-        n_sampled_obj = object_sample_indices.shape[0]
-        n_sampled_robot = robot_sample_indices.shape[0]
-        n_full_obj = first_object.shape[0]
-        
-        # print(f"Sampled particles - Object: {n_sampled_obj}, Robot: {n_sampled_robot}")
-        # print(f"Full GT particles - Object: {n_full_obj}")
-        # print(f"Sampling ratio - Object: {n_sampled_obj/n_full_obj:.3f}, Robot: {n_sampled_robot/first_robot.shape[0]:.3f}")
-        
-        # Pre-allocate arrays for sampled and full particles
-        sampled_object_trajectory = torch.zeros(n_timesteps, n_sampled_obj, 3)
-        sampled_robot_trajectory = torch.zeros(n_timesteps, n_sampled_robot, 3)
-        full_object_trajectory = torch.zeros(n_timesteps, n_full_obj, 3)
-        
-        # Load and sample all timesteps
-        for t in range(n_timesteps):
-            # Load full data
-            object_full = torch.load(f'{data_dir}/{episode_num}/object/x_{t}.pt')
-            robot_full = torch.load(f'{data_dir}/{episode_num}/robot/x_{t}.pt')
-            
-            # Apply consistent sampling (same indices for all timesteps)
-            sampled_object_trajectory[t] = object_full[object_sample_indices]
-            sampled_robot_trajectory[t] = robot_full[robot_sample_indices]
-            
-            # Store full ground truth object data
-            full_object_trajectory[t] = object_full
-        
-        return sampled_object_trajectory, sampled_robot_trajectory, full_object_trajectory, object_sample_indices, robot_sample_indices
-    
     def predict_object_response(self, current_object_pos, current_robot_pos, robot_delta):
         """
         Predict how objects respond to robot motion
@@ -353,20 +300,26 @@ def main():
     """Main function to test object motion prediction"""
     
     # Configuration
-    model_path = "data/gnn_dyn_model/2025-05-29-14-52-41-654478/net_best.pth"
-    config_path = "config/train/gnn_dyn.yaml"
-    data_dir = "../test/PhysTwin/generated_data"
-    camera_calib_path = "data/single_push_rope"  # Path to camera calibration data
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_path", type=str, default="data/gnn_dyn_model/2025-05-31-21-01-09-427982/net_best.pth")
+    parser.add_argument("--camera_calib_path", type=str, default="data/single_push_rope")
+    parser.add_argument("--test_episodes", nargs='+', type=int, default=[0, 1, 2, 3, 4])
+    parser.add_argument("--data_root", type=str, default="../test/PhysTwin/generated_data")
+    args = parser.parse_args()
     
-    # Test episodes 
-    test_episodes = [0, 1, 2, 3, 4, 20, 21, 22, 23, 24]
+    model_path = args.model_path
+    config_path = "config/train/gnn_dyn.yaml"
+    data_root = args.data_root
+    camera_calib_path = args.camera_calib_path
+    test_episodes = args.test_episodes
     
     # Initialize predictor with camera calibration
-    predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path)
+    predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path, data_root)
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")
     print("="*60)
+    print(f"Testing episodes: {test_episodes}")
     
     all_errors = []
     
@@ -377,7 +330,7 @@ def main():
         
         try:
             # Load episode data with FPS sampling
-            actual_objects, robot_trajectory, full_object_trajectory, obj_indices, robot_indices = predictor.load_episode_data(data_dir, episode_num)
+            actual_objects, robot_trajectory, full_object_trajectory, obj_indices, robot_indices = predictor.dataset.load_full_episode(episode_num)
             
             # Predict object motion starting from initial positions
             initial_object_pos = actual_objects[0]

@@ -89,6 +89,56 @@ class ParticleDataset(Dataset):
         particles = np.matmul(np.linalg.inv(opencv_T_world), particles.T).T[:, :3] / self.global_scale
         return particles
 
+    def load_full_episode(self, episode_idx):
+        """
+        Load a complete episode for inference/visualization
+        
+        Args:
+            episode_idx: Episode index to load
+            
+        Returns:
+            sampled_object_trajectory: [timesteps, N_sampled_obj, 3]
+            sampled_robot_trajectory: [timesteps, N_sampled_robot, 3] 
+            full_object_trajectory: [timesteps, N_full_obj, 3]
+            object_sample_indices: indices of sampled object particles
+            robot_sample_indices: indices of sampled robot particles
+        """
+        
+        # Get HDF5 file handle
+        f = self._get_hdf5_file()
+        episode_group = f[f'episode_{episode_idx:06d}']
+        
+        # Get metadata
+        n_frames = episode_group.attrs['n_frames']
+        n_obj_particles = episode_group.attrs['n_obj_particles'] 
+        n_bot_particles = episode_group.attrs['n_bot_particles']
+        
+        # Load full episode data
+        full_object_data = torch.from_numpy(episode_group['object'][:, :, :])  # [time, n_obj, 3]
+        full_robot_data = torch.from_numpy(episode_group['robot'][:, :, :])    # [time, n_bot, 3]
+        
+        # Get first frame data for FPS sampling (consistent with training)
+        first_object = full_object_data[0]  # [n_obj, 3]
+        first_robot = full_robot_data[0]    # [n_bot, 3]
+        
+        # Apply same FPS sampling as training
+        object_sample_indices = fps_rad_tensor(first_object, self.fps_radius)
+        robot_sample_indices = fps_rad_tensor(first_robot, self.fps_radius)
+        
+        # Extract sampled trajectories using consistent indices
+        sampled_object_trajectory = full_object_data[:, object_sample_indices, :]  # [time, sampled_obj, 3]
+        sampled_robot_trajectory = full_robot_data[:, robot_sample_indices, :]     # [time, sampled_robot, 3]
+        
+        print(f"Episode {episode_idx}: {n_frames} timesteps, "
+              f"Objects: {n_obj_particles} -> {len(object_sample_indices)} sampled, "
+              f"Robot: {n_bot_particles} -> {len(robot_sample_indices)} sampled")
+        
+        return (sampled_object_trajectory.float(), 
+                sampled_robot_trajectory.float(), 
+                full_object_data.float(),
+                object_sample_indices, 
+                robot_sample_indices)
+
     def __getitem__(self, idx):
         # Calculate which episode and timestep this idx corresponds to
         offset = self.n_timestep - self.n_his - self.n_roll + 1
@@ -97,7 +147,7 @@ class ParticleDataset(Dataset):
 
         # Get HDF5 file handle (opened lazily per worker)
         f = self._get_hdf5_file()
-        episode_group = f[str(idx_episode)]
+        episode_group = f[f'episode_{idx_episode:06d}']
         
         # Get metadata
         n_frames = episode_group.attrs['n_frames']

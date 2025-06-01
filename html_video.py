@@ -1,12 +1,15 @@
 import glob
 import os
 import re
-
+import yaml
 # Configuration from training pipeline
-N_EPISODE = 25
-TRAIN_VALID_RATIO = 0.9
-N_TRAIN = int(N_EPISODE * TRAIN_VALID_RATIO)  # 22
-# Training episodes: 0-21, Validation episodes: 22-24
+config_path = "config/train/gnn_dyn.yaml"
+with open(config_path, "r") as file:
+    config = yaml.safe_load(file)
+
+N_EPISODE = config['dataset']['n_episode']
+TRAIN_VALID_RATIO = config['train']['train_valid_ratio']
+N_TRAIN = int(N_EPISODE * TRAIN_VALID_RATIO)
 
 def extract_episode_number(filename):
     """Extract episode number from filename like 'prediction_3.mp4'"""
