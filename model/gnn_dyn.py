@@ -48,11 +48,30 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     topk_matrix.scatter_(-1, topk_idx, 1)
     adj_matrix = adj_matrix * topk_matrix
 
+    # if connect_tools_all:
+    #     obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
+    #     obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
+    #     adj_matrix[obj_tool_mask_1] = 0 # avoid object to tool connections
+    #     adj_matrix[obj_tool_mask_2] = 1 # add all tool to object connections
+    #     adj_matrix[tool_mask_12] = 0 # avoid tool to tool relations
+
     if connect_tools_all:
         obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
         obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
-        adj_matrix[obj_tool_mask_1] = 0 # avoid object to tool connections
-        adj_matrix[obj_tool_mask_2] = 1 # add all tool to object connections
+        obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2)
+
+        batch_mask = (adj_matrix[obj_pad_tool_mask_1].reshape(B, -1).sum(-1) > 0)[:, None, None].repeat(1, N, N)
+        batch_obj_tool_mask_1 = obj_tool_mask_1 * batch_mask  # (B, N, N)
+        neg_batch_obj_tool_mask_1 = obj_tool_mask_1 * (~batch_mask)  # (B, N, N)
+        batch_obj_tool_mask_2 = obj_tool_mask_2 * batch_mask  # (B, N, N)
+        neg_batch_obj_tool_mask_2 = obj_tool_mask_2 * (~batch_mask)  # (B, N, N)
+
+        adj_matrix[batch_obj_tool_mask_1] = 0
+        adj_matrix[batch_obj_tool_mask_2] = 1
+        adj_matrix[neg_batch_obj_tool_mask_1] = 0
+        adj_matrix[neg_batch_obj_tool_mask_2] = 0
+
+
 
     n_rels = adj_matrix.sum(dim=(1,2))
     n_rel = n_rels.max().long().item()

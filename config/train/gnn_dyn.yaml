@@ -7,7 +7,7 @@ dataset:
   # - 'rand_spread': random spreaded object pile
   # - 'rand_sparse_spread': random sparse spreaded object pile
   global_scale: 24
-  n_episode: 50
+  n_episode: 500
   n_timestep: 80
   obj: "carrots"
   particle_r: 0.125
@@ -20,12 +20,12 @@ dataset:
 train:
   data_root: "../test/PhysTwin/generated_data"
   random_seed: 42
-  n_epoch: 100  # Reduced from 2000 for faster testing
+  n_epoch: 500
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 64
   nf_hidden: 64
-  num_workers: 8 
+  num_workers: 24
   train_valid_ratio: 0.9
   log_per_iter: 50
   ckp_per_iter: 1000
@@ -37,7 +37,7 @@ train:
   lr_scheduler:
     type: "StepLR"
     enabled: True
-    step_size: 50 # Reduced step size for shorter training
+    step_size: 100
     gamma: 0.1 # reduce LR by this factor
     factor: 0.1 # ReduceLROnPlateau
     patience: 10 # ReduceLROnPlateau
@@ -50,10 +50,10 @@ train:
       epoch: 0
       iter: 0
       folder: 'None'
-    adj_thresh: 0.08
+    adj_thresh: 0.05
     add_delta: False
     connect_tools_all: True  # Connect all tool particles to all object particles regardless of distance
     topk: 10  # Maximum number of neighbors per particle
   lam_reg: 2e-4
   lam_sp: 1e-2
-  fps_radius: 0.03
+  fps_radius: 0.02
