@@ -7,6 +7,7 @@ import pickle
 import json
 import random
 import time
+import h5py
 
 import torch
 import torch.nn.functional as F
@@ -50,12 +51,27 @@ class ParticleDataset(Dataset):
         self.n_his = config['train']['n_history']
         self.n_roll = config['train']['n_rollout']
         self.data_dir = data_dir
+        self.hdf5_path = os.path.join(data_dir, 'data.h5')
 
         self.screenHeight = 720
         self.screenWidth = 720
         self.img_channel = 1
 
         self.fps_radius = config['train']['fps_radius']
+        
+        # File handle for efficient access - will be opened lazily per worker
+        self._hdf5_file = None
+
+    def _get_hdf5_file(self):
+        """Lazy loading of HDF5 file handle to work properly with multiprocessing."""
+        if self._hdf5_file is None:
+            self._hdf5_file = h5py.File(self.hdf5_path, 'r')
+        return self._hdf5_file
+
+    def __del__(self):
+        """Ensure HDF5 file is properly closed when dataset is destroyed."""
+        if self._hdf5_file is not None:
+            self._hdf5_file.close()
 
     def __len__(self):
         return self.n_episode * (self.n_timestep - self.n_his - self.n_roll + 1)
@@ -79,25 +95,27 @@ class ParticleDataset(Dataset):
         idx_episode = idx // offset + self.epi_st_idx
         idx_timestep = idx % offset
 
-        # Pre-allocate tensors for efficiency
-        first_object = torch.load(os.path.join(self.data_dir, '%d/object/x_%d.pt' % (idx_episode, idx_timestep)))
-        first_robot = torch.load(os.path.join(self.data_dir, '%d/robot/x_%d.pt' % (idx_episode, idx_timestep)))
+        # Get HDF5 file handle (opened lazily per worker)
+        f = self._get_hdf5_file()
+        episode_group = f[str(idx_episode)]
+        
+        # Get metadata
+        n_frames = episode_group.attrs['n_frames']
+        n_obj_particles = episode_group.attrs['n_obj_particles'] 
+        n_bot_particles = episode_group.attrs['n_bot_particles']
+        
+        # Read object and robot datasets for the required time window
+        time_end = idx_timestep + self.n_his + self.n_roll
+        
+        # Load object and robot data as numpy arrays then convert to tensors
+        object_data = torch.from_numpy(episode_group['object'][idx_timestep:time_end, :, :])  # [time, n_obj, 3]
+        robot_data = torch.from_numpy(episode_group['robot'][idx_timestep:time_end, :, :])    # [time, n_bot, 3]
         
         n_frames = self.n_his + self.n_roll
-        all_frames_object = torch.zeros(n_frames, first_object.shape[0], 3)
-        all_frames_robot = torch.zeros(n_frames, first_robot.shape[0], 3)
         
-        # Fill tensors efficiently
-        all_frames_object[0] = first_object
-        all_frames_robot[0] = first_robot
-        
-        for i in range(1, n_frames):
-            frame_idx = idx_timestep + i
-            object_path = os.path.join(self.data_dir, '%d/object/x_%d.pt' % (idx_episode, frame_idx))
-            robot_path = os.path.join(self.data_dir, '%d/robot/x_%d.pt' % (idx_episode, frame_idx))
-            
-            all_frames_object[i] = torch.load(object_path)
-            all_frames_robot[i] = torch.load(robot_path)
+        # Get first frame data for FPS sampling
+        first_object = object_data[0]  # [n_obj, 3]
+        first_robot = robot_data[0]    # [n_bot, 3]
         
         # FPS sampling using tensor indices directly (no cdist needed!)
         sampled_object_indices = fps_rad_tensor(first_object, self.fps_radius)
@@ -114,8 +132,8 @@ class ParticleDataset(Dataset):
         robot_mask[n_sampled_object:] = True
         
         # Sample particles using tensor indexing (super efficient!)
-        sampled_object_states = all_frames_object[:, sampled_object_indices, :]  # [time, sampled_object, 3]
-        sampled_robot_states = all_frames_robot[:, sampled_robot_indices, :]     # [time, sampled_robot, 3]
+        sampled_object_states = object_data[:, sampled_object_indices, :]  # [time, sampled_object, 3]
+        sampled_robot_states = robot_data[:, sampled_robot_indices, :]     # [time, sampled_robot, 3]
         
         # Combine sampled particles: [object_particles, robot_particles]
         states = torch.cat([sampled_object_states, sampled_robot_states], dim=1)  # [time, total_sampled, 3]

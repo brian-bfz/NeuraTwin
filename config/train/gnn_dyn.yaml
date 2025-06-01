@@ -7,8 +7,8 @@ dataset:
   # - 'rand_spread': random spreaded object pile
   # - 'rand_sparse_spread': random sparse spreaded object pile
   global_scale: 24
-  n_episode: 25  # Reduced from 100 for faster testing
-  n_timestep: 81
+  n_episode: 50
+  n_timestep: 80
   obj: "carrots"
   particle_r: 0.125
   cam_idx: 0
@@ -23,7 +23,7 @@ train:
   n_epoch: 100  # Reduced from 2000 for faster testing
   lr: 0.001
   adam_beta1: 0.9
-  batch_size: 8  # Increased for better GPU utilization
+  batch_size: 64
   nf_hidden: 64
   num_workers: 8 
   train_valid_ratio: 0.9
