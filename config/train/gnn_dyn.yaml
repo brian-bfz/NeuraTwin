@@ -52,6 +52,8 @@ train:
       folder: 'None'
     adj_thresh: 0.08
     add_delta: False
+    connect_tools_all: True  # Connect all tool particles to all object particles regardless of distance
+    topk: 10  # Maximum number of neighbors per particle
   lam_reg: 2e-4
   lam_sp: 1e-2
   fps_radius: 0.03
