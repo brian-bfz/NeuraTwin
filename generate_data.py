@@ -128,11 +128,8 @@ if __name__ == "__main__":
         include_gaussian=args.include_gaussian,
     )
 
+    save_dir = os.path.join("generated_data")
     for i in range(args.start_episode, args.start_episode + args.n_episodes):
-        save_dir = os.path.join("generated_data", f"{i}")
-        os.makedirs(save_dir, exist_ok=True)
-        if args.include_gaussian:
-            os.makedirs(os.path.join(save_dir, "gaussians"), exist_ok=True)
         trainer.generate_data(
             best_model_path, 
             gaussians_path, 
