@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 
 base_path = "./data/different_types"
-prediction_dir = "./gaussian_output_dynamic"
+prediction_dir = "./gaussian_output_dynamic_white"
 human_mask_path = (
     "./data/different_types_human_mask"
 )

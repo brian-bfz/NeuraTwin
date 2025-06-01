@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
                     gt = gt.astype(np.float32) * gt_mask[..., None]
                     bg_mask = gt_mask == 0
-                    gt[bg_mask] = [255, 255, 255]
+                    gt[bg_mask] = [0, 0, 0]
                     render = render[:, :, :3].astype(np.float32)
 
                     gt = gt * inv_human_mask[..., None]
@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
                     gt = gt.astype(np.float32) * gt_mask[..., None]
                     bg_mask = gt_mask == 0
-                    gt[bg_mask] = [255, 255, 255]
+                    gt[bg_mask] = [0, 0, 0]
                     render = render[:, :, :3].astype(np.float32)
 
                     gt = gt * inv_human_mask[..., None]

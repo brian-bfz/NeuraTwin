@@ -113,9 +113,10 @@ def render_sets(
     separate_sh: bool,
     remove_gaussians: bool = False,
     name: str = "dynamic",
+    output_dir: str = "./gaussian_output_dynamic",
 ):
     with torch.no_grad():
-        output_path = "./gaussian_output_dynamic"
+        output_path = output_dir
 
         bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -281,6 +282,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--remove_gaussians", action="store_true")
     parser.add_argument("--name", default="sceneA", type=str)
+    parser.add_argument("--output_dir", default="./gaussian_output_dynamic", type=str)
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
@@ -296,6 +298,7 @@ if __name__ == "__main__":
         SPARSE_ADAM_AVAILABLE,
         args.remove_gaussians,
         args.name,
+        args.output_dir,
     )
 
     with open("./rendering_finished_dynamic.txt", "a") as f:

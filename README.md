@@ -66,6 +66,7 @@ This repository contains the official implementation of the **PhysTwin** framewo
 
 
 ### Setup
+#### 🐧Linux Setup
 ```
 # Here we use cuda-12.1
 export PATH={YOUR_DIR}/cuda/cuda-12.1/bin:$PATH
@@ -81,7 +82,20 @@ bash ./env_install/env_install.sh
 # Download the necessary pretrained models for data processing
 bash ./env_install/download_pretrained_models.sh
 ```
+
+#### 🪟Windows Setup
 Thanks to @GuangyanCai contributions, now we also have a windows setup codebase in `windows_setup` branch.
+
+#### 🐳Docker Setup
+Thanks to @epiception contributions, we now have Docker support as well.
+```
+export DOCKER_USERNAME="your_alias" # default is ${whoami} (optional)
+chmod +x ./docker_scripts/build.sh
+./docker_scripts/build.sh
+
+# The script accepts architecture version from https://developer.nvidia.com/cuda-gpus as an additional argument
+./docker_scripts/build.sh 8.9+PTX # For NVIDIA RTX 40 series GPUs
+```
 
 ### Download the PhysTwin Data
 Download the original data, processed data, and results into the project's root folder. (The following sections will explain how to process the raw observations and obtain the training results.)
@@ -107,6 +121,16 @@ python interactive_playground.py \
 python interactive_playground.py --n_ctrl_parts 2 --case_name double_stretch_sloth
 python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_lift_cloth_3
 python generate_data.py --n_ctrl_parts 2 --case_name double_stretch_sloth
+```
+or in Docker
+```
+./docker_scripts/run.sh /path/to/data \
+                        /path/to/experiments \
+                        /path/to/experiments_optimization \
+                        /path/to/gaussian_output \
+# inside container
+conda activate phystwin_env
+python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_lift_cloth_3
 ```
 
 Brian's notes: 
@@ -139,10 +163,12 @@ To evaluate the performance of the construected PhysTwin, need to render the ima
 # Use LBS to render the dynamic videos (The final videos in ./gaussian_output_dynamic folder)
 bash gs_run_simulate.sh
 python export_render_eval_data.py
-python visualize_render_results.py
-
 # Get the quantative results
 bash evaluate.sh
+
+# Get the qualitative results
+bash gs_run_simulate_white.sh
+python visualize_render_results.py
 ```
 
 ### Data Processing from Raw Videos

@@ -1,4 +1,4 @@
-output_dir="./gaussian_output_dynamic"
+output_dir="./gaussian_output_dynamic_white"
 
 # views=("0" "1" "2")
 views=("0")
@@ -23,6 +23,8 @@ for scene_name in "${scenes[@]}"; do
         -s ./data/gaussian_data/${scene_name} \
         -m ./gaussian_output/${scene_name}/${exp_name} \
         --name ${scene_name} \
+        --white_background
+        --output_dir ${output_dir}/${scene_name}
 
     for view_name in "${views[@]}"; do
         # Convert images to video
