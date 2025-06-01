@@ -1087,53 +1087,92 @@ class InvPhyTrainerWarp:
                 
         return translation.astype(np.float32), target_changes.astype(np.float32)
     
-    def save_episode_data(self, save_dir, object_data, robot_data, gaussians_data=None):
-        """Save complete episode data as compressed numpy arrays"""
-        # Convert to numpy and save as compressed arrays
+    def save_episode_data(self, data_file_path, episode_id, object_data, robot_data, gaussians_data=None):
+        """Save episode data to a shared HDF5 file with each episode as a group"""
+        import h5py
+        from datetime import datetime
+        
+        # Convert to numpy arrays
         object_array = np.array([x.detach().cpu().numpy() for x in object_data])
         robot_array = np.array([x.detach().cpu().numpy() for x in robot_data])
         
-        # Create HDF5 file
-        episode_file = os.path.join(save_dir, "data.h5")
-        with h5py.File(episode_file, 'w') as f:
-            points = f.create_group('points')
-            points.create_dataset('object', data=object_array, compression='gzip', compression_opts=9)
-            points.create_dataset('robot', data=robot_array, compression='gzip', compression_opts=9)
+        # Open HDF5 file in append mode
+        with h5py.File(data_file_path, 'a') as f:
+            # Create episode group
+            episode_group = f.create_group(f'episode_{episode_id:06d}')
+            
+            # Create datasets with chunk size equal to the whole dataset
+            episode_group.create_dataset(
+                'object', 
+                data=object_array, 
+                compression='gzip', 
+                compression_opts=9,
+                shuffle=True,
+                chunks=object_array.shape  # Chunk size equal to whole dataset
+            )
+            
+            episode_group.create_dataset(
+                'robot', 
+                data=robot_array, 
+                compression='gzip', 
+                compression_opts=9,
+                shuffle=True,
+                chunks=robot_array.shape  # Chunk size equal to whole dataset
+            )
             
             # Gaussians data (if available)
             if self.include_gaussian and gaussians_data:
-                gaussians = f.create_group('gaussians')
+                gaussians = episode_group.create_group('gaussians')
                 
                 # Extract arrays from gaussians data
                 xyz_arrays = []
                 rotation_arrays = []
                 frame_counts = []
-                for gaussians in gaussians_data:
-                    xyz_arrays.append(gaussians['xyz'].detach().cpu().numpy())
-                    rotation_arrays.append(gaussians['rotation'].detach().cpu().numpy())
-                    frame_counts.append(gaussians['frame_count'])
+                for gaussians_data_item in gaussians_data:
+                    xyz_arrays.append(gaussians_data_item['xyz'].detach().cpu().numpy())
+                    rotation_arrays.append(gaussians_data_item['rotation'].detach().cpu().numpy())
+                    frame_counts.append(gaussians_data_item['frame_count'])
                 
                 xyz_data = np.array(xyz_arrays)
                 rotation_data = np.array(rotation_arrays)
                 frame_counts_data = np.array(frame_counts)
                 
-                gaussians.create_dataset('xyz', data=xyz_data, compression='gzip', compression_opts=9)
-                gaussians.create_dataset('rotation', data=rotation_data, compression='gzip', compression_opts=9)
-                gaussians.create_dataset('frame_counts', data=frame_counts_data, compression='gzip', compression_opts=9)
+                gaussians.create_dataset(
+                    'xyz', 
+                    data=xyz_data, 
+                    compression='gzip', 
+                    compression_opts=9,
+                    shuffle=True,
+                    chunks=xyz_data.shape
+                )
+                gaussians.create_dataset(
+                    'rotation', 
+                    data=rotation_data, 
+                    compression='gzip', 
+                    compression_opts=9,
+                    shuffle=True,
+                    chunks=rotation_data.shape
+                )
+                gaussians.create_dataset(
+                    'frame_counts', 
+                    data=frame_counts_data, 
+                    compression='gzip', 
+                    compression_opts=9
+                )
             
-            # Metadata
-            metadata = f.create_group('metadata')
-            metadata.attrs['n_frames'] = len(object_data)
-            metadata.attrs['object_particles'] = object_array.shape[1]
-            metadata.attrs['robot_particles'] = robot_array.shape[1]
-            metadata.attrs['episode_id'] = os.path.basename(save_dir)
-            metadata.attrs['timestamp'] = datetime.now().isoformat()
-            metadata.attrs['include_gaussian'] = self.include_gaussian
+            # Store metadata as attributes
+            episode_group.attrs['n_frames'] = len(object_data)
+            episode_group.attrs['n_obj_particles'] = object_array.shape[1]
+            episode_group.attrs['n_bot_particles'] = robot_array.shape[1]
+            episode_group.attrs['object_type'] = 'rope'  # As specified in requirements
+            episode_group.attrs['motion_type'] = 'single_push'  # As specified in requirements
+            episode_group.attrs['episode_id'] = episode_id
+            episode_group.attrs['include_gaussian'] = self.include_gaussian
         
-        print(f"Saved episode data to {episode_file}: object {object_array.shape}, robot {robot_array.shape}")
+        print(f"Saved episode {episode_id} to {data_file_path}: object {object_array.shape}, robot {robot_array.shape}")
 
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, save_dir=None, custom_control_points=None, 
+        self, model_path, gs_path, n_ctrl_parts=1, data_file_path=None, episode_id=0, custom_control_points=None, 
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
@@ -1326,8 +1365,8 @@ class InvPhyTrainerWarp:
                     'frame_count': frame_count
                 })
 
-        # Save all collected data as compressed numpy arrays
-        self.save_episode_data(save_dir, object_frames, robot_frames, gaussians_frames)
+        # Save all collected data to the shared HDF5 file
+        self.save_episode_data(data_file_path, episode_id, object_frames, robot_frames, gaussians_frames)
 
     def interactive_playground(
         self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False

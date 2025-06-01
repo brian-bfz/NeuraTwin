@@ -11,6 +11,7 @@ import glob
 import os
 import pickle
 from SampleRobot import RobotPcSampler
+import h5py
 
 # def set_all_seeds(seed):
 #     random.seed(seed)
@@ -57,6 +58,18 @@ def random_movement(n_ctrl_parts, num_movements=10, frames_per_movement=10):
         sequence.extend([movement] * frames_per_movement)
     
     return sequence
+
+def initialize_data_file(data_file_path):
+    """Initialize the shared HDF5 data file if it doesn't exist"""
+    if not os.path.exists(data_file_path):
+        # Create empty HDF5 file
+        with h5py.File(data_file_path, 'w') as f:
+            # Add global metadata
+            f.attrs['created'] = datetime.now().isoformat()
+            f.attrs['description'] = 'PhysTwin episode data collection'
+        print(f"Initialized data file: {data_file_path}")
+    else:
+        print(f"Using existing data file: {data_file_path}")
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -128,13 +141,20 @@ if __name__ == "__main__":
         include_gaussian=args.include_gaussian,
     )
 
-    save_dir = os.path.join("generated_data")
+    # Initialize shared data file
+    save_dir = "generated_data"
+    os.makedirs(save_dir, exist_ok=True)
+    data_file_path = os.path.join(save_dir, "data.h5")
+    initialize_data_file(data_file_path)
+
+    # Generate episodes
     for i in range(args.start_episode, args.start_episode + args.n_episodes):
         trainer.generate_data(
             best_model_path, 
             gaussians_path, 
             args.n_ctrl_parts, 
-            save_dir, 
+            data_file_path,
+            i,
         )
 
     # Load custom control points if provided

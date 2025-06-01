@@ -10,8 +10,8 @@ import cv2
 import open3d as o3d
 import h5py
 
-def video_from_data(cfg, save_dir, robot):
-        logger.info("Starting video generation")
+def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
+        logger.info(f"Starting video generation for episode {episode_id}")
 
         vis_cam_idx = 0
         width, height = cfg.WH
@@ -29,18 +29,27 @@ def video_from_data(cfg, save_dir, robot):
         for dynamic_mesh in dynamic_meshes:
             vis.add_geometry(dynamic_mesh)
 
-        # Load data from HDF5 file
-        episode_file = os.path.join(save_dir, "data.h5")
-        
-        with h5py.File(episode_file, 'r') as f:
-            object_data = f['points/object'][:]
-            robot_data = f['points/robot'][:]
+        # Load data from shared HDF5 file
+        episode_key = f'episode_{episode_id:06d}'
             
-            # Print episode metadata
-            metadata = f['metadata']
-            print(f"Episode {metadata.attrs['episode_id']}: {metadata.attrs['n_frames']} frames")
-            print(f"Object particles: {metadata.attrs['object_particles']}, Robot particles: {metadata.attrs['robot_particles']}")
-            print(f"Timestamp: {metadata.attrs['timestamp']}")
+        if episode_key not in f:
+            print(f"Episode {episode_id} not found in data file")
+            return
+                
+        episode_group = f[episode_key]
+        object_data = episode_group['object'][:]
+        robot_data = episode_group['robot'][:]
+        
+        # Print episode metadata
+        n_frames = episode_group.attrs['n_frames']
+        n_obj_particles = episode_group.attrs['n_obj_particles']
+        n_bot_particles = episode_group.attrs['n_bot_particles']
+        object_type = episode_group.attrs['object_type']
+        motion_type = episode_group.attrs['motion_type']
+            
+        print(f"Episode {episode_id}: {n_frames} frames")
+        print(f"Object particles: {n_obj_particles}, Robot particles: {n_bot_particles}")
+        print(f"Object type: {object_type}, Motion type: {motion_type}")
 
         # Initialize with first frame
         x = object_data[0]
@@ -61,11 +70,7 @@ def video_from_data(cfg, save_dir, robot):
         )
 
         # Initialize video writer
-        # Determine case_name and timestamp from save_dir
-        case_name_timestamp = os.path.basename(save_dir.rstrip('/'))
-        videos_dir = os.path.join(os.path.dirname(save_dir), "videos")
-        os.makedirs(videos_dir, exist_ok=True)
-        output_path = os.path.join(videos_dir, f"{case_name_timestamp}.mp4")
+        output_path = os.path.join(output_dir, f"{episode_id:06d}.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, cfg.FPS, (width, height))
 
@@ -100,6 +105,7 @@ def video_from_data(cfg, save_dir, robot):
         # Release video writer
         out.release()
         cv2.destroyAllWindows()
+        vis.destroy_window()
         logger.info(f"Video saved to {output_path}")
 
 
@@ -110,20 +116,20 @@ if __name__ == "__main__":
         type=str,
         default="./data/different_types",
     )
-    # parser.add_argument(
-    #     "--gaussian_path",
-    #     type=str,
-    #     default="./gaussian_output",
-    # )
+    parser.add_argument(
+        "--data_file",
+        type=str,
+        default="generated_data/data.h5",
+        help="Path to the shared HDF5 data file"
+    )
     parser.add_argument(
         "--bg_img_path",
         type=str,
         default="./data/bg.png",
     )
     parser.add_argument("--case_name", type=str, required=True)
-    parser.add_argument("--n_episodes", type=int, default=1)
-    parser.add_argument("--start_episode", type=int, default=0)
-    # parser.add_argument("--timestamp", type=str, required=True)
+    parser.add_argument("--episode_ids", type=int, nargs="+", help="Episode IDs to generate videos for")
+    parser.add_argument("--output_dir", type=str, default="generated_data/videos", help="Output directory for videos")
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -159,22 +165,12 @@ if __name__ == "__main__":
     cfg.WH = data["WH"]
     cfg.bg_img_path = args.bg_img_path
 
-    # exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
-    # gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
-
-    # logger.set_log_file(path=base_dir, name="inference_log")
-    # trainer = InvPhyTrainerWarp(
-    #     data_path=f"{base_path}/{case_name}/final_data.pkl",
-    #     base_dir=base_dir,
-    #     pure_inference_mode=True,
-    #     static_meshes=[],
-    #     robot=sample_robot,
-    # )
-
-    # Generate video from saved data
-    for i in [2000, 2001, 2002, 2003]:
-        save_dir = os.path.join("generated_data", f"{i}")
-        video_from_data(cfg, save_dir, sample_robot)
-    # trainer.video_from_data(
-    #     gaussians_path, save_dir
-    # )
+    # Generate videos for specified episodes
+    if args.episode_ids:
+        with h5py.File(args.data_file, 'r') as f:
+            for episode_id in args.episode_ids:
+                video_from_data(cfg, f, episode_id, sample_robot, args.output_dir)
+    else:
+        # If no episodes specified, generate videos for first few episodes
+        print("No episode IDs specified. Use --episode_ids to specify which episodes to process.")
+        print("Example: python v_from_d.py --case_name your_case --episode_ids 0 1 2")

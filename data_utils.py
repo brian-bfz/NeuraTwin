@@ -16,10 +16,10 @@ class EpisodeLoader:
         Initialize episode loader
         
         Args:
-            episode_path: Path to episode.h5 file or directory containing episode.h5
+            episode_path: Path to data.h5 file or directory containing data.h5
         """
         if os.path.isdir(episode_path):
-            self.episode_file = os.path.join(episode_path, "episode.h5")
+            self.episode_file = os.path.join(episode_path, "data.h5")
         else:
             self.episode_file = episode_path
             
@@ -40,12 +40,12 @@ class EpisodeLoader:
     def load_object_data(self) -> np.ndarray:
         """Load object trajectory data"""
         with h5py.File(self.episode_file, 'r') as f:
-            return f['object/data'][:]
+            return f['points/object'][:]
     
     def load_robot_data(self) -> np.ndarray:
         """Load robot trajectory data"""
         with h5py.File(self.episode_file, 'r') as f:
-            return f['robot/data'][:]
+            return f['points/robot'][:]
     
     def load_gaussians_data(self) -> Optional[Dict[str, np.ndarray]]:
         """Load gaussians data if available"""
@@ -60,17 +60,17 @@ class EpisodeLoader:
             return gaussians_data
     
     def load_frame(self, frame_idx: int) -> Tuple[np.ndarray, np.ndarray]:
-        """Load specific frame data"""
+        """Load specific frame data (benefits from chunking)"""
         with h5py.File(self.episode_file, 'r') as f:
-            object_frame = f['object/data'][frame_idx]
-            robot_frame = f['robot/data'][frame_idx]
+            object_frame = f['points/object'][frame_idx]
+            robot_frame = f['points/robot'][frame_idx]
             return object_frame, robot_frame
     
     def load_frame_range(self, start_frame: int, end_frame: int) -> Tuple[np.ndarray, np.ndarray]:
         """Load range of frames"""
         with h5py.File(self.episode_file, 'r') as f:
-            object_frames = f['object/data'][start_frame:end_frame]
-            robot_frames = f['robot/data'][start_frame:end_frame]
+            object_frames = f['points/object'][start_frame:end_frame]
+            robot_frames = f['points/robot'][start_frame:end_frame]
             return object_frames, robot_frames
     
     def get_episode_info(self) -> Dict:
@@ -79,10 +79,10 @@ class EpisodeLoader:
         
         with h5py.File(self.episode_file, 'r') as f:
             # Data shapes
-            if 'object/data' in f:
-                info['object_shape'] = f['object/data'].shape
-            if 'robot/data' in f:
-                info['robot_shape'] = f['robot/data'].shape
+            if 'points/object' in f:
+                info['object_shape'] = f['points/object'].shape
+            if 'points/robot' in f:
+                info['robot_shape'] = f['points/robot'].shape
             if 'gaussians' in f and 'xyz' in f['gaussians']:
                 info['gaussians_shape'] = f['gaussians/xyz'].shape
         
@@ -105,11 +105,11 @@ class BatchLoader:
         self.episode_paths = self._find_episodes()
     
     def _find_episodes(self) -> List[str]:
-        """Find all episode.h5 files in subdirectories"""
+        """Find all data.h5 files in subdirectories"""
         episode_files = []
         for root, dirs, files in os.walk(self.data_dir):
-            if "episode.h5" in files:
-                episode_files.append(os.path.join(root, "episode.h5"))
+            if "data.h5" in files:
+                episode_files.append(os.path.join(root, "data.h5"))
         
         # Sort by episode number if possible
         def extract_episode_num(path):
