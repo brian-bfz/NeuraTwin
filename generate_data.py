@@ -98,6 +98,7 @@ if __name__ == "__main__":
         cfg.load_from_yaml("configs/cloth.yaml")
     else:
         cfg.load_from_yaml("configs/real.yaml")
+    print(cfg.__dict__)
 
     base_dir = f"./temp_experiments/{case_name}"
 

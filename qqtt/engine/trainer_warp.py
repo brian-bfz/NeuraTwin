@@ -1188,7 +1188,7 @@ class InvPhyTrainerWarp:
         )
         
         # set robot position and movement parameters
-        translation, target_changes = self.robot_translation(offset_dist=cfg.data_generation.offset_dist, keep_off=cfg.data_generation.keep_off, multiplier=cfg.data_generation.multiplier, speed=cfg.data_generation.speed)
+        translation, target_changes = self.robot_translation(offset_dist=cfg.offset_dist, keep_off=cfg.keep_off, multiplier=cfg.multiplier, speed=cfg.speed)
         n_frames = target_changes.shape[0]
         current_finger = 0.0
         finger_changes = np.zeros((n_frames), dtype=np.float32)

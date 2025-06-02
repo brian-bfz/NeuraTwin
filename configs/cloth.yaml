@@ -27,8 +27,7 @@ collision_learn: true
 chamfer_weight: 1.0
 track_weight: 1.0
 self_collision: true
-data_generation:
-  offset_dist: 0.2
-  keep_off: 0.05
-  multiplier: 2.0
-  speed: 0.005
+offset_dist: 0.2
+keep_off: 0.05
+multiplier: 2.0
+speed: 0.005

@@ -49,6 +49,11 @@ class Config:
 
         # Other parameters for visualization
         self.overlay_path = None
+        
+        self.offset_dist = 0.2
+        self.keep_off = 0.05
+        self.multiplier = 2.0
+        self.speed = 0.006
 
     def to_dict(self):
         # Convert the class to dictionary
