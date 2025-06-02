@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
-from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, get_current_YYYY_MM_DD_hh_mm_ss_ms
+from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms
 
 # from env.flex_env import FlexEnv
 
@@ -44,6 +44,12 @@ def collate_fn(data):
     return states_tensor, states_delta_tensor, attr, particle_num_tensor
 
 def train():
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Train GNN dynamics model')
+    parser.add_argument('--name', type=str, default=None,
+                       help='Training run name. If not provided, uses timestamp (YYYY-MM-DD-hh-mm-ss-ms)')
+    args = parser.parse_args()
 
     config = load_yaml('config/train/gnn_dyn.yaml')
     n_rollout = config['train']['n_rollout']
@@ -57,15 +63,30 @@ def train():
 
     use_gpu = torch.cuda.is_available()
 
-
     ### make log dir
     TRAIN_ROOT = 'data/gnn_dyn_model'
+    
     if config['train']['particle']['resume']['active']:
         TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['particle']['resume']['folder'])
     else:
-        TRAIN_DIR = os.path.join(TRAIN_ROOT, get_current_YYYY_MM_DD_hh_mm_ss_ms())
+        # Determine training directory name
+        if args.name:
+            train_name = args.name
+            TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
+            
+            # Check if directory exists and is not empty
+            if os.path.exists(TRAIN_DIR) and os.listdir(TRAIN_DIR):  # Directory exists and is not empty
+                print(f"Error: Training directory '{TRAIN_DIR}' already exists and is not empty!")
+                print(f"Please choose a different name or remove the existing directory.")
+                return
+        else:
+            train_name = YYYY_MM_DD_hh_mm_ss_ms()
+            TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
+    
     os.system('mkdir -p ' + TRAIN_DIR)
     save_yaml(config, os.path.join(TRAIN_DIR, "config.yaml"))
+
+    print(f"Training directory: {TRAIN_DIR}")
 
     if not config['train']['particle']['resume']['active']:
         log_fout = open(os.path.join(TRAIN_DIR, 'log.txt'), 'w')

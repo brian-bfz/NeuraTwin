@@ -3,6 +3,7 @@ import os
 import re
 import yaml
 import argparse
+import json
 
 def extract_episode_number(filename):
     """Extract episode number from filename like 'prediction_3.mp4'"""
@@ -11,23 +12,45 @@ def extract_episode_number(filename):
         return int(match.group(1))
     return None
 
+def format_config_for_html(config, indent=0):
+    """Convert config dictionary to formatted HTML"""
+    html = ""
+    for key, value in config.items():
+        spacing = "&nbsp;" * (indent * 4)
+        if isinstance(value, dict):
+            html += f"{spacing}<strong>{key}:</strong><br>\n"
+            html += format_config_for_html(value, indent + 1)
+        else:
+            html += f"{spacing}<strong>{key}:</strong> {value}<br>\n"
+    return html
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Generate HTML page for GNN simulation videos')
-    parser.add_argument('--timestamp', type=str, required=True,
-                       help='Model timestamp to display (e.g., 2025-05-31-21-01-09-427982)')
+    parser.add_argument('--name', type=str, required=True,
+                       help='Model name to display (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)')
     args = parser.parse_args()
     
-    timestamp = args.timestamp
+    model_name = args.name
     
-    # Configuration from training pipeline
-    config_path = "config/train/gnn_dyn.yaml"
+    # Use model-specific configuration
+    model_dir = f"data/gnn_dyn_model/{model_name}"
+    config_path = os.path.join(model_dir, "config.yaml")
+    
+    if not os.path.exists(config_path):
+        print(f"Error: Model config file '{config_path}' does not exist!")
+        print(f"Please check if the model directory exists and contains config.yaml")
+        return
+    
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
 
     N_EPISODE = config['dataset']['n_episode']
     TRAIN_VALID_RATIO = config['train']['train_valid_ratio']
     N_TRAIN = int(N_EPISODE * TRAIN_VALID_RATIO)
+
+    # Convert config to formatted HTML
+    config_html = format_config_for_html(config)
 
     # HTML 头部
     html_content = f"""
@@ -36,7 +59,7 @@ def main():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GNN Simulation Videos - Model {timestamp}</title>
+    <title>GNN Simulation Videos - Model {model_name}</title>
     <style>
         body {{
             font-family: Arial, sans-serif;
@@ -62,6 +85,10 @@ def main():
         .validation {{
             background-color: #e8f0ff;
             color: #1a4480;
+        }}
+        .config {{
+            background-color: #fff9e6;
+            color: #8b6914;
         }}
         .container {{
             display: flex;
@@ -133,29 +160,81 @@ def main():
             font-weight: bold;
             color: #856404;
         }}
+        .config-section {{
+            background-color: #fff;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: left;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+        }}
+        .config-toggle {{
+            background-color: #fff9e6;
+            border: 1px solid #f0e68c;
+            padding: 10px 20px;
+            margin: 20px auto;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+            display: block;
+            width: 200px;
+            font-weight: bold;
+            color: #8b6914;
+        }}
+        .config-toggle:hover {{
+            background-color: #fff3cd;
+        }}
+        .config-content {{
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }}
+        #config-details {{
+            display: none;
+        }}
     </style>
+    <script>
+        function toggleConfig() {{
+            var element = document.getElementById('config-details');
+            var button = document.getElementById('config-toggle-btn');
+            if (element.style.display === 'none' || element.style.display === '') {{
+                element.style.display = 'block';
+                button.textContent = 'Hide Configuration';
+            }} else {{
+                element.style.display = 'none';
+                button.textContent = 'Show Configuration';
+            }}
+        }}
+    </script>
 </head>
 <body>
-    <h1>GNN Simulation Videos - Model {timestamp}</h1>
-        
-    <div class="stats">
-        <strong>Dataset Split:</strong> Episodes 0-{N_TRAIN-1} (Training) | Episodes {N_TRAIN}-{N_EPISODE-1} (Validation) | Ratio: {int(TRAIN_VALID_RATIO*100)}%-{int((1-TRAIN_VALID_RATIO)*100)}%
+    <h1>GNN Simulation Videos - Model {model_name}</h1>
+            
+    <button id="config-toggle-btn" class="config-toggle" onclick="toggleConfig()">Show Configuration</button>
+    <div id="config-details" class="config-section">
+        <h3>Model Configuration</h3>
+        <div class="config-content">
+            {config_html}
+        </div>
     </div>
 """
 
     # List all mp4 files in the model-specific video directory
-    videos_dir = f"data/video/{timestamp}"
+    videos_dir = f"data/video/{model_name}"
     
     if not os.path.exists(videos_dir):
         print(f"Error: Video directory '{videos_dir}' does not exist!")
-        print(f"Please run gnn_inference.py with model timestamp '{timestamp}' first.")
+        print(f"Please run gnn_inference.py with model name '{model_name}' first.")
         return
     
     video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
 
     if not video_files:
         print(f"No videos found in '{videos_dir}'")
-        print(f"Please run gnn_inference.py with model timestamp '{timestamp}' first.")
+        print(f"Please run gnn_inference.py with model name '{model_name}' first.")
         return
 
     # Separate videos into training and validation
@@ -184,7 +263,7 @@ def main():
     """
         
         for video_path, filename, episode_num in training_videos:
-            rel_video_path = os.path.join("video", timestamp, filename)
+            rel_video_path = os.path.join("..", "video", model_name, filename)
             html_content += f"""
                 <div class="case training-case">
                     <div class="case-name">Episode {episode_num}</div>
@@ -208,7 +287,7 @@ def main():
     """
         
         for video_path, filename, episode_num in validation_videos:
-            rel_video_path = os.path.join("video", timestamp, filename)
+            rel_video_path = os.path.join("..", "video", model_name, filename)
             html_content += f"""
                 <div class="case validation-case">
                     <div class="case-name">Episode {episode_num}</div>
@@ -230,14 +309,17 @@ def main():
 </html>
 """
 
-    # Save HTML file in model-specific directory
-    output_path = f"data/{timestamp}_videos.html"
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    # Save HTML file in data/html directory
+    html_dir = "data/html"
+    os.makedirs(html_dir, exist_ok=True)
+    output_path = os.path.join(html_dir, f"{model_name}_videos.html")
+    
     with open(output_path, "w") as file:
         file.write(html_content)
 
     print(f"HTML file saved to {output_path}")
-    print(f"Model timestamp: {timestamp}")
+    print(f"Model name: {model_name}")
+    print(f"Model directory: {model_dir}")
     print(f"Training videos: {len(training_videos)}")
     print(f"Validation videos: {len(validation_videos)}")
     if training_videos:

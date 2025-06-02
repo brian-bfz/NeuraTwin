@@ -68,7 +68,7 @@ class ParticleDataset(Dataset):
     def _get_hdf5_file(self):
         """Lazy loading of HDF5 file handle to work properly with multiprocessing."""
         if self._hdf5_file is None:
-            self._hdf5_file = h5py.File(self.hdf5_path, 'r')
+            self._hdf5_file = h5py.File(self.hdf5_path, 'r', swmr=True)
         return self._hdf5_file
 
     def __del__(self):

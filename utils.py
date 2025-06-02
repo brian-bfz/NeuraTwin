@@ -157,7 +157,7 @@ def preprocess_action_repeat_tensor(act, width=32, height=32, pos_enc=None):
 
 
 
-def get_current_YYYY_MM_DD_hh_mm_ss_ms():
+def YYYY_MM_DD_hh_mm_ss_ms():
     """
     Returns a string identifying the current:
     - year, month, day, hour, minute, second
