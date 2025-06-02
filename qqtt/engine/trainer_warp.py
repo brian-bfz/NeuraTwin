@@ -1843,10 +1843,6 @@ class InvPhyTrainerWarp:
         collide_object_fric = checkpoint["collide_object_fric"]
         num_object_springs = checkpoint["num_object_springs"]
 
-        assert (
-            len(spring_Y) == self.simulator.n_springs
-        ), "Check if the loaded checkpoint match the config file to connect the springs"
-
         spring_Y = spring_Y[: self.num_object_springs]
         self.init_springs = self.init_springs[: self.num_object_springs]
         self.init_rest_lengths = self.init_rest_lengths[: self.num_object_springs]
@@ -1885,6 +1881,10 @@ class InvPhyTrainerWarp:
             static_meshes=self.dynamic_meshes + self.static_meshes,
             dynamic_points=self.dynamic_points,
         )
+
+        assert (
+            len(spring_Y) == self.simulator.n_springs
+        ), "Check if the loaded checkpoint match the config file to connect the springs"
 
         self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
         self.simulator.set_collide(
