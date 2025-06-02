@@ -2,14 +2,7 @@ import glob
 import os
 import re
 import yaml
-# Configuration from training pipeline
-config_path = "config/train/gnn_dyn.yaml"
-with open(config_path, "r") as file:
-    config = yaml.safe_load(file)
-
-N_EPISODE = config['dataset']['n_episode']
-TRAIN_VALID_RATIO = config['train']['train_valid_ratio']
-N_TRAIN = int(N_EPISODE * TRAIN_VALID_RATIO)
+import argparse
 
 def extract_episode_number(filename):
     """Extract episode number from filename like 'prediction_3.mp4'"""
@@ -18,48 +11,66 @@ def extract_episode_number(filename):
         return int(match.group(1))
     return None
 
-# HTML 头部
-html_content = """
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Generate HTML page for GNN simulation videos')
+    parser.add_argument('--timestamp', type=str, required=True,
+                       help='Model timestamp to display (e.g., 2025-05-31-21-01-09-427982)')
+    args = parser.parse_args()
+    
+    timestamp = args.timestamp
+    
+    # Configuration from training pipeline
+    config_path = "config/train/gnn_dyn.yaml"
+    with open(config_path, "r") as file:
+        config = yaml.safe_load(file)
+
+    N_EPISODE = config['dataset']['n_episode']
+    TRAIN_VALID_RATIO = config['train']['train_valid_ratio']
+    N_TRAIN = int(N_EPISODE * TRAIN_VALID_RATIO)
+
+    # HTML 头部
+    html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GNN Simulation Videos - Training vs Validation</title>
+    <title>GNN Simulation Videos - Model {timestamp}</title>
     <style>
-        body {
+        body {{
             font-family: Arial, sans-serif;
             margin: 20px;
             background-color: #f9f9f9;
             color: #333;
-        }
-        h1 {
+        }}
+        h1 {{
             text-align: center;
             margin-bottom: 20px;
             color: #2c3e50;
-        }
-        h2 {
+        }}
+        h2 {{
             text-align: center;
             margin: 30px 0 20px 0;
             padding: 10px;
             border-radius: 5px;
-        }
-        .training {
+        }}
+        .training {{
             background-color: #e8f5e8;
             color: #2d5a2d;
-        }
-        .validation {
+        }}
+        .validation {{
             background-color: #e8f0ff;
             color: #1a4480;
-        }
-        .container {
+        }}
+        .container {{
             display: flex;
             flex-wrap: wrap;
             gap: 20px;
             justify-content: flex-start;
             margin-bottom: 40px;
-        }
-        .case {
+        }}
+        .case {{
             background-color: #fff;
             border: 1px solid #ddd;
             padding: 10px;
@@ -69,145 +80,170 @@ html_content = """
             margin-bottom: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .training-case {
+        }}
+        .training-case {{
             border-left: 4px solid #4caf50;
-        }
-        .validation-case {
+        }}
+        .validation-case {{
             border-left: 4px solid #2196f3;
-        }
-        .videos {
+        }}
+        .videos {{
             display: flex;
             justify-content: center;
             gap: 10px;
             width: 100%;
-        }
-        .video-container {
+        }}
+        .video-container {{
             width: 100%;
             text-align: center;
-        }
-        video {
+        }}
+        video {{
             width: 100%;
             border: 1px solid #ddd;
             border-radius: 4px;
-        }
-        .case-name {
+        }}
+        .case-name {{
             margin-top: 10px;
             font-weight: bold;
             font-size: 1.1em;
             color: #2c3e50;
-        }
-        .episode-type {
+        }}
+        .episode-type {{
             font-size: 0.9em;
             margin-bottom: 10px;
             padding: 4px 8px;
             border-radius: 12px;
             display: inline-block;
-        }
-        .stats {
+        }}
+        .stats {{
             background-color: #fff;
             padding: 15px;
             margin: 20px 0;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             text-align: center;
-        }
+        }}
+        .model-info {{
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            color: #856404;
+        }}
     </style>
 </head>
 <body>
-    <h1>GNN Simulation Videos - Training vs Validation Split</h1>
-    
+    <h1>GNN Simulation Videos - Model {timestamp}</h1>
+        
     <div class="stats">
-        <strong>Dataset Split:</strong> Episodes 0-21 (Training) | Episodes 22-24 (Validation) | Ratio: 90%-10%
+        <strong>Dataset Split:</strong> Episodes 0-{N_TRAIN-1} (Training) | Episodes {N_TRAIN}-{N_EPISODE-1} (Validation) | Ratio: {int(TRAIN_VALID_RATIO*100)}%-{int((1-TRAIN_VALID_RATIO)*100)}%
     </div>
 """
 
-# List all mp4 files in data/video
-videos_dir = "data/video"
-os.makedirs(videos_dir, exist_ok=True)
-video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
-
-# Separate videos into training and validation
-training_videos = []
-validation_videos = []
-
-for video_path in video_files:
-    filename = os.path.basename(video_path)
-    episode_num = extract_episode_number(filename)
+    # List all mp4 files in the model-specific video directory
+    videos_dir = f"data/video/{timestamp}"
     
-    if episode_num is not None:
-        if episode_num < N_TRAIN:  # Episodes 0-21
-            training_videos.append((video_path, filename, episode_num))
-        else:  # Episodes 22-24
-            validation_videos.append((video_path, filename, episode_num))
-
-# Sort by episode number
-training_videos.sort(key=lambda x: x[2])
-validation_videos.sort(key=lambda x: x[2])
-
-# Add training videos section
-if training_videos:
-    html_content += f"""
-    <h2 class="training">🎯 Training Episodes (0-{N_TRAIN-1}) - {len(training_videos)} videos</h2>
-    <div class="container">
-"""
+    if not os.path.exists(videos_dir):
+        print(f"Error: Video directory '{videos_dir}' does not exist!")
+        print(f"Please run gnn_inference.py with model timestamp '{timestamp}' first.")
+        return
     
-    for video_path, filename, episode_num in training_videos:
-        rel_video_path = os.path.join("video", filename)
+    video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
+
+    if not video_files:
+        print(f"No videos found in '{videos_dir}'")
+        print(f"Please run gnn_inference.py with model timestamp '{timestamp}' first.")
+        return
+
+    # Separate videos into training and validation
+    training_videos = []
+    validation_videos = []
+
+    for video_path in video_files:
+        filename = os.path.basename(video_path)
+        episode_num = extract_episode_number(filename)
+        
+        if episode_num is not None:
+            if episode_num < N_TRAIN:  # Episodes 0-21
+                training_videos.append((video_path, filename, episode_num))
+            else:  # Episodes 22-24
+                validation_videos.append((video_path, filename, episode_num))
+
+    # Sort by episode number
+    training_videos.sort(key=lambda x: x[2])
+    validation_videos.sort(key=lambda x: x[2])
+
+    # Add training videos section
+    if training_videos:
         html_content += f"""
-            <div class="case training-case">
-                <div class="case-name">Episode {episode_num}</div>
-                <div class="videos">
-                    <div class="video-container">
-                        <video src="{rel_video_path}" controls autoplay muted loop></video>
-`                    </div>
-                </div>
-            </div>
+        <h2 class="training">🎯 Training Episodes (0-{N_TRAIN-1}) - {len(training_videos)} videos</h2>
+        <div class="container">
     """
-    
-    html_content += """
-    </div>
-"""
-
-# Add validation videos section  
-if validation_videos:
-    html_content += f"""
-    <h2 class="validation">📊 Validation Episodes ({N_TRAIN}-{N_EPISODE-1}) - {len(validation_videos)} videos</h2>
-    <div class="container">
-"""
-    
-    for video_path, filename, episode_num in validation_videos:
-        rel_video_path = os.path.join("video", filename)
-        html_content += f"""
-            <div class="case validation-case">
-                <div class="case-name">Episode {episode_num}</div>
-                <div class="videos">
-                    <div class="video-container">
-                        <video src="{rel_video_path}" controls autoplay muted loop></video>
+        
+        for video_path, filename, episode_num in training_videos:
+            rel_video_path = os.path.join("video", timestamp, filename)
+            html_content += f"""
+                <div class="case training-case">
+                    <div class="case-name">Episode {episode_num}</div>
+                    <div class="videos">
+                        <div class="video-container">
+                            <video src="{rel_video_path}" controls autoplay muted loop></video>
+                        </div>
                     </div>
                 </div>
-            </div>
+        """
+        
+        html_content += """
+        </div>
     """
-    
-    html_content += """
-    </div>
-"""
 
-# End of the HTML structure
-html_content += """
+    # Add validation videos section  
+    if validation_videos:
+        html_content += f"""
+        <h2 class="validation">📊 Validation Episodes ({N_TRAIN}-{N_EPISODE-1}) - {len(validation_videos)} videos</h2>
+        <div class="container">
+    """
+        
+        for video_path, filename, episode_num in validation_videos:
+            rel_video_path = os.path.join("video", timestamp, filename)
+            html_content += f"""
+                <div class="case validation-case">
+                    <div class="case-name">Episode {episode_num}</div>
+                    <div class="videos">
+                        <div class="video-container">
+                            <video src="{rel_video_path}" controls autoplay muted loop></video>
+                        </div>
+                    </div>
+                </div>
+        """
+        
+        html_content += """
+        </div>
+    """
+
+    # End of the HTML structure
+    html_content += """
 </body>
 </html>
 """
 
-output_path = "data/index.html"
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
-with open(output_path, "w") as file:
-    file.write(html_content)
+    # Save HTML file in model-specific directory
+    output_path = f"data/{timestamp}_videos.html"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as file:
+        file.write(html_content)
 
-print(f"HTML file saved to {output_path}")
-print(f"Training videos: {len(training_videos)}")
-print(f"Validation videos: {len(validation_videos)}")
-if training_videos:
-    print(f"Training episodes: {[v[2] for v in training_videos]}")
-if validation_videos:
-    print(f"Validation episodes: {[v[2] for v in validation_videos]}")
+    print(f"HTML file saved to {output_path}")
+    print(f"Model timestamp: {timestamp}")
+    print(f"Training videos: {len(training_videos)}")
+    print(f"Validation videos: {len(validation_videos)}")
+    if training_videos:
+        print(f"Training episodes: {[v[2] for v in training_videos]}")
+    if validation_videos:
+        print(f"Validation episodes: {[v[2] for v in validation_videos]}")
+
+if __name__ == "__main__":
+    main()

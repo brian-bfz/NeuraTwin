@@ -16,16 +16,21 @@ dataset:
   headless: True
   cont_motion: False
   robot_type: 'franka' # kinova; franka
+  randomness: 
+    use: True
+    state_noise:
+      train: 0.002
+      valid: 0.0
 
 train:
   data_root: "../test/PhysTwin/generated_data"
   random_seed: 42
-  n_epoch: 500
+  n_epoch: 300
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 64
   nf_hidden: 64
-  num_workers: 24
+  num_workers: 16
   train_valid_ratio: 0.9
   log_per_iter: 50
   ckp_per_iter: 1000

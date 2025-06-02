@@ -155,11 +155,7 @@ class ObjectMotionPredictor:
         render_option = vis.get_render_option()
         render_option.point_size = 10.0
         
-        # Create point clouds
-        pred_pcd = o3d.geometry.PointCloud()
-        pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0].numpy())
-        pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Blue for predicted
-            
+        # Create point clouds            
         actual_pcd = o3d.geometry.PointCloud()
         actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0].numpy())
         actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Red for actual
@@ -168,6 +164,10 @@ class ObjectMotionPredictor:
         robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0].numpy())
         robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
         
+        pred_pcd = o3d.geometry.PointCloud()
+        pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0].numpy())
+        pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Blue for predicted
+
         # Full ground truth object point cloud (yellow in BGR: [0, 1, 1])
         # full_gt_pcd = o3d.geometry.PointCloud()
         # full_gt_pcd.points = o3d.utility.Vector3dVector(full_objects[0].numpy())
@@ -175,9 +175,9 @@ class ObjectMotionPredictor:
 
         # Add full GT first so it appears at the bottom
         # vis.add_geometry(full_gt_pcd)
-        vis.add_geometry(pred_pcd)
         vis.add_geometry(actual_pcd)
         vis.add_geometry(robot_pcd)
+        vis.add_geometry(pred_pcd)
 
         n_frames = min(len(predicted_objects), len(actual_objects), len(full_objects))
         print(f"Rendering {n_frames} frames...")
@@ -301,13 +301,13 @@ def main():
     
     # Configuration
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=str, default="data/gnn_dyn_model/2025-05-31-21-01-09-427982/net_best.pth")
+    parser.add_argument("--timestamp", type=str, default="2025-05-31-21-01-09-427982")
     parser.add_argument("--camera_calib_path", type=str, default="data/single_push_rope")
     parser.add_argument("--test_episodes", nargs='+', type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--data_root", type=str, default="../test/PhysTwin/generated_data")
     args = parser.parse_args()
     
-    model_path = args.model_path
+    model_path = f"data/gnn_dyn_model/{args.timestamp}/net_best.pth"
     config_path = "config/train/gnn_dyn.yaml"
     data_root = args.data_root
     camera_calib_path = args.camera_calib_path
@@ -346,8 +346,7 @@ def main():
             print(f"  RMSE: {np.sqrt(avg_error):.6f}")
             print(f"  Timesteps predicted: {len(errors)}")
             
-            # Create visualization
-            video_path = f"data/video/prediction_{episode_num}.mp4"
+            video_path = f"data/video/{args.timestamp}/prediction_{episode_num}.mp4"
             predictor.visualize_object_motion(
                 predicted_objects, actual_objects, robot_trajectory, 
                 full_object_trajectory, episode_num, video_path
@@ -381,7 +380,7 @@ def main():
         else:
             print("❌ Poor prediction accuracy - model needs improvement")
         
-        print(f"\nVideos saved in 'data/video/' directory")
+        print(f"\nVideos saved in 'data/video/{args.timestamp}' directory")
 
 if __name__ == "__main__":
     main()
