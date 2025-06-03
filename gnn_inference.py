@@ -116,10 +116,7 @@ class ObjectMotionPredictor:
             
             object_predictions.append(next_object_pos)
             current_object_pos = next_object_pos
-            
-            if t % 10 == 0:
-                print(f"  Predicted timestep {t+1}/{robot_trajectory.shape[0]-1}")
-        
+                    
         return torch.stack(object_predictions)
     
     def calculate_prediction_error(self, predicted_objects, actual_objects):
@@ -296,6 +293,39 @@ class ObjectMotionPredictor:
         print(f"Video saved to: {save_path}")
         return save_path
 
+def parse_episodes(episodes_arg):
+    """
+    Parse episode specification that supports two formats:
+    1. Space-separated list: ['0', '1', '2', '3', '4'] -> [0, 1, 2, 3, 4]
+    2. Range format: ['0-4'] -> [0, 1, 2, 3, 4] (inclusive)
+    
+    Args:
+        episodes_arg: List of strings from argparse
+    
+    Returns:
+        List of episode numbers
+    """
+    if len(episodes_arg) == 1 and '-' in episodes_arg[0]:
+        # Range format: "0-4"
+        try:
+            start, end = episodes_arg[0].split('-')
+            start, end = int(start), int(end)
+            if start > end:
+                raise ValueError(f"Invalid range: start ({start}) > end ({end})")
+            episodes = list(range(start, end + 1))  # inclusive
+            print(f"Using episode range: {start} to {end} (inclusive) -> {episodes}")
+            return episodes
+        except ValueError as e:
+            raise ValueError(f"Invalid range format '{episodes_arg[0]}': {e}")
+    else:
+        # Space-separated list: ["0", "1", "2", "3", "4"]
+        try:
+            episodes = [int(ep) for ep in episodes_arg]
+            print(f"Using explicit episode list: {episodes}")
+            return episodes
+        except ValueError as e:
+            raise ValueError(f"Invalid episode numbers: {e}")
+
 def main():
     """Main function to test object motion prediction"""
     
@@ -304,15 +334,27 @@ def main():
     parser.add_argument("--name", type=str, default="2025-05-31-21-01-09-427982",
                        help="Model name (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)")
     parser.add_argument("--camera_calib_path", type=str, default="data/single_push_rope")
-    parser.add_argument("--test_episodes", nargs='+', type=int, default=[0, 1, 2, 3, 4])
+    parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
+                       help="Episodes to test. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--data_root", type=str, default="../test/PhysTwin/generated_data")
+    parser.add_argument("--video", action='store_true',
+                       help="Generate visualization videos (optional)")
     args = parser.parse_args()
+    
+    # Parse episodes from the flexible input format
+    try:
+        test_episodes = parse_episodes(args.episodes)
+    except ValueError as e:
+        print(f"Error parsing episodes: {e}")
+        print("Examples:")
+        print("  Space-separated: --episodes 0 1 2 3 4")
+        print("  Range format: --episodes 0-4")
+        return
     
     model_path = f"data/gnn_dyn_model/{args.name}/net_best.pth"
     config_path = "config/train/gnn_dyn.yaml"
     data_root = args.data_root
     camera_calib_path = args.camera_calib_path
-    test_episodes = args.test_episodes
     
     # Initialize predictor with camera calibration
     predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path, data_root)
@@ -321,6 +363,7 @@ def main():
     print("OBJECT MOTION PREDICTION TEST")
     print("="*60)
     print(f"Testing episodes: {test_episodes}")
+    print(f"Video generation: {'Enabled' if args.video else 'Disabled'}")
     
     all_errors = []
     
@@ -342,16 +385,15 @@ def main():
             all_errors.extend(errors)
             
             avg_error = np.mean(errors)
-            print(f"\nEpisode {episode_num} Results:")
-            print(f"  Average MSE: {avg_error:.6f}")
-            print(f"  RMSE: {np.sqrt(avg_error):.6f}")
-            print(f"  Timesteps predicted: {len(errors)}")
+            print(f"Average MSE: {avg_error:.6f} | RMSE: {np.sqrt(avg_error):.6f} | Timesteps predicted: {len(errors)}")
             
-            video_path = f"data/video/{args.name}/prediction_{episode_num}.mp4"
-            predictor.visualize_object_motion(
-                predicted_objects, actual_objects, robot_trajectory, 
-                full_object_trajectory, episode_num, video_path
-            )
+            # Generate video only if --video flag is provided
+            if args.video:
+                video_path = f"data/video/{args.name}/prediction_{episode_num}.mp4"
+                predictor.visualize_object_motion(
+                    predicted_objects, actual_objects, robot_trajectory, 
+                    full_object_trajectory, episode_num, video_path
+                )
             
         except Exception as e:
             print(f"Error processing episode {episode_num}: {e}")
@@ -381,7 +423,10 @@ def main():
         else:
             print("❌ Poor prediction accuracy - model needs improvement")
         
-        print(f"\nVideos saved in 'data/video/{args.name}' directory")
+        if args.video:
+            print(f"\nVideos saved in 'data/video/{args.name}' directory")
+        else:
+            print(f"\nTo generate videos, rerun with --video flag")
 
 if __name__ == "__main__":
     main()
