@@ -191,7 +191,9 @@ class ParticleDataset(Dataset):
         # Combine sampled particles: [object_particles, robot_particles]
         states = torch.cat([sampled_object_states, sampled_robot_states], dim=1)  # [time, total_sampled, 3]
         if self.add_randomness:
-            states[:self.n_his] = states[:self.n_his] + torch.randn_like(states[:self.n_his]) * self.state_noise
+            noise = torch.randn_like(states[:self.n_his]) * self.state_noise
+            noise = torch.clamp(noise, -0.015, 0.015)
+            states[:self.n_his] = states[:self.n_his] + noise
         
         # Calculate states_delta using tensor operations
         states_delta = torch.zeros(n_frames - 1, particle_num, 3)

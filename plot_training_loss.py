@@ -116,7 +116,7 @@ def plot_training_curves(epochs, train_losses, valid_losses, best_valid_losses,
     Plot training and validation loss curves
     """
     
-    plt.figure(figsize=(15, 6))
+    plt.figure(figsize=(9, 6))
     
     plt.plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
     plt.plot(epochs, valid_losses, 'r-', label='Validation Loss', linewidth=2)

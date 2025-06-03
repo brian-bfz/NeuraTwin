@@ -19,14 +19,14 @@ dataset:
   randomness: 
     use: True
     state_noise:
-      train: 0.005
+      train: 0.001
       valid: 0.0
   downsample_dist: 0.014
 
 train:
   data_root: "../test/PhysTwin/generated_data"
   random_seed: 42
-  n_epoch: 500
+  n_epoch: 300
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 64
@@ -52,10 +52,10 @@ train:
   particle:
     nf_effect: 64
     resume:
-      active: True
-      epoch: 299
+      active: true
+      epoch: 199
       iter: 0
-      folder: 'N(0, 0.005) noise'
+      folder: 'N(0, 0.005) noise (copy)'
     adj_thresh: 0.05
     add_delta: False
     connect_tools_all: True  # Connect all tool particles to all object particles regardless of distance
