@@ -116,36 +116,25 @@ def plot_training_curves(epochs, train_losses, valid_losses, best_valid_losses,
     Plot training and validation loss curves
     """
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    plt.figure(figsize=(15, 6))
     
-    # Plot 1: Training and Validation Loss
-    ax1.plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
-    ax1.plot(epochs, valid_losses, 'r-', label='Validation Loss', linewidth=2)
-    ax1.plot(epochs, best_valid_losses, 'g--', label='Best Validation Loss', linewidth=1, alpha=0.7)
+    plt.plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
+    plt.plot(epochs, valid_losses, 'r-', label='Validation Loss', linewidth=2)
+    plt.plot(epochs, best_valid_losses, 'g--', label='Best Validation Loss', linewidth=1, alpha=0.7)
     
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Loss (RMSE)')
-    ax1.set_title(f'Training Progress - Model {model_name}')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_yscale('log')  # Log scale for better visualization
-    
-    # Plot 2: Validation Loss (zoomed)
-    ax2.plot(epochs, valid_losses, 'r-', label='Validation Loss', linewidth=2)
-    ax2.plot(epochs, best_valid_losses, 'g--', label='Best Validation Loss', linewidth=2)
-    
-    ax2.set_xlabel('Epoch')
-    ax2.set_ylabel('Validation Loss (RMSE)')
-    ax2.set_title(f'Validation Loss Detail - Model {model_name}')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (RMSE)')
+    plt.title(f'Training Progress - Model {model_name}')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.yscale('log')  # Log scale for better visualization
+        
     # Find best epoch
     best_epoch = epochs[np.argmin(valid_losses)]
     best_loss = min(valid_losses)
     
     # Add annotation for best model
-    ax2.annotate(f'Best: Epoch {best_epoch}\nLoss: {best_loss:.6f}', 
+    plt.annotate(f'Best: Epoch {best_epoch}\nLoss: {best_loss:.6f}', 
                 xy=(best_epoch, best_loss), 
                 xytext=(best_epoch + len(epochs)*0.1, best_loss + (max(valid_losses) - min(valid_losses))*0.1),
                 arrowprops=dict(arrowstyle='->', color='red', alpha=0.7),
