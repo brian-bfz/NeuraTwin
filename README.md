@@ -173,10 +173,7 @@ python visualize_render_results.py
 
 ### Data Processing from Raw Videos
 The original data in each case only includes `color`, `depth`, `calibrate.pkl`, `metadata.json`. All other data are processed as below to get, including the projection, tracking and shape priors.
-<<<<<<< HEAD
-=======
 (Note: Be aware of the conflict in the diff-gaussian-rasterization library between Gaussian Splatting and Trellis. For data processing, you don't need to install the gaussian splatting; ignore the last section in env_install.sh)
->>>>>>> upstream/main
 ```
 # Process the data
 python script_process_data.py
@@ -188,8 +185,6 @@ python export_gaussian_data.py
 python export_video_human_mask.py
 ```
 
-<<<<<<< HEAD
-=======
 ### Control Force Visualization
 Visualize the force applied by the hand to the object as inferred from our PhysTwin model, based solely on video data.
 ```
@@ -230,7 +225,6 @@ python interactive_playground.py --n_ctrl_parts 1 --case_name single_push_rope_1
 python interactive_playground.py --n_ctrl_parts 2 --case_name double_stretch_sloth --n_dup 2
 ```
 
->>>>>>> upstream/main
 ### Follow-up and Potential Collaborations  
 If you are interested in collaborating or extending this work for your research, feel free to contact us at `hanxiao.jiang@columbia.edu`.  
 
