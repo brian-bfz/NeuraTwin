@@ -40,6 +40,7 @@ If you use this code for your research, please cite:
 
 ### Create conda environment
 `conda env create -f env.yaml && conda activate dyn-res-pile-manip`
+`conda install -c conda-forge opencv` as the pip version doesn't have have an avc1 encoder
 
 ### Install PyFleX
 Run `bash scripts/install_pyflex.sh`. You may need to `source ~/.bashrc` to `import PyFleX`.  

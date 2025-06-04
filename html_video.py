@@ -27,14 +27,14 @@ def format_config_for_html(config, indent=0):
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Generate HTML page for GNN simulation videos')
-    parser.add_argument('--name', type=str, required=True,
+    parser.add_argument('--model', type=str, required=True,
                        help='Model name to display (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)')
     args = parser.parse_args()
     
-    model_name = args.name
+    model = args.model
     
     # Use model-specific configuration
-    model_dir = f"data/gnn_dyn_model/{model_name}"
+    model_dir = f"data/gnn_dyn_model/{model}"
     config_path = os.path.join(model_dir, "config.yaml")
     
     if not os.path.exists(config_path):
@@ -59,7 +59,7 @@ def main():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GNN Simulation Videos - Model {model_name}</title>
+    <title>GNN Simulation Videos - Model {model}</title>
     <style>
         body {{
             font-family: Arial, sans-serif;
@@ -211,7 +211,7 @@ def main():
     </script>
 </head>
 <body>
-    <h1>GNN Simulation Videos - Model {model_name}</h1>
+    <h1>GNN Simulation Videos - Model {model}</h1>
             
     <button id="config-toggle-btn" class="config-toggle" onclick="toggleConfig()">Show Configuration</button>
     <div id="config-details" class="config-section">
@@ -223,18 +223,18 @@ def main():
 """
 
     # List all mp4 files in the model-specific video directory
-    videos_dir = f"data/video/{model_name}"
+    videos_dir = f"data/video/{model}"
     
     if not os.path.exists(videos_dir):
         print(f"Error: Video directory '{videos_dir}' does not exist!")
-        print(f"Please run gnn_inference.py with model name '{model_name}' first.")
+        print(f"Please run gnn_inference.py with model name '{model}' first.")
         return
     
     video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
 
     if not video_files:
         print(f"No videos found in '{videos_dir}'")
-        print(f"Please run gnn_inference.py with model name '{model_name}' first.")
+        print(f"Please run gnn_inference.py with model name '{model}' first.")
         return
 
     # Separate videos into training and validation
@@ -263,7 +263,7 @@ def main():
     """
         
         for video_path, filename, episode_num in training_videos:
-            rel_video_path = os.path.join("..", "video", model_name, filename)
+            rel_video_path = os.path.join("..", "video", model, filename)
             html_content += f"""
                 <div class="case training-case">
                     <div class="case-name">Episode {episode_num}</div>
@@ -287,7 +287,7 @@ def main():
     """
         
         for video_path, filename, episode_num in validation_videos:
-            rel_video_path = os.path.join("..", "video", model_name, filename)
+            rel_video_path = os.path.join("..", "video", model, filename)
             html_content += f"""
                 <div class="case validation-case">
                     <div class="case-name">Episode {episode_num}</div>
@@ -312,13 +312,13 @@ def main():
     # Save HTML file in data/html directory
     html_dir = "data/html"
     os.makedirs(html_dir, exist_ok=True)
-    output_path = os.path.join(html_dir, f"{model_name}_videos.html")
+    output_path = os.path.join(html_dir, f"{model}_videos.html")
     
     with open(output_path, "w") as file:
         file.write(html_content)
 
     print(f"HTML file saved to {output_path}")
-    print(f"Model name: {model_name}")
+    print(f"Model name: {model}")
     print(f"Model directory: {model_dir}")
     print(f"Training videos: {len(training_videos)}")
     print(f"Validation videos: {len(validation_videos)}")

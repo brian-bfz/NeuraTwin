@@ -331,12 +331,12 @@ def main():
     
     # Configuration
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name", type=str, default="2025-05-31-21-01-09-427982",
+    parser.add_argument("--model", type=str, default="2025-05-31-21-01-09-427982",
                        help="Model name (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)")
     parser.add_argument("--camera_calib_path", type=str, default="data/single_push_rope")
     parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
                        help="Episodes to test. Format: space-separated list (0 1 2 3 4) or range (0-4)")
-    parser.add_argument("--data_root", type=str, default="../test/PhysTwin/generated_data")
+    parser.add_argument("--data_root", type=str, default="../PhysTwin/generated_data")
     parser.add_argument("--video", action='store_true',
                        help="Generate visualization videos (optional)")
     args = parser.parse_args()
@@ -351,7 +351,7 @@ def main():
         print("  Range format: --episodes 0-4")
         return
     
-    model_path = f"data/gnn_dyn_model/{args.name}/net_best.pth"
+    model_path = f"data/gnn_dyn_model/{args.model}/net_best.pth"
     config_path = "config/train/gnn_dyn.yaml"
     data_root = args.data_root
     camera_calib_path = args.camera_calib_path
@@ -389,7 +389,7 @@ def main():
             
             # Generate video only if --video flag is provided
             if args.video:
-                video_path = f"data/video/{args.name}/prediction_{episode_num}.mp4"
+                video_path = f"data/video/{args.model}/prediction_{episode_num}.mp4"
                 predictor.visualize_object_motion(
                     predicted_objects, actual_objects, robot_trajectory, 
                     full_object_trajectory, episode_num, video_path
@@ -424,7 +424,7 @@ def main():
             print("❌ Poor prediction accuracy - model needs improvement")
         
         if args.video:
-            print(f"\nVideos saved in 'data/video/{args.name}' directory")
+            print(f"\nVideos saved in 'data/video/{args.model}' directory")
         else:
             print(f"\nTo generate videos, rerun with --video flag")
 

@@ -24,7 +24,7 @@ dataset:
   downsample_dist: 0.014
 
 train:
-  data_root: "../test/PhysTwin/generated_data"
+  data_root: "../PhysTwin/generated_data"
   random_seed: 42
   n_epoch: 300
   lr: 0.001
