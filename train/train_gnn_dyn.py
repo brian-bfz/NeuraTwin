@@ -5,108 +5,17 @@ import cv2
 import numpy as np
 import json
 import random
-import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-
+from timer import EpochTimer
 import matplotlib.pyplot as plt
 
 from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
 from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms
 
-class EpochTimer:
-    """Simple timer for tracking epoch-level performance"""
-    def __init__(self):
-        self.reset()
-    
-    def reset(self):
-        self.data_loading_time = 0.0
-        self.forward_time = 0.0
-        self.backward_time = 0.0
-        self.total_time = 0.0
-        self.gpu_memory_peak = 0.0
-    
-    def start_epoch(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.epoch_start = time.perf_counter()
-        self.reset()
-    
-    def end_epoch(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.total_time = time.perf_counter() - self.epoch_start
-        if torch.cuda.is_available():
-            self.gpu_memory_peak = torch.cuda.max_memory_allocated() / 1024 / 1024  # MB
-    
-    def time_data_loading(self):
-        return DataLoadingTimer(self)
-    
-    def time_forward(self):
-        return ForwardTimer(self)
-    
-    def time_backward(self):
-        return BackwardTimer(self)
-    
-    def get_summary(self):
-        return {
-            'total_time': self.total_time,
-            'data_loading_time': self.data_loading_time,
-            'forward_time': self.forward_time,
-            'backward_time': self.backward_time,
-            'gpu_memory_peak_mb': self.gpu_memory_peak,
-            'data_loading_pct': (self.data_loading_time / self.total_time) * 100 if self.total_time > 0 else 0,
-            'forward_pct': (self.forward_time / self.total_time) * 100 if self.total_time > 0 else 0,
-            'backward_pct': (self.backward_time / self.total_time) * 100 if self.total_time > 0 else 0,
-        }
-
-class DataLoadingTimer:
-    def __init__(self, epoch_timer):
-        self.epoch_timer = epoch_timer
-    
-    def __enter__(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.start = time.perf_counter()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.epoch_timer.data_loading_time += time.perf_counter() - self.start
-
-class ForwardTimer:
-    def __init__(self, epoch_timer):
-        self.epoch_timer = epoch_timer
-    
-    def __enter__(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.start = time.perf_counter()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.epoch_timer.forward_time += time.perf_counter() - self.start
-
-class BackwardTimer:
-    def __init__(self, epoch_timer):
-        self.epoch_timer = epoch_timer
-    
-    def __enter__(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.start = time.perf_counter()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self.epoch_timer.backward_time += time.perf_counter() - self.start
 
 # from env.flex_env import FlexEnv
 
@@ -247,12 +156,12 @@ def train():
             if epoch_timer and phase == 'train':
                 epoch_timer.start_epoch()
 
-            for i, data in enumerate(dataloaders[phase]):
+            # Time data loading
+            if epoch_timer and phase == 'train':
+                data_timer = epoch_timer.time_data_loading()
+                data_timer.__enter__()
 
-                # Time data loading
-                if epoch_timer and phase == 'train':
-                    data_timer = epoch_timer.time_data_loading()
-                    data_timer.__enter__()
+            for i, data in enumerate(dataloaders[phase]):
 
                 # states: B x (n_his + n_roll) x (particles_num + pusher_num) x 3
                 # attrs: B x (n_his + n_roll) x (particles_num + pusher_num)
@@ -352,17 +261,29 @@ def train():
 
                 if phase == 'train' and i % ckp_per_iter == 0:
                     torch.save(model.state_dict(), '%s/net_epoch_%d_iter_%d.pth' % (TRAIN_DIR, epoch, i))
+                
+                                # Time data loading
+                if epoch_timer and phase == 'train':
+                    data_timer = epoch_timer.time_data_loading()
+                    data_timer.__enter__()
 
+            # End data loading timing
+            if epoch_timer and phase == 'train':
+                data_timer.__exit__(None, None, None)
 
             # End epoch timing and log profiling info
             if epoch_timer and phase == 'train':
                 epoch_timer.end_epoch()
                 timing_summary = epoch_timer.get_summary()
+                timing_summary['fps_time'] = datasets['train'].fps_times
                 
                 # Log timing breakdown
                 timing_log = f'PROFILING [Epoch {epoch}] Total: {timing_summary["total_time"]:.2f}s | ' \
                            f'Data: {timing_summary["data_loading_time"]:.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
+                           f'Get Item: {datasets["train"].total_times:.2f}s | ' \
+                           f'FPS: {timing_summary["fps_time"]:.2f}s ({timing_summary["fps_pct"]:.1f}%) | ' \
                            f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
+                           f'Edges: {timing_summary["edge_time"]:.2f}s ({timing_summary["edge_pct"]:.1f}%) | ' \
                            f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
                            f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB'
                 

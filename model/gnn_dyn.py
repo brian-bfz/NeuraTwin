@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import time
 
 def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
     """
@@ -37,7 +38,9 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     tool_mask_1 = tool_mask[:, :, None].repeat(1, 1, N)
     tool_mask_2 = tool_mask[:, None, :].repeat(1, N, 1)
     tool_mask_12 = tool_mask_1 * tool_mask_2
+    obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
     dis[tool_mask_12] = 1e10  # avoid tool to tool relations
+    dis[obj_tool_mask_1] = 1e10 # avoid object to tool connections
 
     adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
 
@@ -377,6 +380,11 @@ class PropNetDiffDenModel(nn.Module):
         
         # Create tool mask (tool particles have attr=1, objects have attr=0)
         tool_mask = (a_cur > 0.5) & mask
+        
+        # Time edge construction
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        edge_start = time.perf_counter()
                 
         # Construct edges using efficient batch processing
         Rr_batch, Rs_batch = construct_edges_from_states_batch(
@@ -387,6 +395,16 @@ class PropNetDiffDenModel(nn.Module):
             topk=self.topk,
             connect_tools_all=self.connect_tools_all
         )
+        
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        edge_time = time.perf_counter() - edge_start
+        
+        # Store edge construction timing for profiling
+        if hasattr(self, '_edge_times'):
+            self._edge_times.append(edge_time)
+        elif not hasattr(self, '_edge_times'):
+            self._edge_times = [edge_time]
 
         s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch)
 

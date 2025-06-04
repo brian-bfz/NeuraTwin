@@ -65,6 +65,9 @@ class ParticleDataset(Dataset):
         # File handle for efficient access - will be opened lazily per worker
         self._hdf5_file = None
 
+        self.fps_times = 0
+        self.total_times = 0
+
     def _get_hdf5_file(self):
         """Lazy loading of HDF5 file handle to work properly with multiprocessing."""
         if self._hdf5_file is None:
@@ -143,6 +146,9 @@ class ParticleDataset(Dataset):
                 robot_sample_indices)
 
     def __getitem__(self, idx):
+        
+        total_time = time.perf_counter()
+
         # Calculate which episode and timestep this idx corresponds to
         offset = self.n_timestep - self.n_his - self.n_roll + 1
         idx_episode = idx // offset + self.epi_st_idx
@@ -154,8 +160,6 @@ class ParticleDataset(Dataset):
         
         # Get metadata
         n_frames = episode_group.attrs['n_frames']
-        n_obj_particles = episode_group.attrs['n_obj_particles'] 
-        n_bot_particles = episode_group.attrs['n_bot_particles']
         
         # Read object and robot datasets for the required time window
         time_end = idx_timestep + self.n_his + self.n_roll
@@ -171,9 +175,14 @@ class ParticleDataset(Dataset):
         first_robot = robot_data[0]    # [n_bot, 3]
         
         # FPS sampling using tensor indices directly (no cdist needed!)
+        fps_start = time.perf_counter()
+        
         sampled_object_indices = fps_rad_tensor(first_object, self.fps_radius)
         sampled_robot_indices = fps_rad_tensor(first_robot, self.fps_radius)
         
+        fps_time = time.perf_counter() - fps_start
+        self.fps_times += fps_time
+                
         n_sampled_object = sampled_object_indices.shape[0]
         n_sampled_robot = sampled_robot_indices.shape[0]
         particle_num = n_sampled_object + n_sampled_robot
@@ -214,6 +223,9 @@ class ParticleDataset(Dataset):
         states = states.float()
         states_delta = states_delta.float()
         attrs = attrs.float()
+        
+        total_time = time.perf_counter() - total_time
+        self.total_times += total_time
         
         return states, states_delta, attrs, particle_num
 
