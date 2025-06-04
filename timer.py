@@ -12,7 +12,6 @@ class EpochTimer:
         self.backward_time = 0.0
         self.total_time = 0.0
         self.gpu_memory_peak = 0.0
-        self.fps_time = 0.0
         self.edge_time = 0.0
     
     def start_epoch(self):
@@ -44,12 +43,10 @@ class EpochTimer:
             'forward_time': self.forward_time,
             'backward_time': self.backward_time,
             'gpu_memory_peak_mb': self.gpu_memory_peak,
-            'fps_time': self.fps_time,
             'edge_time': self.edge_time,
             'data_loading_pct': (self.data_loading_time / self.total_time) * 100 if self.total_time > 0 else 0,
             'forward_pct': (self.forward_time / self.total_time) * 100 if self.total_time > 0 else 0,
             'backward_pct': (self.backward_time / self.total_time) * 100 if self.total_time > 0 else 0,
-            'fps_pct': (self.fps_time / self.total_time) * 100 if self.total_time > 0 else 0,
             'edge_pct': (self.edge_time / self.total_time) * 100 if self.total_time > 0 else 0,
         }
 

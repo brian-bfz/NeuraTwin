@@ -274,14 +274,14 @@ def train():
             # End epoch timing and log profiling info
             if epoch_timer and phase == 'train':
                 epoch_timer.end_epoch()
+                if hasattr(model, '_edge_times'):
+                    epoch_timer.edge_time = sum(model._edge_times)
+                    model._edge_times = []
                 timing_summary = epoch_timer.get_summary()
-                timing_summary['fps_time'] = datasets['train'].fps_times
                 
                 # Log timing breakdown
                 timing_log = f'PROFILING [Epoch {epoch}] Total: {timing_summary["total_time"]:.2f}s | ' \
                            f'Data: {timing_summary["data_loading_time"]:.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
-                           f'Get Item: {datasets["train"].total_times:.2f}s | ' \
-                           f'FPS: {timing_summary["fps_time"]:.2f}s ({timing_summary["fps_pct"]:.1f}%) | ' \
                            f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
                            f'Edges: {timing_summary["edge_time"]:.2f}s ({timing_summary["edge_pct"]:.1f}%) | ' \
                            f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \

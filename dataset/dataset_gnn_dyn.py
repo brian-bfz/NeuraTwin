@@ -6,7 +6,6 @@ import pdb
 import pickle
 import json
 import random
-import time
 import h5py
 
 import torch
@@ -14,8 +13,6 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 # from env.flex_env import FlexEnv
-
-from scipy.spatial import KDTree
 from utils import load_yaml, set_seed, fps_rad_tensor, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
 
 import matplotlib.pyplot as plt
@@ -64,9 +61,6 @@ class ParticleDataset(Dataset):
         
         # File handle for efficient access - will be opened lazily per worker
         self._hdf5_file = None
-
-        self.fps_times = 0
-        self.total_times = 0
 
     def _get_hdf5_file(self):
         """Lazy loading of HDF5 file handle to work properly with multiprocessing."""
@@ -146,9 +140,6 @@ class ParticleDataset(Dataset):
                 robot_sample_indices)
 
     def __getitem__(self, idx):
-        
-        total_time = time.perf_counter()
-
         # Calculate which episode and timestep this idx corresponds to
         offset = self.n_timestep - self.n_his - self.n_roll + 1
         idx_episode = idx // offset + self.epi_st_idx
@@ -175,14 +166,9 @@ class ParticleDataset(Dataset):
         first_robot = robot_data[0]    # [n_bot, 3]
         
         # FPS sampling using tensor indices directly (no cdist needed!)
-        fps_start = time.perf_counter()
-        
         sampled_object_indices = fps_rad_tensor(first_object, self.fps_radius)
         sampled_robot_indices = fps_rad_tensor(first_robot, self.fps_radius)
         
-        fps_time = time.perf_counter() - fps_start
-        self.fps_times += fps_time
-                
         n_sampled_object = sampled_object_indices.shape[0]
         n_sampled_robot = sampled_robot_indices.shape[0]
         particle_num = n_sampled_object + n_sampled_robot
@@ -223,9 +209,6 @@ class ParticleDataset(Dataset):
         states = states.float()
         states_delta = states_delta.float()
         attrs = attrs.float()
-        
-        total_time = time.perf_counter() - total_time
-        self.total_times += total_time
         
         return states, states_delta, attrs, particle_num
 
