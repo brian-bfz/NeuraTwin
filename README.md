@@ -135,6 +135,8 @@ python interactive_playground.py --inv_ctrl --n_ctrl_parts 2 --case_name double_
 
 Brian's notes: 
 1. urdfpy is outdated. Ignore its requirement on networkx version. When running it for the first time, numpy will return an error saying that np.float is outdated. Replace that with float. 
+2. You also need to download the xarm folder, which contains the robot's urdf. 
+3. env_install may fail if a folder named /tmp/extensions already exists. In this case, go to process_data/TRELLIS/setup.sh, change all instances of /tmp/extensions to an empty folder, then run setup.sh again.
 
 Options: 
 -   --inv_ctrl: inverse the control direction
