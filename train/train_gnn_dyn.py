@@ -17,6 +17,97 @@ from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
 from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms
 
+class EpochTimer:
+    """Simple timer for tracking epoch-level performance"""
+    def __init__(self):
+        self.reset()
+    
+    def reset(self):
+        self.data_loading_time = 0.0
+        self.forward_time = 0.0
+        self.backward_time = 0.0
+        self.total_time = 0.0
+        self.gpu_memory_peak = 0.0
+    
+    def start_epoch(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.epoch_start = time.perf_counter()
+        self.reset()
+    
+    def end_epoch(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.total_time = time.perf_counter() - self.epoch_start
+        if torch.cuda.is_available():
+            self.gpu_memory_peak = torch.cuda.max_memory_allocated() / 1024 / 1024  # MB
+    
+    def time_data_loading(self):
+        return DataLoadingTimer(self)
+    
+    def time_forward(self):
+        return ForwardTimer(self)
+    
+    def time_backward(self):
+        return BackwardTimer(self)
+    
+    def get_summary(self):
+        return {
+            'total_time': self.total_time,
+            'data_loading_time': self.data_loading_time,
+            'forward_time': self.forward_time,
+            'backward_time': self.backward_time,
+            'gpu_memory_peak_mb': self.gpu_memory_peak,
+            'data_loading_pct': (self.data_loading_time / self.total_time) * 100 if self.total_time > 0 else 0,
+            'forward_pct': (self.forward_time / self.total_time) * 100 if self.total_time > 0 else 0,
+            'backward_pct': (self.backward_time / self.total_time) * 100 if self.total_time > 0 else 0,
+        }
+
+class DataLoadingTimer:
+    def __init__(self, epoch_timer):
+        self.epoch_timer = epoch_timer
+    
+    def __enter__(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.start = time.perf_counter()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.epoch_timer.data_loading_time += time.perf_counter() - self.start
+
+class ForwardTimer:
+    def __init__(self, epoch_timer):
+        self.epoch_timer = epoch_timer
+    
+    def __enter__(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.start = time.perf_counter()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.epoch_timer.forward_time += time.perf_counter() - self.start
+
+class BackwardTimer:
+    def __init__(self, epoch_timer):
+        self.epoch_timer = epoch_timer
+    
+    def __enter__(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.start = time.perf_counter()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.epoch_timer.backward_time += time.perf_counter() - self.start
+
 # from env.flex_env import FlexEnv
 
 def collate_fn(data):
@@ -49,6 +140,8 @@ def train():
     parser = argparse.ArgumentParser(description='Train GNN dynamics model')
     parser.add_argument('--name', type=str, default=None,
                        help='Training run name. If not provided, uses timestamp (YYYY-MM-DD-hh-mm-ss-ms)')
+    parser.add_argument('--profiling', action='store_true',
+                       help='Enable timing profiling (logs timing breakdown each epoch)')
     args = parser.parse_args()
 
     config = load_yaml('config/train/gnn_dyn.yaml')
@@ -87,6 +180,11 @@ def train():
     save_yaml(config, os.path.join(TRAIN_DIR, "config.yaml"))
 
     print(f"Training directory: {TRAIN_DIR}")
+
+    # Initialize profiling if enabled
+    epoch_timer = EpochTimer() if args.profiling else None
+    if args.profiling:
+        print("Profiling enabled - will log timing breakdown each epoch")
 
     if not config['train']['particle']['resume']['active']:
         log_fout = open(os.path.join(TRAIN_DIR, 'log.txt'), 'w')
@@ -144,8 +242,17 @@ def train():
         for phase in phases:
             model.train(phase == 'train')
             meter_loss = AverageMeter()
+            
+            # Start epoch timing
+            if epoch_timer and phase == 'train':
+                epoch_timer.start_epoch()
 
             for i, data in enumerate(dataloaders[phase]):
+
+                # Time data loading
+                if epoch_timer and phase == 'train':
+                    data_timer = epoch_timer.time_data_loading()
+                    data_timer.__enter__()
 
                 # states: B x (n_his + n_roll) x (particles_num + pusher_num) x 3
                 # attrs: B x (n_his + n_roll) x (particles_num + pusher_num)
@@ -160,10 +267,18 @@ def train():
                     attrs = attrs.cuda()
                     states_delta = states_delta.cuda()
 
+                # End data loading timing
+                if epoch_timer and phase == 'train':
+                    data_timer.__exit__(None, None, None)
 
                 loss = 0.
 
                 with torch.set_grad_enabled(phase == 'train'):
+                    
+                    # Time forward pass
+                    if epoch_timer and phase == 'train':
+                        forward_timer = epoch_timer.time_forward()
+                        forward_timer.__enter__()
 
                     # s_cur: B x (particles_num + pusher_num) x 3
                     s_cur = states[:, 0]
@@ -200,14 +315,27 @@ def train():
                         s_cur = s_pred
 
                     loss = loss / (n_rollout * B)
+                    
+                    # End forward pass timing
+                    if epoch_timer and phase == 'train':
+                        forward_timer.__exit__(None, None, None)
 
 
                 meter_loss.update(loss.item(), B)
 
                 if phase == 'train':
+                    # Time backward pass
+                    if epoch_timer:
+                        backward_timer = epoch_timer.time_backward()
+                        backward_timer.__enter__()
+                    
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
+                    
+                    # End backward pass timing
+                    if epoch_timer:
+                        backward_timer.__exit__(None, None, None)
 
 
                 ### log and save ckp
@@ -225,6 +353,22 @@ def train():
                 if phase == 'train' and i % ckp_per_iter == 0:
                     torch.save(model.state_dict(), '%s/net_epoch_%d_iter_%d.pth' % (TRAIN_DIR, epoch, i))
 
+
+            # End epoch timing and log profiling info
+            if epoch_timer and phase == 'train':
+                epoch_timer.end_epoch()
+                timing_summary = epoch_timer.get_summary()
+                
+                # Log timing breakdown
+                timing_log = f'PROFILING [Epoch {epoch}] Total: {timing_summary["total_time"]:.2f}s | ' \
+                           f'Data: {timing_summary["data_loading_time"]:.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
+                           f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
+                           f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
+                           f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB'
+                
+                print(timing_log)
+                log_fout.write(timing_log + '\n')
+                log_fout.flush()
 
             log = '%s [%d/%d] Loss: %.6f, Best valid: %.6f' % (
                 phase, epoch, n_epoch, np.sqrt(meter_loss.avg), np.sqrt(best_valid_loss))
