@@ -38,9 +38,7 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     tool_mask_1 = tool_mask[:, :, None].repeat(1, 1, N)
     tool_mask_2 = tool_mask[:, None, :].repeat(1, N, 1)
     tool_mask_12 = tool_mask_1 * tool_mask_2
-    obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
     dis[tool_mask_12] = 1e10  # avoid tool to tool relations
-    dis[obj_tool_mask_1] = 1e10 # avoid object to tool connections
 
     adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
 
@@ -73,8 +71,9 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
         adj_matrix[batch_obj_tool_mask_2] = 1
         adj_matrix[neg_batch_obj_tool_mask_1] = 0
         adj_matrix[neg_batch_obj_tool_mask_2] = 0
-
-
+    else:
+        obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
+        adj_matrix[obj_tool_mask_1] = 0
 
     n_rels = adj_matrix.sum(dim=(1,2))
     n_rel = n_rels.max().long().item()
@@ -85,7 +84,7 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     Rr = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1
-    Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1
+    Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1    
     return Rr, Rs
 
 def construct_edges_from_states(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
@@ -353,6 +352,7 @@ class PropNetDiffDenModel(nn.Module):
         self.connect_tools_all = config['train']['particle']['connect_tools_all']
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
+        print(self.connect_tools_all)
 
     def predict_one_step(self, a_cur, s_cur, s_delta, particle_nums=None):
         # a_cur: B x particle_num (0 for objects, 1 for tools/robot)

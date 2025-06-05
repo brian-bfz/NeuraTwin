@@ -90,10 +90,10 @@ class ObjectMotionPredictor:
         
         Args:
         - initial_object_pos: [N_obj, 3] starting object positions
-        - robot_trajectory: [timesteps, N_robot, 3] robot motion sequence (already downsampled)
+        - robot_trajectory: [downsampled timesteps, N_robot, 3] robot motion sequence
         
         Returns:
-        - object_predictions: [timesteps, N_obj, 3] predicted object motion
+        - object_predictions: [downsampled timesteps, N_obj, 3] predicted object motion
         """
         
         object_predictions = [initial_object_pos.clone()]
