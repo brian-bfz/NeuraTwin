@@ -46,18 +46,18 @@ train:
     step_size: 100 # StepLR
     gamma: 0.1 # StepLR
     factor: 0.2 # ReduceLROnPlateau
-    patience: 20 # ReduceLROnPlateau
+    patience: 10 # ReduceLROnPlateau
     threshold_mode: 'rel' # ReduceLROnPlateau
     cooldown: 0 # ReduceLROnPlateau
   rollback:
     enabled: true
     patience: 10
-    threshold: 1.5
+    threshold: 2
   particle:
     nf_effect: 64
     resume:
       active: true
-      epoch: 150
+      epoch: 170
       iter: 0
       folder: "New_baseline"
     adj_thresh: 0.05

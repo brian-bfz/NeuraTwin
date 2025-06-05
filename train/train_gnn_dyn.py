@@ -228,11 +228,15 @@ def train():
 
                         s_delta = states_delta[:, idx_step]
 
+                        # For backward compatibility, create single-step "history" 
+                        # by repeating current state n_history times
+                        # TODO: Implement proper sliding window history later
+                        a_cur_expanded = a_cur[:, :, None].repeat(1, 1, n_history)  # B x particle_num x n_history
+                        s_cur_expanded = s_cur[:, :, None, :].repeat(1, 1, n_history, 1)  # B x particle_num x n_history x 3
+                        s_delta_expanded = s_delta[:, :, None, :].repeat(1, 1, n_history, 1)  # B x particle_num x n_history x 3
+
                         # s_pred: B x particles_num x 3
-                        # s_pred = model.predict_one_step(a_cur, s_cur, s_delta)
-                        # s_pred = model.predict_one_step_adj_list(a_cur, s_cur, s_delta)
-                        s_pred = model.predict_one_step(a_cur, s_cur, s_delta)
-                        # print('diff between s_pred and s_pred_adj: ', torch.sum(torch.abs(s_pred[0, :particle_nums[0]] - s_pred_adj[0, :particle_nums[0]])))
+                        s_pred = model.predict_one_step(a_cur_expanded, s_cur_expanded, s_delta_expanded)
 
                         # loss += F.mse_loss(s_pred, s_nxt[:, pusher_num:])
                         for j in range(B):
@@ -355,13 +359,13 @@ def train():
                 
                 # Check for validation loss spike and rollback
                 if config['train']['rollback']['enabled'] and len(validation_history) >= patience_epochs:
-                    recent_avg = np.mean(validation_history[-patience_epochs:])
-                    if recent_avg > best_valid_loss * rollback_threshold:
+                    recent_min = np.min(validation_history[-patience_epochs:])
+                    if recent_min > best_valid_loss * rollback_threshold:
                         print(f"Validation loss spike detected! Rolling back to epoch {best_epoch}")
-                        print(f"Current avg loss: {recent_avg:.6f}, Best loss: {best_valid_loss:.6f}")
+                        print(f"Current avg loss: {recent_min:.6f}, Best loss: {best_valid_loss:.6f}")
                         
                         # reset random seed
-                        set_seed(torch.randint(0, 10000, (1,)).item())
+                        # set_seed(torch.randint(0, 10000, (1,)).item())
 
                         # Load the best checkpoint
                         model.load_state_dict(torch.load('%s/net_best.pth' % (TRAIN_DIR)))
