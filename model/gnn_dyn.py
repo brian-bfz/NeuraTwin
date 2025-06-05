@@ -42,6 +42,11 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
 
     adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
 
+    obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
+    obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
+    obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2)
+
+
     # add topk constraints
     topk = min(dis.shape[-1], topk)
     topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
@@ -57,10 +62,6 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     #     adj_matrix[tool_mask_12] = 0 # avoid tool to tool relations
 
     if connect_tools_all:
-        obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
-        obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
-        obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2)
-
         batch_mask = (adj_matrix[obj_pad_tool_mask_1].reshape(B, -1).sum(-1) > 0)[:, None, None].repeat(1, N, N)
         batch_obj_tool_mask_1 = obj_tool_mask_1 * batch_mask  # (B, N, N)
         neg_batch_obj_tool_mask_1 = obj_tool_mask_1 * (~batch_mask)  # (B, N, N)
@@ -72,7 +73,6 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
         adj_matrix[neg_batch_obj_tool_mask_1] = 0
         adj_matrix[neg_batch_obj_tool_mask_2] = 0
     else:
-        obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
         adj_matrix[obj_tool_mask_1] = 0
 
     n_rels = adj_matrix.sum(dim=(1,2))
@@ -267,15 +267,13 @@ class PropModuleDiffDen(nn.Module):
         nf_effect = config['train']['particle']['nf_effect']
         self.nf_effect = nf_effect
         self.add_delta = config['train']['particle']['add_delta']
-        
-        # Get n_history from config
-        self.n_history = config['train']['particle']['n_history']
+
         self.use_gpu = use_gpu
 
         # particle encoder
-        # input: pusher movement (3 * n_history), attr (1 * n_history)
+        # input: pusher movement (3), attr (1)
         self.particle_encoder = ParticleEncoder(
-            (3 + 1) * self.n_history, nf_effect, nf_effect)
+            3 + 1, nf_effect, nf_effect)
 
         # relation encoder
         # input: attr * 2 (2), state offset (3)
@@ -294,41 +292,22 @@ class PropModuleDiffDen(nn.Module):
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
-    def forward(self, a_hist, s_hist, s_delta, Rr, Rs, verbose=False):
-        # a_hist: B x n_history x particle_num -- indicating the type of the objects, slider or pusher
-        # s_hist: B x n_history x particle_num x 3 -- position of the objects
-        # s_delta: B x n_history x particle_num x 3 -- displacement of the objects
+    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, verbose=False):
+        # a_cur: B x particle_num -- indicating the type of the objects, slider or pusher
+        # s_cur: B x particle_num x 3 -- position of the objects
+        # s_delta: B x particle_num x 3 -- impulses of the objects
         # Rr: B x rel_num x particle_num
         # Rs: B x rel_num x particle_num
-        
-        B, n_history, N = a_hist.size()
+        B, N = a_cur.size()
         _, rel_num, _ = Rr.size()
         nf_effect = self.nf_effect
 
         pstep = 3
 
-        # Convert from data format (B x time x particle_num) to model format (B x particle_num x time)
-        a_hist = a_hist.transpose(1, 2)  # B x particle_num x n_history
-        s_hist = s_hist.transpose(1, 2)  # B x particle_num x n_history x 3
-        s_delta = s_delta.transpose(1, 2)  # B x particle_num x n_history x 3
-
         Rr_t = Rr.transpose(1, 2) # TODO: add .continuous()? # B x particle_num x rel_num
+        Rs_t = Rs.transpose(1, 2) # B x particle_num x rel_num
 
-        # Flatten history dimension for encoding (no transpose needed!)
-        # a_hist: B x particle_num x n_history (already in the right format)
-        # a_hist_flat = a_hist  # B x particle_num x n_history
-        
-        # s_hist: B x particle_num x n_history x 3 -> B x particle_num x (3 * n_history)
-        # s_hist_flat = s_hist.reshape(B, N, -1)  # B x particle_num x (3 * n_history) Not needed because we use relative coordinates instead, but I'm keeping it in case I need absolute z-coordinates later
-        
-        # s_delta: B x particle_num x n_history x 3 -> B x particle_num x (3 * n_history)
-        s_delta_flat = s_delta.reshape(B, N, -1)  # B x particle_num x (3 * n_history)
-
-        # Get current frame data for relations (since edges are constructed dynamically)
-        a_cur = a_hist[:, :, -1]  # B x particle_num (last time step)
-        s_cur = s_hist[:, :, -1, :]  # B x particle_num x 3 (last time step)
-        
-        # receiver_attr, sender_attr (using current frame only)
+        # receiver_attr, sender_attr
         a_cur_r = Rr.bmm(a_cur[..., None]) # B x rel_num x 1
         a_cur_s = Rs.bmm(a_cur[..., None]) # B x rel_num x 1
 
@@ -338,7 +317,7 @@ class PropModuleDiffDen(nn.Module):
 
         # particle encode
         particle_encode = self.particle_encoder(
-            torch.cat([s_delta_flat, a_hist], 2)) # B x particle_num x nf_effect
+            torch.cat([s_delta, a_cur[:, :, None]], 2)) # B x particle_num x nf_effect
         particle_effect = particle_encode
 
         # relation encode
@@ -361,7 +340,6 @@ class PropModuleDiffDen(nn.Module):
         # B x particle_num x 3
         particle_pred = self.particle_predictor(particle_effect)
 
-        # Use the most recent state for residual connection
         return particle_pred + s_cur
 
 class PropNetDiffDenModel(nn.Module):
@@ -375,23 +353,19 @@ class PropNetDiffDenModel(nn.Module):
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_hist, s_hist, s_delta, particle_nums=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, particle_nums=None):
         # assume these variables have already been calculated
-        # a_hist: B x n_history x particle_num (0 for objects, 1 for tools/robot)
-        # s_hist: B x n_history x particle_num x 3
-        # s_delta: B x n_history x particle_num x 3 (for t < n_history - 1, s_delta is s_hist[t+1] - s_hist[t]; for t = n_history - 1, s_delta is 0 for objects, s_hist[t+1] - s_hist[t] for robot)
+        # a_cur: B x n_history x particle_num (0 for objects, 1 for tools/robot)
+        # s_cur: B x n_history x particle_num x 3
+        # s_delta: B x n_history x particle_num x 3 (for t < n_history - 1, s_delta is s_cur[t+1] - s_cur[t]; for t = n_history - 1, s_delta is 0 for objects, s_cur[t+1] - s_cur[t] for robot)
         # particle_nums: B
-        assert type(a_hist) == torch.Tensor
-        assert type(s_hist) == torch.Tensor
+        assert type(a_cur) == torch.Tensor
+        assert type(s_cur) == torch.Tensor
         assert type(s_delta) == torch.Tensor
-        assert a_hist.shape == s_hist.shape[:3]
-        assert s_hist.shape == s_delta.shape
+        assert a_cur.shape == s_cur.shape[:2]
+        assert s_cur.shape == s_delta.shape
 
-        B, n_history, N = a_hist.size()
-
-        # Use the most recent state for edge construction
-        a_cur = a_hist[:, -1, :]  # B x particle_num
-        s_cur = s_hist[:, -1, :, :]  # B x particle_num x 3
+        B, N = a_cur.size()
 
         # Create batch masks for valid particles and tools
         if particle_nums is not None:
@@ -412,7 +386,7 @@ class PropNetDiffDenModel(nn.Module):
         #     torch.cuda.synchronize()
         # edge_start = time.perf_counter()
                 
-        # Construct edges using efficient batch processing (using most recent state)
+        # Construct edges using efficient batch processing
         Rr_batch, Rs_batch = construct_edges_from_states_batch(
             s_cur, 
             self.adj_thresh, 
@@ -432,7 +406,6 @@ class PropNetDiffDenModel(nn.Module):
         # elif not hasattr(self, '_edge_times'):
         #     self._edge_times = [edge_time]
 
-        # Forward pass with full history
-        s_pred = self.model.forward(a_hist, s_hist, s_delta, Rr_batch, Rs_batch)
+        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch)
 
         return s_pred
