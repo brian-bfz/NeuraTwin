@@ -268,9 +268,8 @@ class PropModuleDiffDen(nn.Module):
         self.nf_effect = nf_effect
         self.add_delta = config['train']['particle']['add_delta']
         
-        # Get n_history from config, default to 1 for backward compatibility
-        self.n_history = config['train']['particle'].get('n_history', 1)
-
+        # Get n_history from config
+        self.n_history = config['train']['particle']['n_history']
         self.use_gpu = use_gpu
 
         # particle encoder
@@ -296,17 +295,22 @@ class PropModuleDiffDen(nn.Module):
             nf_effect, nf_effect, 3)
 
     def forward(self, a_hist, s_hist, s_delta, Rr, Rs, verbose=False):
-        # a_hist: B x particle_num x n_history -- indicating the type of the objects, slider or pusher
-        # s_hist: B x particle_num x n_history x 3 -- position of the objects
-        # s_delta: B x particle_num x n_history x 3 -- displacement of the objects
+        # a_hist: B x n_history x particle_num -- indicating the type of the objects, slider or pusher
+        # s_hist: B x n_history x particle_num x 3 -- position of the objects
+        # s_delta: B x n_history x particle_num x 3 -- displacement of the objects
         # Rr: B x rel_num x particle_num
         # Rs: B x rel_num x particle_num
         
-        B, N, n_history = a_hist.size()
+        B, n_history, N = a_hist.size()
         _, rel_num, _ = Rr.size()
         nf_effect = self.nf_effect
 
         pstep = 3
+
+        # Convert from data format (B x time x particle_num) to model format (B x particle_num x time)
+        a_hist = a_hist.transpose(1, 2)  # B x particle_num x n_history
+        s_hist = s_hist.transpose(1, 2)  # B x particle_num x n_history x 3
+        s_delta = s_delta.transpose(1, 2)  # B x particle_num x n_history x 3
 
         Rr_t = Rr.transpose(1, 2) # TODO: add .continuous()? # B x particle_num x rel_num
 
@@ -373,9 +377,9 @@ class PropNetDiffDenModel(nn.Module):
 
     def predict_one_step(self, a_hist, s_hist, s_delta, particle_nums=None):
         # assume these variables have already been calculated
-        # a_hist: B x particle_num x n_history (0 for objects, 1 for tools/robot)
-        # s_hist: B x particle_num x n_history x 3
-        # s_delta: B x particle_num x n_history x 3 (for t < n_history - 1, s_delta is s_hist[t+1] - s_hist[t]; for t = n_history - 1, s_delta is 0 for objects, s_hist[t+1] - s_hist[t] for robot)
+        # a_hist: B x n_history x particle_num (0 for objects, 1 for tools/robot)
+        # s_hist: B x n_history x particle_num x 3
+        # s_delta: B x n_history x particle_num x 3 (for t < n_history - 1, s_delta is s_hist[t+1] - s_hist[t]; for t = n_history - 1, s_delta is 0 for objects, s_hist[t+1] - s_hist[t] for robot)
         # particle_nums: B
         assert type(a_hist) == torch.Tensor
         assert type(s_hist) == torch.Tensor
@@ -383,11 +387,11 @@ class PropNetDiffDenModel(nn.Module):
         assert a_hist.shape == s_hist.shape[:3]
         assert s_hist.shape == s_delta.shape
 
-        B, N, n_history = a_hist.size()
+        B, n_history, N = a_hist.size()
 
         # Use the most recent state for edge construction
-        a_cur = a_hist[:, :, -1]  # B x particle_num
-        s_cur = s_hist[:, :, -1, :]  # B x particle_num x 3
+        a_cur = a_hist[:, -1, :]  # B x particle_num
+        s_cur = s_hist[:, -1, :, :]  # B x particle_num x 3
 
         # Create batch masks for valid particles and tools
         if particle_nums is not None:

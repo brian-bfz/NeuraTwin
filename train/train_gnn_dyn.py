@@ -22,9 +22,9 @@ from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, lo
 
 def collate_fn(data):
     """
-    data: is a list of tuples with (example, label, length)
-            where 'example' is a tensor of arbitrary shape
-            and label/length are scalars
+    data: is a list of tuples with (states, states_delta, attrs, particle_num)
+            where states/states_delta are tensors of shape [particle_num, time, 3]
+            and attrs is [particle_num, time]
     """
     states, states_delta, attrs, particle_num = zip(*data)
     max_len = max(particle_num)
@@ -192,12 +192,12 @@ def train():
 
             for i, data in enumerate(dataloaders[phase]):
 
-                # states: B x (n_his + n_roll) x (particles_num + pusher_num) x 3
-                # attrs: B x (n_his + n_roll) x (particles_num + pusher_num)
-                # states_delta: B x (n_his + n_roll - 1) x (particles_num + pusher_num) x 3
+                # states: B x (n_his + n_roll) x particle_num x 3
+                # attrs: B x (n_his + n_roll) x particle_num
+                # states_delta: B x (n_his + n_roll - 1) x particle_num x 3
                 states, states_delta, attrs, particle_nums = data
 
-                B, length, n_obj, _ = states.size()
+                B, length, max_particles, _ = states.size()
                 assert length == n_rollout + n_history
 
                 if use_gpu:
@@ -218,44 +218,44 @@ def train():
                         forward_timer = epoch_timer.time_forward()
                         forward_timer.__enter__()
 
-                    # s_cur: B x (particles_num + pusher_num) x 3
-                    s_cur = states[:, 0]
-                    a_cur = attrs[:, 0]
+                    # Initialize history buffer for rollout
+                    # Start with the first n_history frames
+                    history_buffer_states = states[:, :n_history, :, :].clone()  # B x n_history x particle_num x 3
+                    history_buffer_delta = states_delta[:, :n_history, :, :].clone()  # B x n_history x particle_num x 3
 
                     for idx_step in range(n_rollout):
-                        # s_nxt: B x (particles_num + pusher_num) x 3
-                        s_nxt = states[:, idx_step + 1]
+                        # Extract current history window
+                        a_hist = attrs[:, idx_step:idx_step + n_history, :]  # B x n_history x particle_num # we can just use gt attrs here
+                        s_hist = history_buffer_states  # B x n_history x particle_num x 3
+                        s_delta_hist = history_buffer_delta  # B x n_history x particle_num x 3
+                        
+                        # Ground truth next state 
+                        s_nxt = states[:, n_history + idx_step, :, :]  # B x particle_num x 3
 
-                        s_delta = states_delta[:, idx_step]
-
-                        # For backward compatibility, create single-step "history" 
-                        # by repeating current state n_history times
-                        # TODO: Implement proper sliding window history later
-                        a_cur_expanded = a_cur[:, :, None].repeat(1, 1, n_history)  # B x particle_num x n_history
-                        s_cur_expanded = s_cur[:, :, None, :].repeat(1, 1, n_history, 1)  # B x particle_num x n_history x 3
-                        s_delta_expanded = s_delta[:, :, None, :].repeat(1, 1, n_history, 1)  # B x particle_num x n_history x 3
-
-                        # s_pred: B x particles_num x 3
-                        s_pred = model.predict_one_step(a_cur_expanded, s_cur_expanded, s_delta_expanded)
+                        # s_pred: B x particle_num x 3
+                        s_pred = model.predict_one_step(a_hist, s_hist, s_delta_hist, particle_nums)
 
                         # loss += F.mse_loss(s_pred, s_nxt[:, pusher_num:])
                         for j in range(B):
                             loss += F.mse_loss(s_pred[j, :particle_nums[j]], s_nxt[j, :particle_nums[j]])
                         # loss += F.mse_loss(s_pred, s_nxt)
 
-                        # if epoch >= 10:
-                        #     print("MSE Loss: ", F.mse_loss(s_pred, s_nxt[:, pusher_num:]).item())
-                        #     ax = plt.axes(projection='3d')
-                        #     print("s_pred: ", s_pred.shape)
-                        #     print("s_nxt: ", s_nxt[:, pusher_num:].shape)
-                        #     ax.scatter3D(s_pred[0, :, 0].detach().cpu().numpy(), s_pred[0, :, 1].detach().cpu().numpy(), s_pred[0, :, 2].detach().cpu().numpy(), color='red')
-                        #     ax.scatter3D(s_nxt[0, pusher_num:, 0].detach().cpu().numpy(), s_nxt[0, pusher_num:, 1].detach().cpu().numpy(), s_nxt[0, pusher_num:, 2].detach().cpu().numpy(), color='blue')
-                        #     plt.show()
+                        # Update history buffer for next rollout step
+                        if idx_step < n_rollout - 1:  # Don't update on last step
+                            # Update delta buffer 
+                            # Update delta with the newly predicted particle deltas
+                            history_buffer_delta[:, -1, :, :] = s_pred - history_buffer_states[:, -1, :, :]
+                            # Remove oldest frame, add new frame's robot deltas
+                            history_buffer_delta = torch.cat([
+                                history_buffer_delta[:, 1:, :, :],  # Remove first frame
+                                states_delta[:, idx_step + n_history, :, :].unsqueeze(1)  # Add new delta
+                            ])
 
-                        # s_cur: B x (particles_num + pusher_num) x 3
-                        # s_cur = torch.cat([states[:, idx_step + 1, :pusher_num], s_pred], dim=1)
-                        s_cur = s_pred
-
+                            # Remove oldest frame, add new prediction
+                            history_buffer_states = torch.cat([
+                                history_buffer_states[:, 1:, :, :],  # Remove first frame
+                                s_pred.unsqueeze(1)  # Add prediction as new frame
+                            ], dim=1)                                                        
                     loss = loss / (n_rollout * B)
                     
                     # End forward pass timing

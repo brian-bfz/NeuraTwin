@@ -131,13 +131,24 @@ class ParticleDataset(Dataset):
         sampled_object_trajectory = full_object_data[:, object_sample_indices, :]  # [time, sampled_obj, 3]
         sampled_robot_trajectory = full_robot_data[:, robot_sample_indices, :]     # [time, sampled_robot, 3]
         
-        print(f"Episode {episode_idx}: {n_frames} -> {len(frame_indices)} timesteps, "
+        # Prepend n_history-1 copies of the first frame for history initialization
+        # This allows inference to start with proper history context
+        first_obj_frame = sampled_object_trajectory[:1].repeat(self.n_his - 1, 1, 1)  # [(n_his-1), sampled_obj, 3]
+        first_robot_frame = sampled_robot_trajectory[:1].repeat(self.n_his - 1, 1, 1)  # [(n_his-1), sampled_robot, 3]
+        
+        sampled_object_trajectory = torch.cat([first_obj_frame, sampled_object_trajectory], dim=0)
+        sampled_robot_trajectory = torch.cat([first_robot_frame, sampled_robot_trajectory], dim=0)
+        states = torch.cat([sampled_object_trajectory, sampled_robot_trajectory], dim=1)
+        states_delta = torch.zeros(states.shape[0] - 1, states.shape[1], 3)
+        states_delta[:, n_obj_particles:] = sampled_robot_trajectory[1:] - sampled_robot_trajectory[:-1]
+        
+
+        print(f"Episode {episode_idx}: {n_frames} -> {len(frame_indices)} timesteps (+ {self.n_his-1} history frames padding), "
               f"Objects: {n_obj_particles} -> {len(object_sample_indices)} sampled, "
               f"Robot: {n_bot_particles} -> {len(robot_sample_indices)} sampled")
         
         return (sampled_object_trajectory.float(), 
                 sampled_robot_trajectory.float(), 
-                full_object_data.float(),
                 object_sample_indices, 
                 robot_sample_indices)
 
@@ -180,9 +191,17 @@ class ParticleDataset(Dataset):
             noise = torch.clamp(noise, -0.015, 0.015)
             states[:self.n_his] = states[:self.n_his] + noise
         
-        # Calculate states_delta using tensor operations
+        # Calculate states_delta using tensor operations with new logic
+        # For t < n_history - 1: s_delta = s_hist[t+1] - s_hist[t] 
+        # For t >= n_history - 1: s_delta = 0 for objects, s_hist[t+1] - s_hist[t] for robot
         states_delta = torch.zeros(n_frames - 1, particle_num, 3)
-        states_delta[:, n_sampled_object:] = sampled_robot_states[1:] - sampled_robot_states[:-1]
+        
+        # For frames 0 to n_his-2: use consecutive frame differences for all particles
+        states_delta[:self.n_his - 1] = states[1:self.n_his] - states[:self.n_his - 1]
+        
+        # For frames n_his-1 to n_frames-2: 
+        # - Robot: consecutive frame differences (robot motion is given)
+        states_delta[self.n_his - 1:n_frames - 1, n_sampled_object:] = states[self.n_his:n_frames, n_sampled_object:] - states[self.n_his - 1:n_frames - 1, n_sampled_object:]
         
         # Create attrs tensor
         attrs = torch.zeros(n_frames, particle_num)
