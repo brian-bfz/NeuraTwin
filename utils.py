@@ -448,7 +448,7 @@ def fps_rad(pcd, radius):
     pcd_fps = np.stack(pcd_fps_lst, axis=0)
     return pcd_fps
 
-def fps_rad_tensor(pcd_tensor, radius):
+def fps_rad_tensor_old(pcd_tensor, radius):
         """
         Tensor-based FPS that returns indices directly.
         
@@ -471,6 +471,39 @@ def fps_rad_tensor(pcd_tensor, radius):
         
         return torch.from_numpy(np.array(selected_indices)).long()
 
+def fps_rad_tensor(points, radius):
+    """
+    Farthest point sampling on tensor
+    Args:
+        points: [N, 3] torch tensor on GPU
+        radius: float
+    
+    Returns:
+        selected_indices: [M] torch tensor of indices
+    """
+    N = points.shape[0]
+    device = points.device
+    
+    # Start with random point
+    rand_idx = torch.randint(0, N, (1,), device=device)
+    selected_indices = torch.zeros(N, dtype=torch.long, device=device)
+    selected_indices[rand_idx] = 1
+    n_selected = 1
+
+    # Distance to closest selected point
+    dist = torch.norm(points - points[rand_idx], dim=1)
+    
+    # Keep adding farthest points until radius constraint satisfied
+    while dist.max() > radius:
+        farthest_idx = torch.argmax(dist)
+        selected_indices[n_selected] = farthest_idx
+        n_selected += 1
+        
+        # Update distances
+        new_dists = torch.norm(points - points[farthest_idx], dim=1)
+        dist = torch.minimum(dist, new_dists)
+    
+    return selected_indices[:n_selected]
 
 def fps_np(pcd, particle_num, init_idx=-1):
     # pcd: (n, c) numpy array

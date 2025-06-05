@@ -146,6 +146,9 @@ def train():
     st_epoch = config['train']['particle']['resume']['epoch'] if config['train']['particle']['resume']['epoch'] > 0 else 0
     best_valid_loss = np.inf
 
+    avg_timer = EpochTimer()
+    avg_timer.reset()
+
     for epoch in range(st_epoch, n_epoch):
 
         for phase in phases:
@@ -286,6 +289,17 @@ def train():
                            f'Edges: {timing_summary["edge_time"]:.2f}s ({timing_summary["edge_pct"]:.1f}%) | ' \
                            f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
                            f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB'
+                
+                for attr in epoch_timer.__dict__:
+                    if hasattr(avg_timer, attr):
+                        avg_timer.__dict__[attr] += epoch_timer.__dict__[attr]
+                timing_summary = avg_timer.get_summary()
+                timing_log += f'Avg Total: {timing_summary["total_time"] / (epoch + 1) :.2f}s | ' \
+                           f'Avg Data: {timing_summary["data_loading_time"] / (epoch + 1):.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
+                           f'Avg Forward: {timing_summary["forward_time"] / (epoch + 1):.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
+                           f'Avg Edges: {timing_summary["edge_time"] / (epoch + 1):.2f}s ({timing_summary["edge_pct"]:.1f}%) | ' \
+                           f'Avg Backward: {timing_summary["backward_time"] / (epoch + 1):.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
+                           f'Avg GPU Mem: {timing_summary["gpu_memory_peak_mb"] / (epoch + 1):.0f}MB'
                 
                 print(timing_log)
                 log_fout.write(timing_log + '\n')

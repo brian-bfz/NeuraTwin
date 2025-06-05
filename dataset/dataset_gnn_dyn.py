@@ -61,7 +61,7 @@ class ParticleDataset(Dataset):
         
         # File handle for efficient access - will be opened lazily per worker
         self._hdf5_file = None
-        self.offset = self.n_timestep - self.n_his * self.downsample_rate - self.n_roll * self.downsample_rate + 1
+        self.offset = self.n_timestep - (self.n_his + self.n_roll - 1) * self.downsample_rate
 
     def _get_hdf5_file(self):
         """Lazy loading of HDF5 file handle to work properly with multiprocessing."""
@@ -115,9 +115,9 @@ class ParticleDataset(Dataset):
         n_bot_particles = episode_group.attrs['n_bot_particles']
         
         # Load full episode data
-        full_object_data = torch.from_numpy(episode_group['object'][:, :, :])  # [time, n_obj, 3]
-        full_robot_data = torch.from_numpy(episode_group['robot'][:, :, :])    # [time, n_bot, 3]
         frame_indices = [i for i in range(0,n_frames, self.downsample_rate)]
+        full_object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_obj, 3]
+        full_robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [time, n_bot, 3]
         
         # Get first frame data for FPS sampling (consistent with training)
         first_object = full_object_data[0]  # [n_obj, 3]
@@ -130,8 +130,6 @@ class ParticleDataset(Dataset):
         # Extract sampled trajectories using consistent indices
         sampled_object_trajectory = full_object_data[:, object_sample_indices, :]  # [time, sampled_obj, 3]
         sampled_robot_trajectory = full_robot_data[:, robot_sample_indices, :]     # [time, sampled_robot, 3]
-        sampled_object_trajectory = sampled_object_trajectory[frame_indices, :, :]
-        sampled_robot_trajectory = sampled_robot_trajectory[frame_indices, :, :]
         
         print(f"Episode {episode_idx}: {n_frames} -> {len(frame_indices)} timesteps, "
               f"Objects: {n_obj_particles} -> {len(object_sample_indices)} sampled, "
@@ -154,7 +152,6 @@ class ParticleDataset(Dataset):
                 
         # Generate downsampled frame indices
         frame_indices = [idx_timestep + i * self.downsample_rate for i in range(self.n_his + self.n_roll)]
-        
         object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_obj, 3]
         robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [time, n_bot, 3]
         
@@ -164,7 +161,7 @@ class ParticleDataset(Dataset):
         first_object = object_data[0]  # [n_obj, 3]
         first_robot = robot_data[0]    # [n_bot, 3]
         
-        # FPS sampling using tensor indices directly (no cdist needed!)
+        # FPS sampling using tensor indices directly 
         sampled_object_indices = fps_rad_tensor(first_object, self.fps_radius)
         sampled_robot_indices = fps_rad_tensor(first_robot, self.fps_radius)
         
