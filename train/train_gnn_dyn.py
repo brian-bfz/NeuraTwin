@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from timer import EpochTimer
 import matplotlib.pyplot as plt
+from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 
 from dataset.dataset_gnn_dyn import ParticleDataset
 from model.gnn_dyn import PropNetDiffDenModel
@@ -140,6 +141,25 @@ def train():
     optimizer = torch.optim.Adam(params,
                                 lr=float(config['train']['lr']),
                                 betas=(config['train']['adam_beta1'], 0.999))
+
+    # Add lr_scheduler
+    scheduler = None
+    if config['train']['lr_scheduler']['enabled']:
+        if config['train']['lr_scheduler']['type'] == "ReduceLROnPlateau":
+            scheduler = ReduceLROnPlateau(
+                optimizer,
+                mode='min',
+                factor=config['train']['lr_scheduler']['factor'],
+                patience=config['train']['lr_scheduler']['patience'],
+                threshold_mode=config['train']['lr_scheduler']['threshold_mode'],
+                cooldown=config['train']['lr_scheduler']['cooldown']
+            )
+        elif config['train']['lr_scheduler']['type'] == "StepLR":
+            step_size = config['train']['lr_scheduler']['step_size']
+            gamma = config['train']['lr_scheduler']['gamma']
+            scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
+        else:
+            raise ValueError("unknown scheduler type: %s" % config['train']['lr_scheduler']['type'])
 
 
     # start training
@@ -316,6 +336,12 @@ def train():
                 if meter_loss.avg < best_valid_loss:
                     best_valid_loss = meter_loss.avg
                     torch.save(model.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
+                
+                # Step the scheduler
+                if (scheduler is not None) and (config['train']['lr_scheduler']['type'] == "StepLR"):
+                    scheduler.step()
+                if (scheduler is not None) and (config['train']['lr_scheduler']['type'] == "ReduceLROnPlateau"):
+                    scheduler.step(meter_loss.avg)
 
 
 

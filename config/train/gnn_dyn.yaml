@@ -17,7 +17,7 @@ dataset:
   cont_motion: False
   robot_type: 'franka' # kinova; franka
   randomness: 
-    use: True
+    use: False
     state_noise:
       train: 0.0
       valid: 0.0
@@ -33,7 +33,7 @@ train:
   nf_hidden: 64
   num_workers: 12
   train_valid_ratio: 0.9
-  log_per_iter: 300
+  log_per_iter: 350
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1
@@ -41,11 +41,11 @@ train:
   n_rollout: 5
   rollout_decay: 1.0
   lr_scheduler:
-    type: "StepLR"
+    type: "ReduceLROnPlateau"
     enabled: True
-    step_size: 40
-    gamma: 0.1 # reduce LR by this factor
-    factor: 0.1 # ReduceLROnPlateau
+    step_size: 100 # StepLR
+    gamma: 0.1 # StepLR
+    factor: 0.2 # ReduceLROnPlateau
     patience: 10 # ReduceLROnPlateau
     threshold_mode: 'rel' # ReduceLROnPlateau
     cooldown: 0 # ReduceLROnPlateau
