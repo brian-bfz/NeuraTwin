@@ -46,16 +46,20 @@ train:
     step_size: 100 # StepLR
     gamma: 0.1 # StepLR
     factor: 0.2 # ReduceLROnPlateau
-    patience: 10 # ReduceLROnPlateau
+    patience: 20 # ReduceLROnPlateau
     threshold_mode: 'rel' # ReduceLROnPlateau
     cooldown: 0 # ReduceLROnPlateau
+  rollback:
+    enabled: true
+    patience: 10
+    threshold: 1.5
   particle:
     nf_effect: 64
     resume:
-      active: false
-      epoch: 0
+      active: true
+      epoch: 150
       iter: 0
-      folder: 
+      folder: "New_baseline"
     adj_thresh: 0.05
     add_delta: False
     connect_tools_all: False  # Connect all tool particles to all object particles regardless of distance

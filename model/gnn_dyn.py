@@ -352,7 +352,6 @@ class PropNetDiffDenModel(nn.Module):
         self.connect_tools_all = config['train']['particle']['connect_tools_all']
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
-        print(self.connect_tools_all)
 
     def predict_one_step(self, a_cur, s_cur, s_delta, particle_nums=None):
         # a_cur: B x particle_num (0 for objects, 1 for tools/robot)

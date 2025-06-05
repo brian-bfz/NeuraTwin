@@ -61,7 +61,6 @@ def train():
     log_per_iter = config['train']['log_per_iter']
     n_epoch = config['train']['n_epoch']
 
-    # Note: No longer need camera parameters since we work directly with world coordinates
     set_seed(config['train']['random_seed'])
 
     use_gpu = torch.cuda.is_available()
@@ -168,6 +167,13 @@ def train():
 
     avg_timer = EpochTimer()
     avg_timer.reset()
+
+    # Early stopping and rollback configuration
+    if config['train']['rollback']['enabled']:
+        patience_epochs = config['train']['rollback']['patience']  # Number of epochs to wait before rollback
+        rollback_threshold = config['train']['rollback']['threshold']  # Factor by which validation loss must increase to trigger rollback
+        validation_history = []
+    best_epoch = 0
 
     for epoch in range(st_epoch, n_epoch):
 
@@ -333,10 +339,46 @@ def train():
 
 
             if phase == 'valid':
-                if meter_loss.avg < best_valid_loss:
-                    best_valid_loss = meter_loss.avg
-                    torch.save(model.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
+                current_val_loss = meter_loss.avg
+                if config['train']['rollback']['enabled']:
+                    validation_history.append(current_val_loss)
                 
+                if current_val_loss < best_valid_loss:
+                    best_valid_loss = current_val_loss
+                    best_epoch = epoch
+                    torch.save(model.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
+                    if config['train']['rollback']['enabled']:
+                        torch.save({
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+                        }, '%s/checkpoint_best.pth' % (TRAIN_DIR))
+                
+                # Check for validation loss spike and rollback
+                if config['train']['rollback']['enabled'] and len(validation_history) >= patience_epochs:
+                    recent_avg = np.mean(validation_history[-patience_epochs:])
+                    if recent_avg > best_valid_loss * rollback_threshold:
+                        print(f"Validation loss spike detected! Rolling back to epoch {best_epoch}")
+                        print(f"Current avg loss: {recent_avg:.6f}, Best loss: {best_valid_loss:.6f}")
+                        
+                        # reset random seed
+                        set_seed(torch.randint(0, 10000, (1,)).item())
+
+                        # Load the best checkpoint
+                        model.load_state_dict(torch.load('%s/net_best.pth' % (TRAIN_DIR)))
+                        checkpoint = torch.load('%s/checkpoint_best.pth' % (TRAIN_DIR))
+                        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                        if scheduler and checkpoint['scheduler_state_dict']:
+                            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                        
+                        # Reset to best epoch
+                        epoch = best_epoch
+                        validation_history = validation_history[:best_epoch+1]  # Trim history
+                        
+                        log_rollback = f"Rolled back to epoch {best_epoch} with validation loss {best_valid_loss:.6f}"
+                        print(log_rollback)
+                        log_fout.write(log_rollback + '\n')
+                        log_fout.flush()
+
                 # Step the scheduler
                 if (scheduler is not None) and (config['train']['lr_scheduler']['type'] == "StepLR"):
                     scheduler.step()
