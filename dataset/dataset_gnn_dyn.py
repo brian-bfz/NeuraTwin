@@ -127,6 +127,10 @@ class ParticleDataset(Dataset):
         object_sample_indices = fps_rad_tensor(first_object, self.fps_radius)
         robot_sample_indices = fps_rad_tensor(first_robot, self.fps_radius)
         
+        # Get sampled particle counts
+        n_sampled_object = len(object_sample_indices)
+        n_sampled_robot = len(robot_sample_indices)
+        
         # Extract sampled trajectories using consistent indices
         sampled_object_trajectory = full_object_data[:, object_sample_indices, :]  # [time, sampled_obj, 3]
         sampled_robot_trajectory = full_robot_data[:, robot_sample_indices, :]     # [time, sampled_robot, 3]
@@ -139,18 +143,20 @@ class ParticleDataset(Dataset):
         sampled_object_trajectory = torch.cat([first_obj_frame, sampled_object_trajectory], dim=0)
         sampled_robot_trajectory = torch.cat([first_robot_frame, sampled_robot_trajectory], dim=0)
         states = torch.cat([sampled_object_trajectory, sampled_robot_trajectory], dim=1)
+
         states_delta = torch.zeros(states.shape[0] - 1, states.shape[1], 3)
-        states_delta[:, n_obj_particles:] = sampled_robot_trajectory[1:] - sampled_robot_trajectory[:-1]
+        states_delta[:, n_sampled_object:] = sampled_robot_trajectory[1:] - sampled_robot_trajectory[:-1]
         
+        attrs = torch.zeros(states.shape[0], states.shape[1])
+        attrs[:, n_sampled_object:] = 1.0
+
+        particle_num = n_sampled_object + n_sampled_robot
 
         print(f"Episode {episode_idx}: {n_frames} -> {len(frame_indices)} timesteps (+ {self.n_his-1} history frames padding), "
-              f"Objects: {n_obj_particles} -> {len(object_sample_indices)} sampled, "
-              f"Robot: {n_bot_particles} -> {len(robot_sample_indices)} sampled")
+              f"Objects: {n_obj_particles} -> {n_sampled_object} sampled, "
+              f"Robot: {n_bot_particles} -> {n_sampled_robot} sampled")
         
-        return (sampled_object_trajectory.float(), 
-                sampled_robot_trajectory.float(), 
-                object_sample_indices, 
-                robot_sample_indices)
+        return states.float(), states_delta.float(), attrs.float(), particle_num
 
     def __getitem__(self, idx):
         # Calculate which episode and timestep this idx corresponds to
