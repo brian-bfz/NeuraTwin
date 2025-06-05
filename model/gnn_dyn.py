@@ -269,7 +269,7 @@ class PropModuleDiffDen(nn.Module):
         self.add_delta = config['train']['particle']['add_delta']
         
         # Get n_history from config
-        self.n_history = config['train']['particle']['n_history']
+        self.n_history = config['train']['n_history']
         self.use_gpu = use_gpu
 
         # particle encoder

@@ -59,12 +59,7 @@ class ObjectMotionPredictor:
         Returns:
             predicted_states: [timesteps, particles, 3] - predicted trajectory
         """
-        
-        # Move data to device
-        states = states.to(self.device)
-        states_delta = states_delta.to(self.device) 
-        attrs = attrs.to(self.device)
-        
+                
         # Calculate n_rollout from episode length
         n_rollout = states.shape[0] - self.n_history
         
@@ -78,7 +73,7 @@ class ObjectMotionPredictor:
         states = states.unsqueeze(0)  # [1, timesteps, particles, 3]
         states_delta = states_delta.unsqueeze(0)  # [1, timesteps-1, particles, 3]
         attrs = attrs.unsqueeze(0)  # [1, timesteps, particles]
-        particle_nums = torch.tensor([particle_num], dtype=torch.int32)
+        particle_nums = torch.tensor([particle_num], dtype=torch.int32, device=self.device)
         
         # Initialize prediction storage
         predicted_states = [states[0, i].clone() for i in range(self.n_history)]  # Start with history
@@ -98,7 +93,7 @@ class ObjectMotionPredictor:
                 s_pred = self.model.predict_one_step(a_hist, s_hist, s_delta_hist, particle_nums)  # [1, particles, 3]
                 
                 # Store prediction
-                predicted_states.append(s_pred[0].clone().cpu())
+                predicted_states.append(s_pred[0].clone())
                 
                 # Update history buffer for next rollout step (same as training)
                 if idx_step < n_rollout - 1:  # Don't update on last step
@@ -168,18 +163,23 @@ class ObjectMotionPredictor:
         # Set render options
         render_option = vis.get_render_option()
         render_option.point_size = 10.0
+
+        #Move data to numpy
+        actual_objects = actual_objects.cpu().numpy()
+        robot_trajectory = robot_trajectory.cpu().numpy()
+        predicted_objects = predicted_objects.cpu().numpy()
         
         # Create point clouds            
         actual_pcd = o3d.geometry.PointCloud()
-        actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0].numpy())
+        actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0])
         actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Red for actual
             
         robot_pcd = o3d.geometry.PointCloud()
-        robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0].numpy())
+        robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0])
         robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
         
         pred_pcd = o3d.geometry.PointCloud()
-        pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0].numpy())
+        pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0])
         pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Blue for predicted
 
         # Add geometries to visualizer
@@ -227,9 +227,9 @@ class ObjectMotionPredictor:
         
         for frame_idx in range(n_frames):
             # Get positions for this frame
-            pred_obj_pos = predicted_objects[frame_idx].numpy()
-            actual_obj_pos = actual_objects[frame_idx].numpy()
-            robot_pos = robot_trajectory[frame_idx].numpy()
+            pred_obj_pos = predicted_objects[frame_idx]
+            actual_obj_pos = actual_objects[frame_idx]
+            robot_pos = robot_trajectory[frame_idx]
             
             if frame_idx == 0:
                 print(f"Sampled object particles: {actual_obj_pos.shape[0]}")
@@ -378,6 +378,9 @@ def main():
         try:
             # Load episode data in the new format
             states, states_delta, attrs, particle_num = predictor.dataset.load_full_episode(episode_num)
+            states = states.to(predictor.device)
+            states_delta = states_delta.to(predictor.device)
+            attrs = attrs.to(predictor.device)
             
             # Extract number of object particles from attrs (0=object, 1=robot)
             n_obj_particles = (attrs[0] == 0).sum().item()
