@@ -42,6 +42,11 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
 
     adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
 
+    obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
+    obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
+    obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2)
+
+
     # add topk constraints
     topk = min(dis.shape[-1], topk)
     topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
@@ -57,10 +62,6 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     #     adj_matrix[tool_mask_12] = 0 # avoid tool to tool relations
 
     if connect_tools_all:
-        obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
-        obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
-        obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2)
-
         batch_mask = (adj_matrix[obj_pad_tool_mask_1].reshape(B, -1).sum(-1) > 0)[:, None, None].repeat(1, N, N)
         batch_obj_tool_mask_1 = obj_tool_mask_1 * batch_mask  # (B, N, N)
         neg_batch_obj_tool_mask_1 = obj_tool_mask_1 * (~batch_mask)  # (B, N, N)
@@ -72,7 +73,6 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
         adj_matrix[neg_batch_obj_tool_mask_1] = 0
         adj_matrix[neg_batch_obj_tool_mask_2] = 0
     else:
-        obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
         adj_matrix[obj_tool_mask_1] = 0
 
     n_rels = adj_matrix.sum(dim=(1,2))
