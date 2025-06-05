@@ -29,11 +29,11 @@ train:
   n_epoch: 300
   lr: 0.001
   adam_beta1: 0.9
-  batch_size: 64
+  batch_size: 128
   nf_hidden: 64
   num_workers: 12
   train_valid_ratio: 0.9
-  log_per_iter: 500
+  log_per_iter: 300
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1

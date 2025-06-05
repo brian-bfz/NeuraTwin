@@ -448,7 +448,7 @@ def fps_rad(pcd, radius):
     pcd_fps = np.stack(pcd_fps_lst, axis=0)
     return pcd_fps
 
-def fps_rad_tensor_old(pcd_tensor, radius):
+def fps_rad_tensor(pcd_tensor, radius):
         """
         Tensor-based FPS that returns indices directly.
         
@@ -471,7 +471,7 @@ def fps_rad_tensor_old(pcd_tensor, radius):
         
         return torch.from_numpy(np.array(selected_indices)).long()
 
-def fps_rad_tensor(points, radius):
+def fps_rad_tensor_new(points, radius):
     """
     Farthest point sampling on tensor
     Args:
