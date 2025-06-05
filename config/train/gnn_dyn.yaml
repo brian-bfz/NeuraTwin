@@ -7,7 +7,7 @@ dataset:
   # - 'rand_spread': random spreaded object pile
   # - 'rand_sparse_spread': random sparse spreaded object pile
   global_scale: 24
-  n_episode: 500
+  n_episode: 2000
   n_timestep: 80
   obj: "carrots"
   particle_r: 0.125
@@ -21,10 +21,10 @@ dataset:
     state_noise:
       train: 0.0
       valid: 0.0
-  downsample_dist: 0.014
+  downsample_rate: 3
 
 train:
-  data_root: "../PhysTwin/generated_data"
+  data_file: "../PhysTwin/generated_data/less_empty_data.h5"
   random_seed: 42
   n_epoch: 300
   lr: 0.001
@@ -33,7 +33,7 @@ train:
   nf_hidden: 64
   num_workers: 12
   train_valid_ratio: 0.9
-  log_per_iter: 50
+  log_per_iter: 500
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1
@@ -43,7 +43,7 @@ train:
   lr_scheduler:
     type: "StepLR"
     enabled: True
-    step_size: 100
+    step_size: 40
     gamma: 0.1 # reduce LR by this factor
     factor: 0.1 # ReduceLROnPlateau
     patience: 10 # ReduceLROnPlateau

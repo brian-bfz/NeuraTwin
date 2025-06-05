@@ -11,7 +11,7 @@ from utils import load_yaml, fps_rad_tensor
 import argparse
 
 class ObjectMotionPredictor:
-    def __init__(self, model_path, config_path, camera_calib_path, data_root):
+    def __init__(self, model_path, config_path, camera_calib_path, data_file):
         """Initialize the object motion predictor"""
         self.config = load_yaml(config_path)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -25,10 +25,10 @@ class ObjectMotionPredictor:
             data = json.load(f)
         self.intrinsics = np.array(data["intrinsics"])
         self.WH = data["WH"]
-        self.FPS = data["fps"]
+        self.FPS = data["fps"] / self.config['dataset']['downsample_rate']
         
         # Initialize dataset for consistent data loading
-        self.dataset = ParticleDataset(data_root, self.config, 'train')  # Use train to access all episodes
+        self.dataset = ParticleDataset(data_file, self.config, 'train')  # Use train to access all episodes
         
         # CRITICAL: Use same parameters as training!
         self.fps_radius = self.config['train']['fps_radius']  # 0.03
@@ -90,7 +90,7 @@ class ObjectMotionPredictor:
         
         Args:
         - initial_object_pos: [N_obj, 3] starting object positions
-        - robot_trajectory: [timesteps, N_robot, 3] robot motion sequence
+        - robot_trajectory: [timesteps, N_robot, 3] robot motion sequence (already downsampled)
         
         Returns:
         - object_predictions: [timesteps, N_obj, 3] predicted object motion
@@ -99,10 +99,11 @@ class ObjectMotionPredictor:
         object_predictions = [initial_object_pos.clone()]
         current_object_pos = initial_object_pos.clone()
         
-        print(f"Predicting object motion for {robot_trajectory.shape[0]-1} timesteps...")
+        print(f"Predicting object motion for {robot_trajectory.shape[0]-1} downsampled timesteps...")
+        print(f"Downsample rate: {self.config['dataset']['downsample_rate']}")
         
         for t in range(robot_trajectory.shape[0] - 1):
-            # Robot motion between timesteps
+            # Robot motion between downsampled timesteps
             current_robot_pos = robot_trajectory[t]
             next_robot_pos = robot_trajectory[t + 1]
             robot_delta = next_robot_pos - current_robot_pos
@@ -336,9 +337,10 @@ def main():
     parser.add_argument("--camera_calib_path", type=str, default="data/single_push_rope")
     parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
                        help="Episodes to test. Format: space-separated list (0 1 2 3 4) or range (0-4)")
-    parser.add_argument("--data_root", type=str, default="../PhysTwin/generated_data")
+    parser.add_argument("--data_file", type=str, default="../PhysTwin/generated_data/less_empty_data.h5")
     parser.add_argument("--video", action='store_true',
                        help="Generate visualization videos (optional)")
+    parser.add_argument("--config_path", type=str, default=None)
     args = parser.parse_args()
     
     # Parse episodes from the flexible input format
@@ -352,12 +354,15 @@ def main():
         return
     
     model_path = f"data/gnn_dyn_model/{args.model}/net_best.pth"
-    config_path = "config/train/gnn_dyn.yaml"
-    data_root = args.data_root
+    if args.config_path is None:
+        config_path = f"data/gnn_dyn_model/{args.model}/config.yaml"
+    else:
+        config_path = args.config_path
+    data_file = args.data_file 
     camera_calib_path = args.camera_calib_path
     
     # Initialize predictor with camera calibration
-    predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path, data_root)
+    predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path, data_file)
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")

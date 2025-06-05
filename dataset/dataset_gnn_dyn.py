@@ -23,11 +23,12 @@ from torch.utils.data import DataLoader
 np.seterr(divide='ignore', invalid='ignore')
 
 class ParticleDataset(Dataset):
-    def __init__(self, data_dir, config, phase):
+    def __init__(self, data_file, config, phase):
         self.config = config
 
         n_episode = config['dataset']['n_episode']
         n_timestep = config['dataset']['n_timestep']
+        self.downsample_rate = config['dataset']['downsample_rate']
         self.global_scale = config['dataset']['global_scale']
 
         train_valid_ratio = config['train']['train_valid_ratio']
@@ -47,8 +48,7 @@ class ParticleDataset(Dataset):
         self.n_timestep = n_timestep + 1
         self.n_his = config['train']['n_history']
         self.n_roll = config['train']['n_rollout']
-        self.data_dir = data_dir
-        self.hdf5_path = os.path.join(data_dir, 'data.h5')
+        self.hdf5_path = data_file
 
         self.screenHeight = 720
         self.screenWidth = 720
@@ -61,6 +61,7 @@ class ParticleDataset(Dataset):
         
         # File handle for efficient access - will be opened lazily per worker
         self._hdf5_file = None
+        self.offset = self.n_timestep - self.n_his * self.downsample_rate - self.n_roll * self.downsample_rate + 1
 
     def _get_hdf5_file(self):
         """Lazy loading of HDF5 file handle to work properly with multiprocessing."""
@@ -74,7 +75,7 @@ class ParticleDataset(Dataset):
             self._hdf5_file.close()
 
     def __len__(self):
-        return self.n_episode * (self.n_timestep - self.n_his - self.n_roll + 1)
+        return self.n_episode * self.offset
     
     def read_particles(self, particles_path):
         particles = np.load(particles_path).reshape(-1, 4)
@@ -116,6 +117,7 @@ class ParticleDataset(Dataset):
         # Load full episode data
         full_object_data = torch.from_numpy(episode_group['object'][:, :, :])  # [time, n_obj, 3]
         full_robot_data = torch.from_numpy(episode_group['robot'][:, :, :])    # [time, n_bot, 3]
+        frame_indices = [i for i in range(0,n_frames, self.downsample_rate)]
         
         # Get first frame data for FPS sampling (consistent with training)
         first_object = full_object_data[0]  # [n_obj, 3]
@@ -128,8 +130,10 @@ class ParticleDataset(Dataset):
         # Extract sampled trajectories using consistent indices
         sampled_object_trajectory = full_object_data[:, object_sample_indices, :]  # [time, sampled_obj, 3]
         sampled_robot_trajectory = full_robot_data[:, robot_sample_indices, :]     # [time, sampled_robot, 3]
+        sampled_object_trajectory = sampled_object_trajectory[frame_indices, :, :]
+        sampled_robot_trajectory = sampled_robot_trajectory[frame_indices, :, :]
         
-        print(f"Episode {episode_idx}: {n_frames} timesteps, "
+        print(f"Episode {episode_idx}: {n_frames} -> {len(frame_indices)} timesteps, "
               f"Objects: {n_obj_particles} -> {len(object_sample_indices)} sampled, "
               f"Robot: {n_bot_particles} -> {len(robot_sample_indices)} sampled")
         
@@ -141,23 +145,18 @@ class ParticleDataset(Dataset):
 
     def __getitem__(self, idx):
         # Calculate which episode and timestep this idx corresponds to
-        offset = self.n_timestep - self.n_his - self.n_roll + 1
-        idx_episode = idx // offset + self.epi_st_idx
-        idx_timestep = idx % offset
+        idx_episode = idx // self.offset + self.epi_st_idx
+        idx_timestep = idx % self.offset
 
         # Get HDF5 file handle (opened lazily per worker)
         f = self._get_hdf5_file()
         episode_group = f[f'episode_{idx_episode:06d}']
+                
+        # Generate downsampled frame indices
+        frame_indices = [idx_timestep + i * self.downsample_rate for i in range(self.n_his + self.n_roll)]
         
-        # Get metadata
-        n_frames = episode_group.attrs['n_frames']
-        
-        # Read object and robot datasets for the required time window
-        time_end = idx_timestep + self.n_his + self.n_roll
-        
-        # Load object and robot data as numpy arrays then convert to tensors
-        object_data = torch.from_numpy(episode_group['object'][idx_timestep:time_end, :, :])  # [time, n_obj, 3]
-        robot_data = torch.from_numpy(episode_group['robot'][idx_timestep:time_end, :, :])    # [time, n_bot, 3]
+        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_obj, 3]
+        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [time, n_bot, 3]
         
         n_frames = self.n_his + self.n_roll
         
@@ -172,13 +171,7 @@ class ParticleDataset(Dataset):
         n_sampled_object = sampled_object_indices.shape[0]
         n_sampled_robot = sampled_robot_indices.shape[0]
         particle_num = n_sampled_object + n_sampled_robot
-        
-        # Create masks for particle types
-        object_mask = torch.zeros(particle_num, dtype=torch.bool)
-        robot_mask = torch.zeros(particle_num, dtype=torch.bool)
-        object_mask[:n_sampled_object] = True
-        robot_mask[n_sampled_object:] = True
-        
+                
         # Sample particles using tensor indexing (super efficient!)
         sampled_object_states = object_data[:, sampled_object_indices, :]  # [time, sampled_object, 3]
         sampled_robot_states = robot_data[:, sampled_robot_indices, :]     # [time, sampled_robot, 3]
@@ -192,18 +185,11 @@ class ParticleDataset(Dataset):
         
         # Calculate states_delta using tensor operations
         states_delta = torch.zeros(n_frames - 1, particle_num, 3)
-        
-        # Efficient tensor computation for consecutive frame differences
-        next_states = states[1:]      # [time-1, particles, 3]
-        current_states = states[:-1]  # [time-1, particles, 3]
-        
-        # For object particles: delta = 0 (implicitly, since states_delta is zero-initialized)
-        # For robot particles: delta = next - current
-        states_delta[:, robot_mask, :] = next_states[:, robot_mask, :] - current_states[:, robot_mask, :]
+        states_delta[:, n_sampled_object:] = sampled_robot_states[1:] - sampled_robot_states[:-1]
         
         # Create attrs tensor
         attrs = torch.zeros(n_frames, particle_num)
-        attrs[:, robot_mask] = 1.0   # robot particles
+        attrs[:, n_sampled_object:] = 1.0   # robot particles
         
         # Convert to float tensors
         states = states.float()
@@ -222,7 +208,7 @@ def dataset_test():
     cam.append(env.get_cam_extrinsics())
     env.close()
 
-    dataset = ParticleDataset(config['train']['data_root'], config, 'train', cam)
+    dataset = ParticleDataset(config['train']['data_file'], config, 'train', cam)
     states, states_delta, attrs, particle_num, color_imgs = dataset[0]
     vid = cv2.VideoWriter('dataset_nopusher.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 1, (720, 720))
     for i in range(states.shape[0] - 1):
