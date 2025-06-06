@@ -4,6 +4,7 @@ import re
 import yaml
 import argparse
 import json
+from .paths import *
 
 def extract_episode_number(filename):
     """Extract episode number from filename like 'prediction_3.mp4'"""
@@ -32,17 +33,14 @@ def main():
     args = parser.parse_args()
     
     model = args.model
-    
-    # Use model-specific configuration
-    model_dir = f"data/gnn_dyn_model/{model}"
-    config_path = os.path.join(model_dir, "config.yaml")
-    
-    if not os.path.exists(config_path):
-        print(f"Error: Model config file '{config_path}' does not exist!")
+    model_paths = get_model_paths(model)
+        
+    if not os.path.exists(model_paths['config']):
+        print(f"Error: Model config file '{model_paths['config']}' does not exist!")
         print(f"Please check if the model directory exists and contains config.yaml")
         return
     
-    with open(config_path, "r") as file:
+    with open(model_paths['config'], "r") as file:
         config = yaml.safe_load(file)
 
     N_EPISODE = config['dataset']['n_episode']
@@ -221,19 +219,16 @@ def main():
         </div>
     </div>
 """
-
-    # List all mp4 files in the model-specific video directory
-    videos_dir = f"data/video/{model}"
     
-    if not os.path.exists(videos_dir):
-        print(f"Error: Video directory '{videos_dir}' does not exist!")
+    if not os.path.exists(model_paths['video_dir']):
+        print(f"Error: Video directory '{model_paths['video_dir']}' does not exist!")
         print(f"Please run gnn_inference.py with model name '{model}' first.")
         return
     
-    video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
+    video_files = glob.glob(os.path.join(model_paths['video_dir'], "*.mp4"))
 
     if not video_files:
-        print(f"No videos found in '{videos_dir}'")
+        print(f"No videos found in '{model_paths['video_dir']}'")
         print(f"Please run gnn_inference.py with model name '{model}' first.")
         return
 
@@ -310,16 +305,15 @@ def main():
 """
 
     # Save HTML file in data/html directory
-    html_dir = "data/html"
-    os.makedirs(html_dir, exist_ok=True)
-    output_path = os.path.join(html_dir, f"{model}_videos.html")
+    os.makedirs(DATA_ROOT / "html", exist_ok=True)
+    output_path = os.path.join(DATA_ROOT / "html", f"{model}_videos.html")
     
     with open(output_path, "w") as file:
         file.write(html_content)
 
     print(f"HTML file saved to {output_path}")
     print(f"Model name: {model}")
-    print(f"Model directory: {model_dir}")
+    print(f"Model directory: {model_paths['model_dir']}")
     print(f"Training videos: {len(training_videos)}")
     print(f"Validation videos: {len(validation_videos)}")
     if training_videos:
