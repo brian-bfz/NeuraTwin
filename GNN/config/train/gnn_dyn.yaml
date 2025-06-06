@@ -1,0 +1,69 @@
+dataset:
+  folder: "data/gnn_dyn_data_custom" # gen_data
+  init_pos: 'spread'
+  # initialization options:
+  # - 'spread': deterministic spreaded object pile
+  # - 'rand_blob': random blob-shape object pile
+  # - 'rand_spread': random spreaded object pile
+  # - 'rand_sparse_spread': random sparse spreaded object pile
+  global_scale: 24
+  n_episode: 2000
+  n_timestep: 60
+  obj: "carrots"
+  particle_r: 0.125
+  cam_idx: 0
+  wkspc_w: 5.0
+  headless: True
+  cont_motion: False
+  robot_type: 'franka' # kinova; franka
+  randomness: 
+    use: False
+    state_noise:
+      train: 0.0
+      valid: 0.0
+  downsample_rate: 3
+
+train:
+  data_file: "../PhysTwin/generated_data/less_empty_data.h5"
+  random_seed: 42
+  n_epoch: 400
+  lr: 0.001
+  adam_beta1: 0.9
+  batch_size: 128
+  nf_hidden: 64
+  num_workers: 12
+  train_valid_ratio: 0.9
+  log_per_iter: 350
+  ckp_per_iter: 1000
+  resume_epoch: -1
+  resume_iter: -1
+  n_history: 4
+  n_rollout: 4
+  rollout_decay: 1.0
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    enabled: true
+    step_size: 100 # StepLR
+    gamma: 0.1 # StepLR
+    factor: 0.2 # ReduceLROnPlateau
+    patience: 10 # ReduceLROnPlateau
+    threshold_mode: 'rel' # ReduceLROnPlateau
+    cooldown: 0 # ReduceLROnPlateau
+  rollback:
+    enabled: true
+    patience: 10
+    threshold: 2
+  particle:
+    nf_effect: 64
+    resume:
+      active: false
+      epoch: 0
+      iter: 0
+      folder: 
+    adj_thresh: 0.10
+    add_delta: False
+    connect_tools_all: False  # Connect all tool particles to all object particles regardless of distance
+    topk: 15  # Maximum number of neighbors per particle
+  lam_reg: 2e-4
+  lam_sp: 1e-2
+  fps_radius: 0.02
