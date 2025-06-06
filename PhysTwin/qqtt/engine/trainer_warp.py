@@ -1,6 +1,6 @@
-from PhysTwin.qqtt.data import RealData, SimpleData
-from PhysTwin.qqtt.utils import logger, visualize_pc, cfg
-from PhysTwin.qqtt.model.diff_simulator import (
+from ..data import RealData, SimpleData
+from ..utils import logger, visualize_pc, cfg
+from ..model.diff_simulator import (
     SpringMassSystemWarp,
 )
 import open3d as o3d
@@ -17,22 +17,22 @@ from pynput import keyboard
 import pyrender
 import trimesh
 
-from PhysTwin.gaussian_splatting.scene.gaussian_model import GaussianModel
-from PhysTwin.gaussian_splatting.scene.cameras import Camera
-from PhysTwin.gaussian_splatting.gaussian_renderer import render as render_gaussian
-from PhysTwin.gaussian_splatting.dynamic_utils import (
+from ...gaussian_splatting.scene.gaussian_model import GaussianModel
+from ...gaussian_splatting.scene.cameras import Camera
+from ...gaussian_splatting.gaussian_renderer import render as render_gaussian
+from ...gaussian_splatting.dynamic_utils import (
     interpolate_motions_speedup,
     knn_weights,
     knn_weights_sparse,
     get_topk_indices,
     calc_weights_vals_from_indices,
 )
-from PhysTwin.gaussian_splatting.utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
-from PhysTwin.gs_render import (
+from ...gaussian_splatting.utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
+from ...gs_render import (
     remove_gaussians_with_low_opacity,
     remove_gaussians_with_point_mesh_distance,
 )
-from PhysTwin.gaussian_splatting.rotation_utils import quaternion_multiply, matrix_to_quaternion
+from ...gaussian_splatting.rotation_utils import quaternion_multiply, matrix_to_quaternion
 
 from sklearn.cluster import KMeans
 import copy

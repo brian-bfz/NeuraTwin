@@ -1,8 +1,9 @@
-from PhysTwin.qqtt.utils import logger, cfg
+from .qqtt.utils import logger, cfg
 import numpy as np
 import torch
 from argparse import ArgumentParser
-from PhysTwin.SampleRobot import RobotPcSampler
+from .SampleRobot import RobotPcSampler
+from .paths import *
 import os
 import pickle
 import json
@@ -11,6 +12,7 @@ import open3d as o3d
 import h5py
 import sys
 from scripts.utils import parse_episodes
+import glob
 
 def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
         logger.info(f"Starting video generation for episode {episode_id}")
@@ -116,37 +118,38 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_path",
         type=str,
-        default="PhysTwin/data/different_types",
+        default=str(DATA_DIFFERENT_TYPES),
     )
     parser.add_argument(
         "--data_file",
         type=str,
-        default="PhysTwin/generated_data/data.h5",
+        default=str(GENERATED_DATA_DIR / "data.h5"),
         help="Path to the shared HDF5 data file"
     )
     parser.add_argument(
         "--bg_img_path",
         type=str,
-        default="PhysTwin/data/bg.png",
+        default=str(DATA_BG_IMG),
     )
     parser.add_argument("--case_name", type=str, required=True)
     parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
                        help="Episodes to generate videos for. Format: space-separated list (0 1 2 3 4) or range (0-4)")
-    parser.add_argument("--output_dir", type=str, default="PhysTwin/generated_videos", help="Output directory for videos")
+    parser.add_argument("--output_dir", type=str, default=str(GENERATED_VIDEOS_DIR), help="Output directory for videos")
     args = parser.parse_args()
 
     base_path = args.base_path
     case_name = args.case_name
 
     if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml("PhysTwin/configs/cloth.yaml")
+        cfg.load_from_yaml(str(CONFIG_CLOTH))
     else:
-        cfg.load_from_yaml("PhysTwin/configs/real.yaml")
+        cfg.load_from_yaml(str(CONFIG_REAL))
 
-    base_dir = f"PhysTwin/temp_experiments/{case_name}"
+    case_paths = get_case_paths(case_name)
+    base_dir = str(case_paths['base_dir'])
 
     # Load the robot finger
-    urdf_path = "PhysTwin/xarm/xarm7_with_gripper.urdf"
+    urdf_path = str(URDF_XARM7)
     R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 
     init_pose = np.eye(4)

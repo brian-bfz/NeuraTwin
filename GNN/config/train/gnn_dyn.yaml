@@ -1,5 +1,5 @@
 dataset:
-  file: "../PhysTwin/generated_data/less_empty_data.h5"
+  file: "PhysTwin/generated_data/less_empty_data.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile

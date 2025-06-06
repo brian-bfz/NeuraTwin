@@ -62,8 +62,9 @@ html_content = """
     <div class="container">
 """
 
-# List all mp4 files in PhysTwin/generated_videos
-videos_dir = "PhysTwin/generated_videos"
+# List all mp4 files in generated_videos
+from .paths import GENERATED_VIDEOS_DIR
+videos_dir = GENERATED_VIDEOS_DIR
 os.makedirs(videos_dir, exist_ok=True)
 video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
 
@@ -88,7 +89,7 @@ html_content += """
 </html>
 """
 
-output_path = "PhysTwin/generated_videos/index.html"
+output_path = GENERATED_VIDEOS_DIR / "index.html"
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 with open(output_path, "w") as file:
     file.write(html_content)

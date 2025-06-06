@@ -5,9 +5,10 @@ import cv2
 import open3d as o3d
 import pickle
 import json
-from GNN.dataset.dataset_gnn_dyn import ParticleDataset
-from GNN.model.gnn_dyn import PropNetDiffDenModel
-from GNN.utils import load_yaml, fps_rad_tensor
+from .dataset.dataset_gnn_dyn import ParticleDataset
+from .model.gnn_dyn import PropNetDiffDenModel
+from .utils import load_yaml, fps_rad_tensor
+from .paths import *
 import argparse
 from scripts.utils import parse_episodes
 
@@ -379,9 +380,10 @@ def main():
         return
     
     # Setup file paths
-    model_path = f"data/gnn_dyn_model/{args.model}/net_best.pth"
+    model_paths = get_model_paths(args.model)
+    model_path = str(model_paths['net_best'])
     if args.config_path is None:
-        config_path = f"data/gnn_dyn_model/{args.model}/config.yaml"
+        config_path = str(model_paths['config'])
     else:
         config_path = args.config_path
     data_file = args.data_file 
@@ -433,7 +435,7 @@ def main():
             
             # Generate video only if --video flag is provided
             if args.video:
-                video_path = f"data/video/{args.model}/prediction_{episode_num}.mp4"
+                video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
                 predictor.visualize_object_motion(
                     predicted_objects, actual_objects, actual_robots, 
                     episode_num, video_path
@@ -468,7 +470,7 @@ def main():
             print("❌ Poor prediction accuracy - model needs improvement")
         
         if args.video:
-            print(f"\nVideos saved in 'data/video/{args.model}' directory")
+            print(f"\nVideos saved in '{model_paths['video_dir']}' directory")
         else:
             print(f"\nTo generate videos, rerun with --video flag")
 

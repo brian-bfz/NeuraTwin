@@ -9,13 +9,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from GNN.timer import EpochTimer
+from ..timer import EpochTimer
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 
-from GNN.dataset.dataset_gnn_dyn import ParticleDataset
-from GNN.model.gnn_dyn import PropNetDiffDenModel
-from GNN.utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms
+from ..dataset.dataset_gnn_dyn import ParticleDataset
+from ..model.gnn_dyn import PropNetDiffDenModel
+from ..utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms
+from ..paths import *
 
 
 # from env.flex_env import FlexEnv
@@ -77,7 +78,7 @@ def train():
     args = parser.parse_args()
 
     # Load training configuration
-    config = load_yaml('GNN/config/train/gnn_dyn.yaml')
+    config = load_yaml(str(CONFIG_TRAIN_GNN_DYN))
     n_rollout = config['train']['n_rollout']
     n_history = config['train']['n_history']
     ckp_per_iter = config['train']['ckp_per_iter']
@@ -90,7 +91,7 @@ def train():
     # SETUP TRAINING DIRECTORY
     # ========================================================================
     
-    TRAIN_ROOT = 'data/gnn_dyn_model'
+    TRAIN_ROOT = GNN_DYN_MODEL_ROOT
     
     if config['train']['particle']['resume']['active']:
         # Resume from existing checkpoint

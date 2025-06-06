@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 # from env.flex_env import FlexEnv
-from GNN.utils import load_yaml, set_seed, fps_rad_tensor, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
+from ..utils import load_yaml, set_seed, fps_rad_tensor, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
 
 import matplotlib.pyplot as plt
 # from dgl.geometry import farthest_point_sampler

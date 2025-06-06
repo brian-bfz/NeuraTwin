@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 from collections import defaultdict
 import glob
+from .paths import *
 
 def find_log_files(model_dir):
     """
@@ -284,7 +285,7 @@ def plot_multi_model_comparison(model_names, save_path=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Visualize GNN training loss curves')
-    parser.add_argument('--name', type=str,
+    parser.add_argument('--model', type=str,
                        help='Single model name (e.g., 2025-06-01-15-33-02-230868 or custom_model_name)')
     parser.add_argument('--compare', type=str, nargs='+',
                        help='Multiple model names to compare (e.g., --compare model1 model2 model3)')
@@ -303,10 +304,10 @@ def main():
         
         plot_multi_model_comparison(model_names, save_path)
         
-    elif args.name:
+    elif args.model:
         # Single model mode
-        model_name = args.name
-        model_dir = f"data/gnn_dyn_model/{model_name}"
+        model_name = args.model
+        model_dir = get_model_paths(model_name)['model_dir']
         
         if not os.path.exists(model_dir):
             print(f"Error: Model directory '{model_dir}' does not exist!")
