@@ -130,7 +130,7 @@ def train():
     # ========================================================================
     
     phases = ['train', 'valid']
-    datasets = {phase: ParticleDataset(config['train']['data_file'], config, phase) for phase in phases}
+    datasets = {phase: ParticleDataset(config['dataset']['file'], config, phase) for phase in phases}
 
     dataloaders = {phase: DataLoader(
         datasets[phase],

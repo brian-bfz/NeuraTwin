@@ -26,7 +26,7 @@ def create_output_folder():
 def get_real_dataset_examples(config, n_examples):
     """Get n_examples from the real dataset"""
     # Create dataset instance
-    dataset = ParticleDataset(config['train']['data_file'], config, 'train')
+    dataset = ParticleDataset(config['dataset']['file'], config, 'train')
     
     examples = []
     for i in range(n_examples):

@@ -1,0 +1,26 @@
+# GNN
+*.avi
+GNN/data
+GNN/build/
+GNN/visualize_edges/
+
+# PhysTwin
+PhysTwin/experiments/
+PhysTwin/data/
+PhysTwin/experiments_optimization/
+PhysTwin/gaussian_output/
+PhysTwin/generated_data/
+PhysTwin/generated_videos/
+PhysTwin/xarm/
+PhysTwin/
+
+# All
+*.egg-info
+*.png
+*.so
+*.prof
+*.profile
+*.mp4
+*.zip
+__pycache__/
+.DS_Store

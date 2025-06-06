@@ -1,5 +1,5 @@
 dataset:
-  folder: "data/gnn_dyn_data_custom" # gen_data
+  file: "../PhysTwin/generated_data/less_empty_data.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -24,7 +24,6 @@ dataset:
   downsample_rate: 3
 
 train:
-  data_file: "../PhysTwin/generated_data/less_empty_data.h5"
   random_seed: 42
   n_epoch: 400
   lr: 0.001

@@ -292,7 +292,7 @@ def dataset_test():
     cam.append(env.get_cam_extrinsics())
     env.close()
 
-    dataset = ParticleDataset(config['train']['data_file'], config, 'train', cam)
+    dataset = ParticleDataset(config['dataset']['file'], config, 'train', cam)
     states, states_delta, attrs, particle_num, color_imgs = dataset[0]
     
     # Create visualization video
