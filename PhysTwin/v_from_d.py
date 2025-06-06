@@ -1,14 +1,16 @@
-from qqtt.utils import logger, cfg
+from PhysTwin.qqtt.utils import logger, cfg
 import numpy as np
 import torch
 from argparse import ArgumentParser
-from SampleRobot import RobotPcSampler
+from PhysTwin.SampleRobot import RobotPcSampler
 import os
 import pickle
 import json
 import cv2
 import open3d as o3d
 import h5py
+import sys
+from scripts.utils import parse_episodes
 
 def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
         logger.info(f"Starting video generation for episode {episode_id}")
@@ -114,36 +116,37 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_path",
         type=str,
-        default="./data/different_types",
+        default="PhysTwin/data/different_types",
     )
     parser.add_argument(
         "--data_file",
         type=str,
-        default="generated_data/data.h5",
+        default="PhysTwin/generated_data/data.h5",
         help="Path to the shared HDF5 data file"
     )
     parser.add_argument(
         "--bg_img_path",
         type=str,
-        default="./data/bg.png",
+        default="PhysTwin/data/bg.png",
     )
     parser.add_argument("--case_name", type=str, required=True)
-    parser.add_argument("--episode_ids", type=int, nargs="+", help="Episode IDs to generate videos for")
-    parser.add_argument("--output_dir", type=str, default="generated_data/videos", help="Output directory for videos")
+    parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
+                       help="Episodes to generate videos for. Format: space-separated list (0 1 2 3 4) or range (0-4)")
+    parser.add_argument("--output_dir", type=str, default="PhysTwin/generated_videos", help="Output directory for videos")
     args = parser.parse_args()
 
     base_path = args.base_path
     case_name = args.case_name
 
     if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml("configs/cloth.yaml")
+        cfg.load_from_yaml("PhysTwin/configs/cloth.yaml")
     else:
-        cfg.load_from_yaml("configs/real.yaml")
+        cfg.load_from_yaml("PhysTwin/configs/real.yaml")
 
-    base_dir = f"./temp_experiments/{case_name}"
+    base_dir = f"PhysTwin/temp_experiments/{case_name}"
 
     # Load the robot finger
-    urdf_path = "xarm/xarm7_with_gripper.urdf"
+    urdf_path = "PhysTwin/xarm/xarm7_with_gripper.urdf"
     R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 
     init_pose = np.eye(4)
@@ -165,12 +168,17 @@ if __name__ == "__main__":
     cfg.WH = data["WH"]
     cfg.bg_img_path = args.bg_img_path
 
+    # Parse episode specification
+    try:
+        episode_list = parse_episodes(args.episodes)
+    except ValueError as e:
+        print(f"Error parsing episodes: {e}")
+        print("Examples:")
+        print("  Space-separated: --episodes 0 1 2 3 4")
+        print("  Range format: --episodes 0-4")
+        sys.exit(1)
+
     # Generate videos for specified episodes
-    if args.episode_ids:
-        with h5py.File(args.data_file, 'r') as f:
-            for episode_id in args.episode_ids:
-                video_from_data(cfg, f, episode_id, sample_robot, args.output_dir)
-    else:
-        # If no episodes specified, generate videos for first few episodes
-        print("No episode IDs specified. Use --episode_ids to specify which episodes to process.")
-        print("Example: python v_from_d.py --case_name your_case --episode_ids 0 1 2")
+    with h5py.File(args.data_file, 'r') as f:
+        for episode_id in episode_list:
+            video_from_data(cfg, f, episode_id, sample_robot, args.output_dir)

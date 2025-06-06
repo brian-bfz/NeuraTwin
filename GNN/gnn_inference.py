@@ -5,10 +5,11 @@ import cv2
 import open3d as o3d
 import pickle
 import json
-from dataset.dataset_gnn_dyn import ParticleDataset
-from model.gnn_dyn import PropNetDiffDenModel
-from utils import load_yaml, fps_rad_tensor
+from GNN.dataset.dataset_gnn_dyn import ParticleDataset
+from GNN.model.gnn_dyn import PropNetDiffDenModel
+from GNN.utils import load_yaml, fps_rad_tensor
 import argparse
+from scripts.utils import parse_episodes
 
 # ============================================================================
 # MAIN PREDICTION CLASS
@@ -349,41 +350,6 @@ class ObjectMotionPredictor:
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def parse_episodes(episodes_arg):
-    """
-    Parse episode specification supporting both list and range formats.
-    
-    Args:
-        episodes_arg: list[str] - episode specification from command line
-        
-    Returns:
-        list[int] - parsed episode numbers
-        
-    Examples:
-        ['0', '1', '2', '3', '4'] -> [0, 1, 2, 3, 4]
-        ['0-4'] -> [0, 1, 2, 3, 4] (inclusive range)
-    """
-    if len(episodes_arg) == 1 and '-' in episodes_arg[0]:
-        # Range format: "0-4"
-        try:
-            start, end = episodes_arg[0].split('-')
-            start, end = int(start), int(end)
-            if start > end:
-                raise ValueError(f"Invalid range: start ({start}) > end ({end})")
-            episodes = list(range(start, end + 1))  # inclusive
-            print(f"Using episode range: {start} to {end} (inclusive) -> {episodes}")
-            return episodes
-        except ValueError as e:
-            raise ValueError(f"Invalid range format '{episodes_arg[0]}': {e}")
-    else:
-        # Space-separated list: ["0", "1", "2", "3", "4"]
-        try:
-            episodes = [int(ep) for ep in episodes_arg]
-            print(f"Using explicit episode list: {episodes}")
-            return episodes
-        except ValueError as e:
-            raise ValueError(f"Invalid episode numbers: {e}")
-
 def main():
     """
     Main function to test object motion prediction on specified episodes.
@@ -393,10 +359,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="2025-05-31-21-01-09-427982",
                        help="Model name (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)")
-    parser.add_argument("--camera_calib_path", type=str, default="data/single_push_rope")
+    parser.add_argument("--camera_calib_path", type=str, default="PhysTwin/data/different_types/single_push_rope")
     parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
                        help="Episodes to test. Format: space-separated list (0 1 2 3 4) or range (0-4)")
-    parser.add_argument("--data_file", type=str, default="../PhysTwin/generated_data/less_empty_data.h5")
+    parser.add_argument("--data_file", type=str, default="PhysTwin/generated_data/less_empty_data.h5")
     parser.add_argument("--video", action='store_true',
                        help="Generate visualization videos (optional)")
     parser.add_argument("--config_path", type=str, default=None)

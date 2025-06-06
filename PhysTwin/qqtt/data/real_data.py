@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import pickle
-from qqtt.utils import logger, visualize_pc, cfg
+from PhysTwin.qqtt.utils import logger, visualize_pc, cfg
 import matplotlib.pyplot as plt
 
 

@@ -10,16 +10,16 @@
 #
 
 import torch
-from gaussian_splatting.scene import Scene
+from PhysTwin.gaussian_splatting.scene import Scene
 import os
 from tqdm import tqdm
 from os import makedirs
-from gaussian_splatting.gaussian_renderer import render
+from PhysTwin.gaussian_splatting.gaussian_renderer import render
 import torchvision
-from gaussian_splatting.utils.general_utils import safe_state
+from PhysTwin.gaussian_splatting.utils.general_utils import safe_state
 from argparse import ArgumentParser
-from gaussian_splatting.arguments import ModelParams, PipelineParams, get_combined_args
-from gaussian_splatting.gaussian_renderer import GaussianModel
+from PhysTwin.gaussian_splatting.arguments import ModelParams, PipelineParams, get_combined_args
+from PhysTwin.gaussian_splatting.gaussian_renderer import GaussianModel
 try:
     from diff_gaussian_rasterization import SparseGaussianAdam
     SPARSE_ADAM_AVAILABLE = True

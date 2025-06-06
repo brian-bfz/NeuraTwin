@@ -1,7 +1,7 @@
 # import sys
 # sys.path.append("./gaussian_splatting")
-from qqtt import InvPhyTrainerWarp
-from qqtt.utils import logger, cfg
+from PhysTwin.qqtt import InvPhyTrainerWarp
+from PhysTwin.qqtt.utils import logger, cfg
 from datetime import datetime
 import random
 import numpy as np
@@ -10,8 +10,10 @@ from argparse import ArgumentParser
 import glob
 import os
 import pickle
-from SampleRobot import RobotPcSampler
+from PhysTwin.SampleRobot import RobotPcSampler
 import h5py
+import sys
+from scripts.utils import parse_episodes
 
 # def set_all_seeds(seed):
 #     random.seed(seed)
@@ -76,34 +78,44 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_path",
         type=str,
-        default="./data/different_types",
+        default="PhysTwin/data/different_types",
     )
     parser.add_argument(
         "--gaussian_path",
         type=str,
-        default="./gaussian_output",
+        default="PhysTwin/gaussian_output",
     )
     parser.add_argument("--case_name", type=str, default="double_lift_cloth_3")
     parser.add_argument("--n_ctrl_parts", type=int, default=1)
     parser.add_argument("--custom_ctrl_points", type=str, help="Path to directory containing custom control points")
-    parser.add_argument("--n_episodes", type=int, required=True)
-    parser.add_argument("--start_episode", type=int, default=0)
+    parser.add_argument("--episodes", nargs='+', type=str, required=True,
+                       help="Episodes to generate. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--include_gaussian", action="store_true")
     args = parser.parse_args()
+
+    # Parse episode specification
+    try:
+        episode_list = parse_episodes(args.episodes)
+    except ValueError as e:
+        print(f"Error parsing episodes: {e}")
+        print("Examples:")
+        print("  Space-separated: --episodes 0 1 2 3 4")
+        print("  Range format: --episodes 0-4")
+        sys.exit(1)
 
     base_path = args.base_path
     case_name = args.case_name
 
     if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml("configs/cloth.yaml")
+        cfg.load_from_yaml("PhysTwin/configs/cloth.yaml")
     else:
-        cfg.load_from_yaml("configs/real.yaml")
+        cfg.load_from_yaml("PhysTwin/configs/real.yaml")
     print(cfg.__dict__)
 
-    base_dir = f"./temp_experiments/{case_name}"
+    base_dir = f"PhysTwin/temp_experiments/{case_name}"
 
     # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = f"./experiments_optimization/{case_name}/optimal_params.pkl"
+    optimal_path = f"PhysTwin/experiments_optimization/{case_name}/optimal_params.pkl"
     logger.info(f"Load optimal parameters from: {optimal_path}")
     assert os.path.exists(
         optimal_path
@@ -113,7 +125,7 @@ if __name__ == "__main__":
     cfg.set_optimal_params(optimal_params)
 
     # Load the robot finger
-    urdf_path = "xarm/xarm7_with_gripper.urdf"
+    urdf_path = "PhysTwin/xarm/xarm7_with_gripper.urdf"
     R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 
     init_pose = np.eye(4)
@@ -121,11 +133,11 @@ if __name__ == "__main__":
     init_pose[:3, 3] = [0.0, 0.0, 0.0]
 
     exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
-    gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
+    gaussians_path = f"PhysTwin/{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
 
     logger.set_log_file(path=base_dir, name="inference_log")
 
-    best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
+    best_model_path = glob.glob(f"PhysTwin/experiments/{case_name}/train/best_*.pth")[0]
     
     # Create timestamped folder for this simulation run
     # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -143,13 +155,13 @@ if __name__ == "__main__":
     )
 
     # Initialize shared data file
-    save_dir = "generated_data"
+    save_dir = "PhysTwin/generated_data"
     os.makedirs(save_dir, exist_ok=True)
     data_file_path = os.path.join(save_dir, "data.h5")
     initialize_data_file(data_file_path)
 
     # Generate episodes
-    for i in range(args.start_episode, args.start_episode + args.n_episodes):
+    for i in episode_list:
         trainer.generate_data(
             best_model_path, 
             gaussians_path, 

@@ -1,1 +1,1 @@
-# Train package
+# GNN train package

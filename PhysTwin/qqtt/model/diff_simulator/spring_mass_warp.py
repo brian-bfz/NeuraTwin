@@ -1,5 +1,5 @@
 import torch
-from qqtt.utils import logger, cfg
+from PhysTwin.qqtt.utils import logger, cfg
 import warp as wp
 import numpy as np
 

@@ -11,8 +11,12 @@ PhysTwin/experiments_optimization/
 PhysTwin/gaussian_output/
 PhysTwin/generated_data/
 PhysTwin/generated_videos/
+PhysTwin/temp_experiments/
 PhysTwin/xarm/
-PhysTwin/
+
+PhysTwin/data_process/models/weights/
+PhysTwin/data_process/groundedSAM_checkpoints/
+PhysTwin/data_process/TRELLIS/
 
 # All
 *.egg-info
@@ -24,3 +28,4 @@ PhysTwin/
 *.zip
 __pycache__/
 .DS_Store
+*.pth

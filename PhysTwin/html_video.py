@@ -62,20 +62,19 @@ html_content = """
     <div class="container">
 """
 
-# List all mp4 files in generated_data/videos
-videos_dir = "generated_data/videos"
+# List all mp4 files in PhysTwin/generated_videos
+videos_dir = "PhysTwin/generated_videos"
 os.makedirs(videos_dir, exist_ok=True)
 video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
 
 for video_path in sorted(video_files):
     filename = os.path.basename(video_path)
-    rel_video_path = os.path.join("videos", filename)
     html_content += f"""
                 <div class="case">
                     <div class="case-name">{filename}</div>
                     <div class="videos">
                         <div class="video-container">
-                            <video src="{rel_video_path}" controls autoplay muted loop></video>
+                            <video src="{filename}" controls autoplay muted loop></video>
                             <div>Simulation Video</div>
                         </div>
                     </div>
@@ -89,7 +88,7 @@ html_content += """
 </html>
 """
 
-output_path = "generated_data/index.html"
+output_path = "PhysTwin/generated_videos/index.html"
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 with open(output_path, "w") as file:
     file.write(html_content)
