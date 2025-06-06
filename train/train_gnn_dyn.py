@@ -22,21 +22,34 @@ from utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, lo
 
 def collate_fn(data):
     """
-    data: is a list of tuples with (states, states_delta, attrs, particle_num)
-            where states/states_delta are tensors of shape [particle_num, time, 3]
-            and attrs is [particle_num, time]
+    Custom collation function for batching variable-sized particle data.
+    Pads sequences to maximum particle count in batch and handles temporal structure.
+    
+    Args:
+        data: list of tuples - [(states, states_delta, attrs, particle_num), ...] where:
+            states: [particle_num, time, 3] - particle positions over time
+            states_delta: [particle_num, time-1, 3] - particle displacements
+            attrs: [particle_num, time] - particle attributes (0=object, 1=robot)
+            particle_num: int - number of particles in this sample
+            
+    Returns:
+        states_tensor: [batch_size, time, max_particles, 3] - padded position sequences
+        states_delta_tensor: [batch_size, time-1, max_particles, 3] - padded displacement sequences
+        attr: [batch_size, time, max_particles] - padded attribute sequences
+        particle_num_tensor: [batch_size] - particle counts per sample
     """
     states, states_delta, attrs, particle_num = zip(*data)
-    max_len = max(particle_num)
+    max_len = max(particle_num)  # Maximum particles in this batch
     batch_size = len(data)
     n_time, _, n_dim = states[0].shape
+    
+    # Initialize padded tensors
     states_tensor = torch.zeros((batch_size, n_time, max_len, n_dim), dtype=torch.float32)
     states_delta_tensor = torch.zeros((batch_size, n_time - 1, max_len, n_dim), dtype=torch.float32)
     attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
     particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
-    # color_imgs_np = np.array(color_imgs)
-    # color_imgs_tensor = torch.tensor(color_imgs_np, dtype=torch.float32)
 
+    # Fill tensors with actual data (rest remains zero-padded)
     for i in range(len(data)):
         states_tensor[i, :, :particle_num[i], :] = states[i]
         states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
@@ -44,7 +57,16 @@ def collate_fn(data):
 
     return states_tensor, states_delta_tensor, attr, particle_num_tensor
 
+# ============================================================================
+# MAIN TRAINING FUNCTION
+# ============================================================================
+
 def train():
+    """
+    Main training loop for GNN dynamics model with autoregressive rollout.
+    Handles model initialization, data loading, training with validation,
+    learning rate scheduling, early stopping, and checkpoint management.
+    """
     # Parse command line arguments
     import argparse
     parser = argparse.ArgumentParser(description='Train GNN dynamics model')
@@ -54,30 +76,33 @@ def train():
                        help='Enable timing profiling (logs timing breakdown each epoch)')
     args = parser.parse_args()
 
+    # Load training configuration
     config = load_yaml('config/train/gnn_dyn.yaml')
     n_rollout = config['train']['n_rollout']
     n_history = config['train']['n_history']
     ckp_per_iter = config['train']['ckp_per_iter']
     log_per_iter = config['train']['log_per_iter']
     n_epoch = config['train']['n_epoch']
-
     set_seed(config['train']['random_seed'])
-
     use_gpu = torch.cuda.is_available()
 
-    ### make log dir
+    # ========================================================================
+    # SETUP TRAINING DIRECTORY
+    # ========================================================================
+    
     TRAIN_ROOT = 'data/gnn_dyn_model'
     
     if config['train']['particle']['resume']['active']:
+        # Resume from existing checkpoint
         TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['particle']['resume']['folder'])
     else:
-        # Determine training directory name
+        # Create new training directory
         if args.name:
             train_name = args.name
             TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
             
             # Check if directory exists and is not empty
-            if os.path.exists(TRAIN_DIR) and os.listdir(TRAIN_DIR):  # Directory exists and is not empty
+            if os.path.exists(TRAIN_DIR) and os.listdir(TRAIN_DIR):
                 print(f"Error: Training directory '{TRAIN_DIR}' already exists and is not empty!")
                 print(f"Please choose a different name or remove the existing directory.")
                 return
@@ -87,10 +112,9 @@ def train():
     
     os.system('mkdir -p ' + TRAIN_DIR)
     save_yaml(config, os.path.join(TRAIN_DIR, "config.yaml"))
-
     print(f"Training directory: {TRAIN_DIR}")
 
-    # Initialize profiling if enabled
+    # Initialize profiling and logging
     epoch_timer = EpochTimer() if args.profiling else None
     if args.profiling:
         print("Profiling enabled - will log timing breakdown each epoch")
@@ -101,7 +125,10 @@ def train():
         log_fout = open(os.path.join(TRAIN_DIR, 'log_resume_epoch_%d_iter_%d.txt' % (
             config['train']['particle']['resume']['epoch'], config['train']['particle']['resume']['iter'])), 'w')
 
-    ### dataloaders
+    # ========================================================================
+    # DATA LOADING SETUP
+    # ========================================================================
+    
     phases = ['train', 'valid']
     datasets = {phase: ParticleDataset(config['train']['data_file'], config, phase) for phase in phases}
 
@@ -113,13 +140,12 @@ def train():
         collate_fn=collate_fn)
         for phase in phases}
 
+    # ========================================================================
+    # MODEL INITIALIZATION
+    # ========================================================================
 
-    ### create model
-    # model = PropNetModel(config, use_gpu)
-    # model = PropNetNoPusherModel(config, use_gpu)
     model = PropNetDiffDenModel(config, use_gpu)
     print("model #params: %d" % count_trainable_parameters(model))
-
 
     # resume training of a saved model (if given)
     if config['train']['particle']['resume']['active']:
@@ -130,18 +156,19 @@ def train():
         pretrained_dict = torch.load(model_path)
         model.load_state_dict(pretrained_dict)
 
-
     if use_gpu:
         model = model.cuda()
 
+    # ========================================================================
+    # OPTIMIZER, TIMER, ROLLBACK, AND SCHEDULER SETUP
+    # ========================================================================
 
-    ### optimizer and losses
     params = model.parameters()
     optimizer = torch.optim.Adam(params,
                                 lr=float(config['train']['lr']),
                                 betas=(config['train']['adam_beta1'], 0.999))
 
-    # Add lr_scheduler
+    # Initialize learning rate scheduler
     scheduler = None
     if config['train']['lr_scheduler']['enabled']:
         if config['train']['lr_scheduler']['type'] == "ReduceLROnPlateau":
@@ -160,8 +187,6 @@ def train():
         else:
             raise ValueError("unknown scheduler type: %s" % config['train']['lr_scheduler']['type'])
 
-
-    # start training
     st_epoch = config['train']['particle']['resume']['epoch'] if config['train']['particle']['resume']['epoch'] > 0 else 0
     best_valid_loss = np.inf
 
@@ -170,10 +195,14 @@ def train():
 
     # Early stopping and rollback configuration
     if config['train']['rollback']['enabled']:
-        patience_epochs = config['train']['rollback']['patience']  # Number of epochs to wait before rollback
-        rollback_threshold = config['train']['rollback']['threshold']  # Factor by which validation loss must increase to trigger rollback
+        patience_epochs = config['train']['rollback']['patience']
+        rollback_threshold = config['train']['rollback']['threshold']
         validation_history = []
     best_epoch = 0
+
+    # ========================================================================
+    # MAIN TRAINING LOOP
+    # ========================================================================
 
     for epoch in range(st_epoch, n_epoch):
 
@@ -185,16 +214,13 @@ def train():
             if epoch_timer and phase == 'train':
                 epoch_timer.start_epoch()
 
-            # Time data loading
+            # Start data loading timing
             if epoch_timer and phase == 'train':
                 data_timer = epoch_timer.time_data_loading()
                 data_timer.__enter__()
 
             for i, data in enumerate(dataloaders[phase]):
-
-                # states: B x (n_his + n_roll) x particle_num x 3
-                # attrs: B x (n_his + n_roll) x particle_num
-                # states_delta: B x (n_his + n_roll - 1) x particle_num x 3
+                # Data format: B x (n_his + n_roll) x particle_num x 3
                 states, states_delta, attrs, particle_nums = data
 
                 B, length, max_particles, _ = states.size()
@@ -213,15 +239,19 @@ def train():
 
                 with torch.set_grad_enabled(phase == 'train'):
                     
-                    # Time forward pass
+                    # Start forward pass timing
                     if epoch_timer and phase == 'train':
                         forward_timer = epoch_timer.time_forward()
                         forward_timer.__enter__()
 
-                    # Initialize history buffer for rollout
-                    # Start with the first n_history frames
+                    # ============================================================
+                    # AUTOREGRESSIVE ROLLOUT PREDICTION
+                    # ============================================================
+                    
+                    # Initialize sliding window buffers with first n_history frames
                     history_buffer_states = states[:, :n_history, :, :].clone()  # B x n_history x particle_num x 3
                     history_buffer_delta = states_delta[:, :n_history, :, :].clone()  # B x n_history x particle_num x 3
+                    # Assume future object deltas are already masked
 
                     for idx_step in range(n_rollout):
                         # Extract current history window
@@ -235,38 +265,42 @@ def train():
                         # s_pred: B x particle_num x 3
                         s_pred = model.predict_one_step(a_hist, s_hist, s_delta_hist, particle_nums)
 
-                        # loss += F.mse_loss(s_pred, s_nxt[:, pusher_num:])
+                        # Calculate loss only for valid particles
                         for j in range(B):
                             loss += F.mse_loss(s_pred[j, :particle_nums[j]], s_nxt[j, :particle_nums[j]])
-                        # loss += F.mse_loss(s_pred, s_nxt)
 
-                        # Update history buffer for next rollout step
+                        # Update sliding window buffers for next rollout step
                         if idx_step < n_rollout - 1:  # Don't update on last step
-                            # Update delta buffer 
-                            # Update delta with the newly predicted particle deltas
+                            # Update delta buffer with predicted particle motion
                             history_buffer_delta[:, -1, :, :] = s_pred - history_buffer_states[:, -1, :, :]
-                            # Remove oldest frame, add new frame's robot deltas
+                            
+                            # Slide delta window: remove oldest, add new robot deltas from ground truth
                             history_buffer_delta = torch.cat([
                                 history_buffer_delta[:, 1:, :, :],  # Remove first frame
                                 states_delta[:, idx_step + n_history, :, :].unsqueeze(1)  # Add new delta
-                            ])
+                            ], dim=1)
 
-                            # Remove oldest frame, add new prediction
+                            # Slide state window: remove oldest, add prediction
                             history_buffer_states = torch.cat([
                                 history_buffer_states[:, 1:, :, :],  # Remove first frame
                                 s_pred.unsqueeze(1)  # Add prediction as new frame
                             ], dim=1)                                                        
+                    
+                    # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)
                     
                     # End forward pass timing
                     if epoch_timer and phase == 'train':
                         forward_timer.__exit__(None, None, None)
 
-
                 meter_loss.update(loss.item(), B)
 
+                # ============================================================
+                # BACKPROPAGATION AND OPTIMIZATION
+                # ============================================================
+                
                 if phase == 'train':
-                    # Time backward pass
+                    # Start backward pass timing
                     if epoch_timer:
                         backward_timer = epoch_timer.time_backward()
                         backward_timer.__enter__()
@@ -279,8 +313,10 @@ def train():
                     if epoch_timer:
                         backward_timer.__exit__(None, None, None)
 
-
-                ### log and save ckp
+                # ============================================================
+                # LOGGING AND CHECKPOINTING
+                # ============================================================
+                
                 if i % log_per_iter == 0:
                     log = '%s [%d/%d][%d/%d] LR: %.6f, Loss: %.6f (%.6f)' % (
                         phase, epoch, n_epoch, i, len(dataloaders[phase]),
@@ -295,7 +331,7 @@ def train():
                 if phase == 'train' and i % ckp_per_iter == 0:
                     torch.save(model.state_dict(), '%s/net_epoch_%d_iter_%d.pth' % (TRAIN_DIR, epoch, i))
                 
-                                # Time data loading
+                # Start data loading timing for next iteration
                 if epoch_timer and phase == 'train':
                     data_timer = epoch_timer.time_data_loading()
                     data_timer.__enter__()
@@ -304,7 +340,10 @@ def train():
             if epoch_timer and phase == 'train':
                 data_timer.__exit__(None, None, None)
 
-            # End epoch timing and log profiling info
+            # ============================================================
+            # EPOCH-END PROFILING AND LOGGING
+            # ============================================================
+            
             if epoch_timer and phase == 'train':
                 epoch_timer.end_epoch()
                 if hasattr(model, '_edge_times'):
@@ -312,7 +351,7 @@ def train():
                     model._edge_times = []
                 timing_summary = epoch_timer.get_summary()
                 
-                # Log timing breakdown
+                # Log detailed timing breakdown
                 timing_log = f'PROFILING [Epoch {epoch}] Total: {timing_summary["total_time"]:.2f}s | ' \
                            f'Data: {timing_summary["data_loading_time"]:.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
                            f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
@@ -320,6 +359,7 @@ def train():
                            f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
                            f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB'
                 
+                # Calculate running averages
                 for attr in epoch_timer.__dict__:
                     if hasattr(avg_timer, attr):
                         avg_timer.__dict__[attr] += epoch_timer.__dict__[attr]
@@ -341,12 +381,16 @@ def train():
             log_fout.write(log + '\n')
             log_fout.flush()
 
+            # ============================================================
+            # VALIDATION AND MODEL CHECKPOINTING
+            # ============================================================
 
             if phase == 'valid':
                 current_val_loss = meter_loss.avg
                 if config['train']['rollback']['enabled']:
                     validation_history.append(current_val_loss)
                 
+                # Save best model
                 if current_val_loss < best_valid_loss:
                     best_valid_loss = current_val_loss
                     best_epoch = epoch
@@ -364,9 +408,6 @@ def train():
                         print(f"Validation loss spike detected! Rolling back to epoch {best_epoch}")
                         print(f"Current avg loss: {recent_min:.6f}, Best loss: {best_valid_loss:.6f}")
                         
-                        # reset random seed
-                        # set_seed(torch.randint(0, 10000, (1,)).item())
-
                         # Load the best checkpoint
                         model.load_state_dict(torch.load('%s/net_best.pth' % (TRAIN_DIR)))
                         checkpoint = torch.load('%s/checkpoint_best.pth' % (TRAIN_DIR))
@@ -388,9 +429,6 @@ def train():
                     scheduler.step()
                 if (scheduler is not None) and (config['train']['lr_scheduler']['type'] == "ReduceLROnPlateau"):
                     scheduler.step(meter_loss.avg)
-
-
-
 
 if __name__=='__main__':
     train()

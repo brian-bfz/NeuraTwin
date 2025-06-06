@@ -4,142 +4,150 @@ import time
 
 def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
     """
-    Construct edges between particles based on distance and tool connectivity rules (batch version)
+    Construct edges between particles based on distance and tool connectivity rules (batch version).
     
-    :param states: (B, N, state_dim) torch tensor
-    :param adj_thresh: float or (B,) torch tensor - distance threshold for connections
-    :param mask: (B, N) torch tensor, true when index is a valid particle
-    :param tool_mask: (B, N) torch tensor, true when index is a valid tool particle
-    :param topk: int - maximum number of neighbors per particle
-    :param connect_tools_all: bool - if True, connect all tool particles to all object particles
-    :return:
-    - Rr: (B, n_rel, N) torch tensor - receiver matrix
-    - Rs: (B, n_rel, N) torch tensor - sender matrix
+    Args:
+        states: (B, N, state_dim) torch tensor - particle positions
+        adj_thresh: float or (B,) torch tensor - distance threshold for connections
+        mask: (B, N) torch tensor - true when index is a valid particle
+        tool_mask: (B, N) torch tensor - true when index is a valid tool particle
+        topk: int - maximum number of neighbors per particle
+        connect_tools_all: bool - if True, connect all tool particles to all object particles
+        
+    Returns:
+        Rr: (B, n_rel, N) torch tensor - receiver matrix for graph edges
+        Rs: (B, n_rel, N) torch tensor - sender matrix for graph edges
     """
     B, N, state_dim = states.shape
-    s_receiv = states[:, :, None, :].repeat(1, 1, N, 1)
-    s_sender = states[:, None, :, :].repeat(1, N, 1, 1)
+    
+    # Create pairwise particle combinations for distance calculation
+    s_receiv = states[:, :, None, :].repeat(1, 1, N, 1)  # Receiver particles
+    s_sender = states[:, None, :, :].repeat(1, N, 1, 1)   # Sender particles
 
-    # dis: B x particle_num x particle_num
-    # adj_matrix: B x particle_num x particle_num
+    # Calculate squared distances between all particle pairs and the squared distance threshold
     if isinstance(adj_thresh, float):
         adj_thresh = torch.tensor(adj_thresh, device=states.device, dtype=states.dtype).repeat(B)
     threshold = adj_thresh * adj_thresh
-    s_diff = s_receiv - s_sender  # (B, N, N, state_dim)
-    dis = torch.sum(s_diff ** 2, -1)
+    s_diff = s_receiv - s_sender  # Position differences
+    dis = torch.sum(s_diff ** 2, -1)  # Squared distances (B, N, N)
     
-    # Create masks for valid particle connections
-    mask_1 = mask[:, :, None].repeat(1, 1, N)
-    mask_2 = mask[:, None, :].repeat(1, N, 1)
-    mask_12 = mask_1 * mask_2
-    dis[~mask_12] = 1e10  # avoid invalid particles to particles relations
+    # Create validity masks for particle connections
+    mask_1 = mask[:, :, None].repeat(1, 1, N)  # Receiver validity
+    mask_2 = mask[:, None, :].repeat(1, N, 1)  # Sender validity
+    mask_12 = mask_1 * mask_2  # Both particles are valid
+    dis[~mask_12] = 1e10  # Exclude invalid particle pairs
     
-    # Create masks for tool particles
+    # Prevent tool-to-tool connections
     tool_mask_1 = tool_mask[:, :, None].repeat(1, 1, N)
     tool_mask_2 = tool_mask[:, None, :].repeat(1, N, 1)
     tool_mask_12 = tool_mask_1 * tool_mask_2
-    dis[tool_mask_12] = 1e10  # avoid tool to tool relations
+    dis[tool_mask_12] = 1e10  # Avoid tool to tool relations
 
+    # Create adjacency matrix based on distance threshold
     adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
 
-    obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
-    obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
-    obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2)
+    # Define tool-object interaction masks
+    obj_tool_mask_1 = tool_mask_1 * mask_2  # Particle sender, tool receiver
+    obj_tool_mask_2 = tool_mask_2 * mask_1  # Tool sender, particle receiver
+    obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2) # Tool receiver, non-tool sender
 
-
-    # add topk constraints
+    # Apply topk constraint to limit connections per particle
     topk = min(dis.shape[-1], topk)
     topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
     topk_matrix = torch.zeros_like(adj_matrix)
     topk_matrix.scatter_(-1, topk_idx, 1)
     adj_matrix = adj_matrix * topk_matrix
 
-    # if connect_tools_all:
-    #     obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
-    #     obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
-    #     adj_matrix[obj_tool_mask_1] = 0 # avoid object to tool connections
-    #     adj_matrix[obj_tool_mask_2] = 1 # add all tool to object connections
-    #     adj_matrix[tool_mask_12] = 0 # avoid tool to tool relations
-
+    # Handle tool connectivity rules
     if connect_tools_all:
+        # Only connect tools to objects if there are neighboring tool - non-tool particles in batch
         batch_mask = (adj_matrix[obj_pad_tool_mask_1].reshape(B, -1).sum(-1) > 0)[:, None, None].repeat(1, N, N)
         batch_obj_tool_mask_1 = obj_tool_mask_1 * batch_mask  # (B, N, N)
         neg_batch_obj_tool_mask_1 = obj_tool_mask_1 * (~batch_mask)  # (B, N, N)
         batch_obj_tool_mask_2 = obj_tool_mask_2 * batch_mask  # (B, N, N)
         neg_batch_obj_tool_mask_2 = obj_tool_mask_2 * (~batch_mask)  # (B, N, N)
 
-        adj_matrix[batch_obj_tool_mask_1] = 0
-        adj_matrix[batch_obj_tool_mask_2] = 1
+        adj_matrix[batch_obj_tool_mask_1] = 0  # Clear object-to-tool edges
+        adj_matrix[batch_obj_tool_mask_2] = 1  # Add all tool-to-object edges
         adj_matrix[neg_batch_obj_tool_mask_1] = 0
         adj_matrix[neg_batch_obj_tool_mask_2] = 0
     else:
-        adj_matrix[obj_tool_mask_1] = 0
+        adj_matrix[obj_tool_mask_1] = 0  # Clear object-to-tool edges
 
-    n_rels = adj_matrix.sum(dim=(1,2))
-    n_rel = n_rels.max().long().item()
-    rels_idx = []
+    # Convert adjacency matrix to sparse edge representation
+    n_rels = adj_matrix.sum(dim=(1,2))  # Number of edges per batch
+    n_rel = n_rels.max().long().item()  # Maximum edges across batch
     rels_idx = [torch.arange(n_rels[i]) for i in range(B)]
     rels_idx = torch.hstack(rels_idx).to(device=states.device, dtype=torch.long)
-    rels = adj_matrix.nonzero()
+    rels = adj_matrix.nonzero()  # Get edge indices
+    
+    # Create receiver and sender matrices
     Rr = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1
     Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1    
+    
     return Rr, Rs
 
 def construct_edges_from_states(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
     """
-    Construct edges between particles based on distance and tool connectivity rules
+    Construct edges between particles based on distance and tool connectivity rules (NOT USED).
     
-    :param states: (N, state_dim) torch tensor
-    :param adj_thresh: float - distance threshold for connections
-    :param mask: (N) torch tensor, true when index is a valid particle
-    :param tool_mask: (N) torch tensor, true when index is a valid tool particle
-    :param topk: int - maximum number of neighbors per particle
-    :param connect_tools_all: bool - if True, connect all tool particles to all object particles
-    :return:
-    - Rr: (n_rel, N) torch tensor - receiver matrix
-    - Rs: (n_rel, N) torch tensor - sender matrix
+    Args:
+        states: (N, state_dim) torch tensor - particle positions
+        adj_thresh: float - distance threshold for connections
+        mask: (N) torch tensor - true when index is a valid particle
+        tool_mask: (N) torch tensor - true when index is a valid tool particle
+        topk: int - maximum number of neighbors per particle
+        connect_tools_all: bool - if True, connect all tool particles to all object particles
+        
+    Returns:
+        Rr: (n_rel, N) torch tensor - receiver matrix for graph edges
+        Rs: (n_rel, N) torch tensor - sender matrix for graph edges
     """
     N, state_dim = states.shape
+    
+    # Create pairwise particle combinations
     s_receiv = states[:, None, :].repeat(1, N, 1)
     s_sender = states[None, :, :].repeat(N, 1, 1)
 
-    # dis: particle_num x particle_num
-    # adj_matrix: particle_num x particle_num
+    # Calculate distances and create adjacency matrix
     threshold = adj_thresh * adj_thresh
-    s_diff = s_receiv - s_sender  # (N, N, state_dim)
+    s_diff = s_receiv - s_sender
     dis = torch.sum(s_diff ** 2, -1)
     
-    # Create masks for valid particle connections
+    # Apply validity masks
     mask_1 = mask[:, None].repeat(1, N)
     mask_2 = mask[None, :].repeat(N, 1)
     mask_12 = mask_1 * mask_2
-    dis[~mask_12] = 1e10  # avoid invalid particles to particles relations
+    dis[~mask_12] = 1e10
     
-    # Create masks for tool particles
+    # Prevent tool-to-tool connections
     tool_mask_1 = tool_mask[:, None].repeat(1, N)
     tool_mask_2 = tool_mask[None, :].repeat(N, 1)
     tool_mask_12 = tool_mask_1 * tool_mask_2
-    dis[tool_mask_12] = 1e10  # avoid tool to tool relations
+    dis[tool_mask_12] = 1e10
 
-    obj_tool_mask_1 = tool_mask_1 * mask_2  # particle sender, tool receiver
-    obj_tool_mask_2 = tool_mask_2 * mask_1  # particle receiver, tool sender
+    # Define interaction masks
+    obj_tool_mask_1 = tool_mask_1 * mask_2
+    obj_tool_mask_2 = tool_mask_2 * mask_1
 
     adj_matrix = ((dis - threshold) < 0).float()
 
-    # add topk constraints
+    # Apply topk constraint
     topk = min(dis.shape[-1], topk)
     topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
     topk_matrix = torch.zeros_like(adj_matrix)
     topk_matrix.scatter_(-1, topk_idx, 1)
     adj_matrix = adj_matrix * topk_matrix
 
+    # Handle tool connectivity
     if connect_tools_all:
-        adj_matrix[obj_tool_mask_1] = 0  # clear existing tool receiver connections
-        adj_matrix[obj_tool_mask_2] = 1  # connect all object particles to all tool particles
-        adj_matrix[tool_mask_12] = 0     # avoid tool to tool relations
+        adj_matrix[obj_tool_mask_1] = 0  # Clear existing tool receiver connections
+        adj_matrix[obj_tool_mask_2] = 1  # Connect all object particles to all tool particles
+        adj_matrix[tool_mask_12] = 0     # Avoid tool to tool relations
 
+    # Convert to sparse representation
     n_rels = adj_matrix.sum().long().item()
     rels_idx = torch.arange(n_rels).to(device=states.device, dtype=torch.long)
     rels = adj_matrix.nonzero()
@@ -147,12 +155,25 @@ def construct_edges_from_states(states, adj_thresh, mask, tool_mask, topk, conne
     Rs = torch.zeros((n_rels, N), device=states.device, dtype=states.dtype)
     Rr[rels_idx, rels[:, 0]] = 1
     Rs[rels_idx, rels[:, 1]] = 1
+    
     return Rr, Rs
 
-### Propagation Networks
+# ============================================================================
+# NEURAL NETWORK MODULES
+# ============================================================================
 
 class RelationEncoder(nn.Module):
+    """
+    Encodes relation features between connected particles in the graph.
+    """
+    
     def __init__(self, input_size, hidden_size, output_size):
+        """
+        Args:
+            input_size: int - dimension of input relation features
+            hidden_size: int - dimension of hidden layers
+            output_size: int - dimension of output relation embeddings
+        """
         super(RelationEncoder, self).__init__()
 
         self.input_size = input_size
@@ -169,19 +190,30 @@ class RelationEncoder(nn.Module):
         )
 
     def forward(self, x):
-        '''
+        """
         Args:
-            x: [batch_size, n_relations, input_size]
+            x: [batch_size, n_relations, input_size] - relation features
+            
         Returns:
-            [batch_size, n_relations, output_size]
-        '''
+            [batch_size, n_relations, output_size] - encoded relation embeddings
+        """
         B, N, D = x.size()
         x = self.model(x.view(B * N, D))
         return x.view(B, N, self.output_size)
 
 
 class ParticleEncoder(nn.Module):
+    """
+    Encodes particle features including position history and attributes.
+    """
+    
     def __init__(self, input_size, hidden_size, output_size):
+        """
+        Args:
+            input_size: int - dimension of input particle features
+            hidden_size: int - dimension of hidden layers  
+            output_size: int - dimension of output particle embeddings
+        """
         super(ParticleEncoder, self).__init__()
 
         self.input_size = input_size
@@ -196,19 +228,29 @@ class ParticleEncoder(nn.Module):
         )
 
     def forward(self, x):
-        '''
+        """
         Args:
-            x: [batch_size, n_particles, input_size]
+            x: [batch_size, n_particles, input_size] - particle features
+            
         Returns:
-            [batch_size, n_particles, output_size]
-        '''
+            [batch_size, n_particles, output_size] - encoded particle embeddings
+        """
         B, N, D = x.size()
         x = self.model(x.view(B * N, D))
         return x.view(B, N, self.output_size)
 
 
 class Propagator(nn.Module):
+    """
+    Propagates information through the graph using message passing.
+    """
+    
     def __init__(self, input_size, output_size):
+        """
+        Args:
+            input_size: int - dimension of input features
+            output_size: int - dimension of output features
+        """
         super(Propagator, self).__init__()
 
         self.input_size = input_size
@@ -218,12 +260,14 @@ class Propagator(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x, residual=None):
-        '''
+        """
         Args:
-            x: [batch_size, n_relations/n_particles, input_size]
+            x: [batch_size, n_relations/n_particles, input_size] - input features
+            residual: optional residual connection tensor
+            
         Returns:
-            [batch_size, n_relations/n_particles, output_size]
-        '''
+            [batch_size, n_relations/n_particles, output_size] - propagated features
+        """
         B, N, D = x.size()
         x = self.linear(x.view(B * N, D))
 
@@ -234,8 +278,19 @@ class Propagator(nn.Module):
 
         return x.view(B, N, self.output_size)
 
+
 class ParticlePredictor(nn.Module):
+    """
+    Predicts particle positions based on propagated graph features.
+    """
+    
     def __init__(self, input_size, hidden_size, output_size):
+        """
+        Args:
+            input_size: int - dimension of input particle features
+            hidden_size: int - dimension of hidden layers
+            output_size: int - dimension of output predictions (typically 3 for 3D positions)
+        """
         super(ParticlePredictor, self).__init__()
 
         self.input_size = input_size
@@ -247,20 +302,35 @@ class ParticlePredictor(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        '''
+        """
         Args:
-            x: [batch_size, n_particles, input_size]
+            x: [batch_size, n_particles, input_size] - particle features
+            
         Returns:
-            [batch_size, n_particles, output_size]
-        '''
+            [batch_size, n_particles, output_size] - predicted particle positions
+        """
         B, N, D = x.size()
         x = x.view(B * N, D)
         x = self.linear_1(self.relu(self.linear_0(x)))
         return x.view(B, N, self.output_size)
 
-class PropModuleDiffDen(nn.Module):
-    def __init__(self, config, use_gpu=False):
 
+# ============================================================================
+# MAIN GNN DYNAMICS MODULE
+# ============================================================================
+
+class PropModuleDiffDen(nn.Module):
+    """
+    Main GNN module for particle dynamics prediction with history-aware processing.
+    Handles multiple history timesteps and different particle types (objects vs robots/tools).
+    """
+    
+    def __init__(self, config, use_gpu=False):
+        """
+        Args:
+            config: dict - configuration containing model hyperparameters
+            use_gpu: bool - whether to use GPU acceleration
+        """
         super(PropModuleDiffDen, self).__init__()
 
         self.config = config
@@ -268,105 +338,117 @@ class PropModuleDiffDen(nn.Module):
         self.nf_effect = nf_effect
         self.add_delta = config['train']['particle']['add_delta']
         
-        # Get n_history from config
+        # History length for temporal modeling
         self.n_history = config['train']['n_history']
         self.use_gpu = use_gpu
 
-        # particle encoder
-        # input: pusher movement (3 * n_history), attr (1 * n_history)
+        # Particle encoder:
+        # Input: displacement (3 * n_history) + attributes (1 * n_history)
         self.particle_encoder = ParticleEncoder(
             (3 + 1) * self.n_history, nf_effect, nf_effect)
 
-        # relation encoder
-        # input: attr * 2 (2), state offset (3)
+        # Relation encoder:
+        # Input: attributes of both particles (2) + position difference (3)
         self.relation_encoder = RelationEncoder(
             2 + 3, nf_effect, nf_effect)
 
-        # input: (1) particle encode (2) particle effect
+        # Propagators for message passing
         self.particle_propagator = Propagator(
-            2 * nf_effect, nf_effect)
+            2 * nf_effect, nf_effect)  # particle encoding + aggregated relation effects
 
-        # input: (1) relation encode (2) sender effect (3) receiver effect
         self.relation_propagator = Propagator(
-            nf_effect + 2 * nf_effect, nf_effect)
+            nf_effect + 2 * nf_effect, nf_effect)  # relation encoding + sender/receiver effects
 
-        # input: (1) particle effect
+        # Final position predictor
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
     def forward(self, a_hist, s_hist, s_delta, Rr, Rs, verbose=False):
-        # a_hist: B x n_history x particle_num -- indicating the type of the objects, slider or pusher
-        # s_hist: B x n_history x particle_num x 3 -- position of the objects
-        # s_delta: B x n_history x particle_num x 3 -- displacement of the objects
-        # Rr: B x rel_num x particle_num
-        # Rs: B x rel_num x particle_num
+        """
+        Forward pass of the GNN dynamics model.
         
+        Args:
+            a_hist: (B, n_history, particle_num) - particle attributes over history
+            s_hist: (B, n_history, particle_num, 3) - particle positions over history  
+            s_delta: (B, n_history, particle_num, 3) - particle displacements over history
+            Rr: (B, rel_num, particle_num) - receiver matrix for graph edges
+            Rs: (B, rel_num, particle_num) - sender matrix for graph edges
+            verbose: bool - whether to print debug information
+            
+        Returns:
+            (B, particle_num, 3) - predicted next particle positions
+        """
         B, n_history, N = a_hist.size()
         _, rel_num, _ = Rr.size()
         nf_effect = self.nf_effect
+        pstep = 3  # Number of message passing steps
 
-        pstep = 3
-
-        # Convert from data format (B x time x particle_num) to model format (B x particle_num x time)
+        # Convert from data format (B x time x particles) to model format (B x particles x time)
         a_hist = a_hist.transpose(1, 2)  # B x particle_num x n_history
         s_hist = s_hist.transpose(1, 2)  # B x particle_num x n_history x 3
         s_delta = s_delta.transpose(1, 2)  # B x particle_num x n_history x 3
 
         Rr_t = Rr.transpose(1, 2) # TODO: add .continuous()? # B x particle_num x rel_num
 
-        # Flatten history dimension for encoding (no transpose needed!)
-        # a_hist: B x particle_num x n_history (already in the right format)
-        # a_hist_flat = a_hist  # B x particle_num x n_history
-        
-        # s_hist: B x particle_num x n_history x 3 -> B x particle_num x (3 * n_history)
-        # s_hist_flat = s_hist.reshape(B, N, -1)  # B x particle_num x (3 * n_history) Not needed because we use relative coordinates instead, but I'm keeping it in case I need absolute z-coordinates later
-        
-        # s_delta: B x particle_num x n_history x 3 -> B x particle_num x (3 * n_history)
+        # Prepare features for encoding
+        # Flatten displacement history for particle encoder
         s_delta_flat = s_delta.reshape(B, N, -1)  # B x particle_num x (3 * n_history)
 
-        # Get current frame data for relations (since edges are constructed dynamically)
-        a_cur = a_hist[:, :, -1]  # B x particle_num (last time step)
-        s_cur = s_hist[:, :, -1, :]  # B x particle_num x 3 (last time step)
+        # Extract current frame data for edge relations (edges use only latest positions)
+        a_cur = a_hist[:, :, -1]  # B x particle_num (most recent attributes)
+        s_cur = s_hist[:, :, -1, :]  # B x particle_num x 3 (most recent positions)
         
-        # receiver_attr, sender_attr (using current frame only)
-        a_cur_r = Rr.bmm(a_cur[..., None]) # B x rel_num x 1
-        a_cur_s = Rs.bmm(a_cur[..., None]) # B x rel_num x 1
+        # Compute relation features using edge matrices
+        a_cur_r = Rr.bmm(a_cur[..., None])  # B x rel_num x 1 (receiver attributes)
+        a_cur_s = Rs.bmm(a_cur[..., None])  # B x rel_num x 1 (sender attributes)
+        s_cur_r = Rr.bmm(s_cur)  # B x rel_num x 3 (receiver positions)
+        s_cur_s = Rs.bmm(s_cur)  # B x rel_num x 3 (sender positions)
 
-        # receiver_state, sender_state
-        s_cur_r = Rr.bmm(s_cur) # B x rel_num x 3
-        s_cur_s = Rs.bmm(s_cur) # B x rel_num x 3
-
-        # particle encode
+        # Encode particle features (history-aware)
         particle_encode = self.particle_encoder(
-            torch.cat([s_delta_flat, a_hist], 2)) # B x particle_num x nf_effect
+            torch.cat([s_delta_flat, a_hist], 2))  # B x particle_num x nf_effect
         particle_effect = particle_encode
 
-        # relation encode
+        # Encode relation features (current frame only)
         relation_encode = self.relation_encoder(
-            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s], 2)) # B x rel_num x nf_effect
+            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s], 2))  # B x rel_num x nf_effect
 
+        # Message passing iterations
         for i in range(pstep):
-            effect_r = Rr.bmm(particle_effect) # B x rel_num x nf_effect
-            effect_s = Rs.bmm(particle_effect) # B x rel_num x nf_effect
+            # Aggregate particle effects at relation endpoints
+            effect_r = Rr.bmm(particle_effect)  # B x rel_num x nf_effect
+            effect_s = Rs.bmm(particle_effect)  # B x rel_num x nf_effect
             
+            # Update relation effects
             effect_rel = self.relation_propagator(
-                torch.cat([relation_encode, effect_r, effect_s], 2)) # B x rel_num x nf_effect
+                torch.cat([relation_encode, effect_r, effect_s], 2))  # B x rel_num x nf_effect
 
-            effect_rel_agg = Rr_t.bmm(effect_rel) # B x particle_num x nf_effect
+            # Aggregate relation effects back to particles
+            effect_rel_agg = Rr_t.bmm(effect_rel)  # B x particle_num x nf_effect
             
+            # Update particle effects with residual connection
             particle_effect = self.particle_propagator(
                 torch.cat([particle_encode, effect_rel_agg], 2),
                 residual=particle_effect)
-        
-        # B x particle_num x 3
-        particle_pred = self.particle_predictor(particle_effect)
 
-        # Use the most recent state for residual connection
+        # Predict position changes
+        particle_pred = self.particle_predictor(particle_effect)  # B x particle_num x 3
+
+        # Add residual connection to current positions
         return particle_pred + s_cur
 
 class PropNetDiffDenModel(nn.Module):
+    """
+    Complete GNN-based particle dynamics model with edge construction and prediction.
+    Handles full pipeline from raw particle states to next-step predictions.
+    """
 
     def __init__(self, config, use_gpu=False):
+        """
+        Args:
+            config: dict - configuration containing model parameters
+            use_gpu: bool - whether to use GPU acceleration
+        """
         super(PropNetDiffDenModel, self).__init__()
 
         self.config = config
@@ -376,20 +458,30 @@ class PropNetDiffDenModel(nn.Module):
         self.model = PropModuleDiffDen(config, use_gpu)
 
     def predict_one_step(self, a_hist, s_hist, s_delta, particle_nums=None):
-        # assume these variables have already been calculated
-        # a_hist: B x n_history x particle_num (0 for objects, 1 for tools/robot)
-        # s_hist: B x n_history x particle_num x 3
-        # s_delta: B x n_history x particle_num x 3 (for t < n_history - 1, s_delta is s_hist[t+1] - s_hist[t]; for t = n_history - 1, s_delta is 0 for objects, s_hist[t+1] - s_hist[t] for robot)
-        # particle_nums: B
+        """
+        Predict particle positions one step into the future.
+        
+        Args:
+            a_hist: (B, n_history, particle_num) - particle attributes over history
+                   (0 for objects, 1 for tools/robots)
+            s_hist: (B, n_history, particle_num, 3) - particle positions over history
+            s_delta: (B, n_history, particle_num, 3) - particle displacements over history
+                    For t < n_history-1: consecutive frame differences
+                    For t = n_history-1: 0 for objects, actual motion for robots
+            particle_nums: (B,) - number of valid particles per batch sample
+            
+        Returns:
+            (B, particle_num, 3) - predicted next particle positions
+        """
         assert type(a_hist) == torch.Tensor
-        assert type(s_hist) == torch.Tensor
+        assert type(s_hist) == torch.Tensor  
         assert type(s_delta) == torch.Tensor
         assert a_hist.shape == s_hist.shape[:3]
         assert s_hist.shape == s_delta.shape
 
         B, n_history, N = a_hist.size()
 
-        # Use the most recent state for edge construction
+        # Use most recent frame for dynamic edge construction
         a_cur = a_hist[:, -1, :]  # B x particle_num
         s_cur = s_hist[:, -1, :, :]  # B x particle_num x 3
 
@@ -406,13 +498,8 @@ class PropNetDiffDenModel(nn.Module):
         
         # Create tool mask (tool particles have attr=1, objects have attr=0)
         tool_mask = (a_cur > 0.5) & mask
-        
-        # Time edge construction
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # edge_start = time.perf_counter()
                 
-        # Construct edges using efficient batch processing (using most recent state)
+        # Construct graph edges based on current particle positions
         Rr_batch, Rs_batch = construct_edges_from_states_batch(
             s_cur, 
             self.adj_thresh, 
@@ -421,18 +508,8 @@ class PropNetDiffDenModel(nn.Module):
             topk=self.topk,
             connect_tools_all=self.connect_tools_all
         )
-        
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # edge_time = time.perf_counter() - edge_start
-        
-        # Store edge construction timing for profiling
-        # if hasattr(self, '_edge_times'):
-        #     self._edge_times.append(edge_time)
-        # elif not hasattr(self, '_edge_times'):
-        #     self._edge_times = [edge_time]
 
-        # Forward pass with full history
+        # Forward pass through GNN with full history
         s_pred = self.model.forward(a_hist, s_hist, s_delta, Rr_batch, Rs_batch)
 
         return s_pred
