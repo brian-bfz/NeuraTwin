@@ -242,7 +242,6 @@ class InvPhyTrainerWarp:
                     np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
                 ]
 
-
     def _init_start(
         self,
         object_points,
@@ -2662,21 +2661,6 @@ def get_simple_shadow(
     final_shadow = final_shadow == 255
     return final_shadow
 
-
-'''
-[-0.04025196  0.0259362  -0.07883434]
-Selected control point 1: [ 0.1074927  -0.16420561 -0.00984779]
-
-[-0.04025196  0.0259362  -0.07883434]
-Selected control point 1: [-0.14578269 -0.19089821 -0.009117  ]
-
-[-0.04025196  0.0259362  -0.07883434]
-Selected control point 1: [-0.17029284  0.20677952 -0.00766289]
-
-[-0.04025196  0.0259362  -0.07883434]
-Selected control point 1: [ 0.06977675  0.24097862 -0.01045121]
-'''
-
 def calculate_energy(x, spring_Y, springs, rest_lengths, num_object_springs):
     object_springs = springs[:num_object_springs]
     object_rest_lengths = rest_lengths[:num_object_springs]
@@ -2698,7 +2682,6 @@ def calculate_energy(x, spring_Y, springs, rest_lengths, num_object_springs):
 
         total_energy = energy.sum()
         return total_energy
-
 
 # Copy From pytorch3d implementation
 def axis_angle_to_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
@@ -2738,8 +2721,3 @@ def axis_angle_to_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
         + torch.sinc(angles / torch.pi) * cross_product_matrix
         + ((1 - torch.cos(angles)) / angles_sqrd) * cross_product_matrix_sqrd
     )
-
-'''
-
-[-0.17972917 -0.20094689 -0.00053748]
-'''

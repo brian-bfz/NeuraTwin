@@ -7,25 +7,23 @@ import pickle
 import json
 from .dataset.dataset_gnn_dyn import ParticleDataset
 from .model.gnn_dyn import PropNetDiffDenModel
+from .model.rollout import Rollout
 from .utils import load_yaml, fps_rad_tensor
 from .paths import *
 import argparse
 from scripts.utils import parse_episodes
 
-# ============================================================================
-# MAIN PREDICTION CLASS
-# ============================================================================
 
-class ObjectMotionPredictor:
+class Visualizer:
     """
-    GNN-based object motion predictor for autoregressive inference on particle dynamics.
+    GNN-based object motion visualizer for complete episode analysis.
     Handles loading trained models, camera calibration, and generating predictions
-    for complete episodes using autoregressive rollout.
+    with visualization capabilities using the Rollout class.
     """
     
     def __init__(self, model_path, config_path, camera_calib_path, data_file):
         """
-        Initialize the object motion predictor with trained model and data pipeline.
+        Initialize the visualizer with trained model and data pipeline.
         
         Args:
             model_path: str - path to trained model checkpoint
@@ -66,11 +64,10 @@ class ObjectMotionPredictor:
         print(f"Using device: {self.device}")
         print(f"Dataset initialized with {self.dataset.n_episode} episodes")
         print(f"History length: {self.n_history}")
-    
+
     def predict_episode_rollout(self, states, states_delta, attrs, particle_num):
         """
         Predict object motion for entire episode using autoregressive rollout.
-        Implements the same sliding window approach used during training.
         
         Args:
             states: [timesteps, particles, 3] - full episode states with history padding
@@ -92,53 +89,34 @@ class ObjectMotionPredictor:
         print(f"  Rollout steps: {n_rollout}")
         print(f"  Particles: {particle_num}")
         
-        # Add batch dimension for model compatibility
-        states = states.unsqueeze(0)  # [1, timesteps, particles, 3]
-        states_delta = states_delta.unsqueeze(0)  # [1, timesteps-1, particles, 3]
-        attrs = attrs.unsqueeze(0)  # [1, timesteps, particles]
-        particle_nums = torch.tensor([particle_num], dtype=torch.int32, device=self.device)
+        # Initialize rollout with history data (add batch dimension)
+        predictor = Rollout(
+            self.model, 
+            self.config,
+            states[:self.n_history].unsqueeze(0),      # [1, n_history, particles, 3]
+            states_delta[:self.n_history - 1].unsqueeze(0), # [1, n_history - 1, particles, 3] 
+            attrs[:self.n_history].unsqueeze(0),       # [1, n_history, particles]
+            torch.tensor([particle_num], device=self.device)  # [1]
+        )
         
-        # Initialize prediction storage
-        predicted_states = [states[0, i].clone() for i in range(self.n_history)]  # Start with history
+        # Initialize prediction storage with history
+        predicted_states = [states[i].clone() for i in range(self.n_history)]
         
-        # Initialize history buffer for rollout (same as training)
-        history_buffer_states = states[:, :self.n_history, :, :].clone()  # [1, n_history, particles, 3]
-        history_buffer_delta = states_delta[:, :self.n_history, :, :].clone()  # [1, n_history, particles, 3]
-        # Assume future object deltas are already masked
-        
-        with torch.no_grad():
-            for idx_step in range(n_rollout):
-                # Extract current history window for prediction
-                a_hist = attrs[:, idx_step:idx_step + self.n_history, :]  # [1, n_history, particles]
-                s_hist = history_buffer_states  # [1, n_history, particles, 3]
-                s_delta_hist = history_buffer_delta  # [1, n_history, particles, 3]
-                
-                # Predict next state using model
-                s_pred = self.model.predict_one_step(a_hist, s_hist, s_delta_hist, particle_nums)  # [1, particles, 3]
-                
-                # Store prediction
-                predicted_states.append(s_pred[0].clone())
-                
-                # Update sliding window buffers for next iteration (if not last step)
-                if idx_step < n_rollout - 1:
-                    # Update delta buffer with predicted particle motion
-                    history_buffer_delta[:, -1, :, :] = s_pred - history_buffer_states[:, -1, :, :]
-                    
-                    # Slide delta window: remove oldest, add new robot deltas
-                    history_buffer_delta = torch.cat([
-                        history_buffer_delta[:, 1:, :, :],  # Remove first frame
-                        states_delta[:, idx_step + self.n_history, :, :].unsqueeze(1)  # Add new delta
-                    ], dim=1)
-                    
-                    # Slide state window: remove oldest, add prediction
-                    history_buffer_states = torch.cat([
-                        history_buffer_states[:, 1:, :, :],  # Remove first frame  
-                        s_pred.unsqueeze(1)  # Add prediction as new frame
-                    ], dim=1)
+        # Run autoregressive rollout
+        for i in range(n_rollout):
+            step_idx = i + self.n_history
+            
+            # Get next frame data and add batch dimension
+            next_delta = states_delta[step_idx - 1].unsqueeze(0)     # [1, particles, 3]
+            next_attrs = attrs[step_idx].unsqueeze(0)            # [1, particles]
+            
+            # Predict next state and remove batch dimension
+            predicted_state = predictor.forward(next_delta, next_attrs)[0]  # [particles, 3]
+            predicted_states.append(predicted_state)
         
         # Stack predictions and return [timesteps, particles, 3]
         return torch.stack(predicted_states)
-    
+
     def calculate_prediction_error(self, predicted_states, actual_states):
         """
         Calculate MSE errors between predicted and ground truth trajectories.
@@ -389,8 +367,8 @@ def main():
     data_file = args.data_file 
     camera_calib_path = args.camera_calib_path
     
-    # Initialize predictor
-    predictor = ObjectMotionPredictor(model_path, config_path, camera_calib_path, data_file)
+    # Initialize visualizer
+    visualizer = Visualizer(model_path, config_path, camera_calib_path, data_file)
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")
@@ -406,12 +384,12 @@ def main():
         print(f"TESTING EPISODE {episode_num}")
         print(f"{'='*40}")
         
-        try:
+        with torch.no_grad():
             # Load episode data
-            states, states_delta, attrs, particle_num = predictor.dataset.load_full_episode(episode_num)
-            states = states.to(predictor.device)
-            states_delta = states_delta.to(predictor.device)
-            attrs = attrs.to(predictor.device)
+            states, states_delta, attrs, particle_num = visualizer.dataset.load_full_episode(episode_num)
+            states = states.to(visualizer.device)
+            states_delta = states_delta.to(visualizer.device)
+            attrs = attrs.to(visualizer.device)
             
             # Determine particle counts from attributes (0=object, 1=robot)
             n_obj_particles = (attrs[0] == 0).sum().item()
@@ -420,14 +398,14 @@ def main():
             print(f"Loaded episode with {n_obj_particles} object particles, {n_robot_particles} robot particles")
             
             # Run autoregressive rollout prediction
-            predicted_states = predictor.predict_episode_rollout(states, states_delta, attrs, particle_num)
+            predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num)
             
             # Split into object and robot components for evaluation
-            predicted_objects, predicted_robots = predictor.split_object_robot_states(predicted_states, n_obj_particles)
-            actual_objects, actual_robots = predictor.split_object_robot_states(states, n_obj_particles)
+            predicted_objects, predicted_robots = visualizer.split_object_robot_states(predicted_states, n_obj_particles)
+            actual_objects, actual_robots = visualizer.split_object_robot_states(states, n_obj_particles)
             
             # Calculate prediction errors (evaluate object motion only)
-            errors = predictor.calculate_prediction_error(predicted_objects, actual_objects)
+            errors = visualizer.calculate_prediction_error(predicted_objects, actual_objects)
             all_errors.extend(errors)
             
             avg_error = np.mean(errors)
@@ -436,17 +414,11 @@ def main():
             # Generate video only if --video flag is provided
             if args.video:
                 video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
-                predictor.visualize_object_motion(
+                visualizer.visualize_object_motion(
                     predicted_objects, actual_objects, actual_robots, 
                     episode_num, video_path
                 )
-            
-        except Exception as e:
-            print(f"Error processing episode {episode_num}: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
-    
+                
     # Overall results
     if all_errors:
         print(f"\n{'='*60}")

@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 
 from ..dataset.dataset_gnn_dyn import ParticleDataset
 from ..model.gnn_dyn import PropNetDiffDenModel
+from ..model.rollout import Rollout
 from ..utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms
 from ..paths import *
 
@@ -249,43 +250,36 @@ def train():
                     # AUTOREGRESSIVE ROLLOUT PREDICTION
                     # ============================================================
                     
-                    # Initialize sliding window buffers with first n_history frames
-                    history_buffer_states = states[:, :n_history, :, :].clone()  # B x n_history x particle_num x 3
-                    history_buffer_delta = states_delta[:, :n_history, :, :].clone()  # B x n_history x particle_num x 3
-                    # Assume future object deltas are already masked
+                    # Initialize rollout with first n_history frames
+                    rollout = Rollout(
+                        model, 
+                        config,
+                        states[:, :n_history, :, :],      # [B, n_history, particles, 3]
+                        states_delta[:, :n_history - 1, :, :], # [B, n_history - 1, particles, 3]
+                        attrs[:, :n_history, :],          # [B, n_history, particles]
+                        particle_nums           # [B]
+                    )
 
                     for idx_step in range(n_rollout):
-                        # Extract current history window
-                        a_hist = attrs[:, idx_step:idx_step + n_history, :]  # B x n_history x particle_num # we can just use gt attrs here
-                        s_hist = history_buffer_states  # B x n_history x particle_num x 3
-                        s_delta_hist = history_buffer_delta  # B x n_history x particle_num x 3
+                        # Get next frame data
+                        next_delta = states_delta[:, idx_step + n_history - 1, :, :]  # [B, particles, 3]
+                        next_attrs = attrs[:, idx_step + n_history, :]            # [B, particles]
                         
                         # Ground truth next state 
                         s_nxt = states[:, n_history + idx_step, :, :]  # B x particle_num x 3
 
-                        # s_pred: B x particle_num x 3
-                        s_pred = model.predict_one_step(a_hist, s_hist, s_delta_hist, particle_nums)
+                        # Predict next state using rollout
+                        s_pred = rollout.forward(next_delta, next_attrs)  # [B, particles, 3]
 
-                        # Calculate loss only for valid particles
+                        # Calculate loss only for valid object particles
                         for j in range(B):
-                            loss += F.mse_loss(s_pred[j, :particle_nums[j]], s_nxt[j, :particle_nums[j]])
-
-                        # Update sliding window buffers for next rollout step
-                        if idx_step < n_rollout - 1:  # Don't update on last step
-                            # Update delta buffer with predicted particle motion
-                            history_buffer_delta[:, -1, :, :] = s_pred - history_buffer_states[:, -1, :, :]
-                            
-                            # Slide delta window: remove oldest, add new robot deltas from ground truth
-                            history_buffer_delta = torch.cat([
-                                history_buffer_delta[:, 1:, :, :],  # Remove first frame
-                                states_delta[:, idx_step + n_history, :, :].unsqueeze(1)  # Add new delta
-                            ], dim=1)
-
-                            # Slide state window: remove oldest, add prediction
-                            history_buffer_states = torch.cat([
-                                history_buffer_states[:, 1:, :, :],  # Remove first frame
-                                s_pred.unsqueeze(1)  # Add prediction as new frame
-                            ], dim=1)                                                        
+                            # Get object particle mask (attr == 0)
+                            object_mask = (next_attrs[j] == 0)[:particle_nums[j]]
+                            if object_mask.sum() > 0:  # Only add loss if there are object particles
+                                loss += F.mse_loss(
+                                    s_pred[j, :particle_nums[j]][object_mask], 
+                                    s_nxt[j, :particle_nums[j]][object_mask]
+                                )                                                        
                     
                     # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)
