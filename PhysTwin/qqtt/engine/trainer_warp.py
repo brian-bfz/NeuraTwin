@@ -45,7 +45,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 from GNN.model.rollout import Rollout
-from GNN.utils import create_edges_for_points
+from GNN.utils import create_edges_for_points, fps_rad_tensor
 
 class InvPhyTrainerWarp:
     def __init__(
@@ -1619,9 +1619,9 @@ class InvPhyTrainerWarp:
         )
         current_force_judge = origin_force_judge.clone()
         current_trans_dynamic_points = self.dynamic_points
-        current_finger = 1.0
-        close_flag = True
-        is_closing = False
+        current_finger = 0.0  # Start with grippers closed
+        close_flag = False
+        is_closing = True
 
         # Initialize GNN rollout if provided
         gnn_rollout = None
@@ -1633,15 +1633,18 @@ class InvPhyTrainerWarp:
             
             # Get initial positions
             initial_x = wp.to_torch(self.simulator.wp_states[0].wp_x, requires_grad=False).clone()
+            object_indices = fps_rad_tensor(initial_x[:self.num_all_points], gnn_config['train']['fps_radius'])
+            robot_indices = fps_rad_tensor(current_trans_dynamic_points, gnn_config['train']['fps_radius']) 
+
             n_history = gnn_config['train']['n_history']
             
             # Total particles (object + robot)
-            n_object_particles = self.num_all_points
-            n_robot_particles = len(current_trans_dynamic_points)
+            n_object_particles = len(object_indices)
+            n_robot_particles = len(robot_indices)
             total_particles = n_object_particles + n_robot_particles
             
             # Create initial state by concatenating object and robot positions
-            initial_positions = torch.cat([initial_x, current_trans_dynamic_points], dim=0)
+            initial_positions = torch.cat([initial_x[object_indices], current_trans_dynamic_points[robot_indices]], dim=0)
             
             # Repeat initial positions n_history times [1, n_history, particles, 3]
             initial_states = initial_positions.unsqueeze(0).unsqueeze(0).repeat(1, n_history, 1, 1)
@@ -1673,25 +1676,37 @@ class InvPhyTrainerWarp:
             
             logger.info(f"GNN rollout initialized with {n_object_particles} object + {n_robot_particles} robot particles")
 
-            # Add GNN prediction point cloud if available (only object particles)
-            gnn_pcd = None
+            # Add GNN prediction point cloud (both object and robot particles)
+            gnn_obj_pcd = None
+            gnn_robot_pcd = None
             gnn_line_set = None
-            gnn_pcd = o3d.geometry.PointCloud()
-            gnn_obj_positions = gnn_x[:self.num_all_points].cpu().numpy()  # Only object particles
-            gnn_pcd.points = o3d.utility.Vector3dVector(gnn_obj_positions)
-            gnn_pcd.paint_uniform_color([0, 1, 0])  # Green for GNN predictions
-            vis.add_geometry(gnn_pcd, reset_bounding_box=False)
+            
+            # Object particles in green
+            gnn_obj_pcd = o3d.geometry.PointCloud()
+            gnn_obj_positions = gnn_x[:n_object_particles].cpu().numpy()
+            gnn_obj_pcd.points = o3d.utility.Vector3dVector(gnn_obj_positions)
+            gnn_obj_pcd.paint_uniform_color([0, 1, 0])  # Green for GNN object predictions
+            vis.add_geometry(gnn_obj_pcd, reset_bounding_box=False)
+            
+            # Robot particles in red
+            gnn_robot_pcd = o3d.geometry.PointCloud()
+            gnn_robot_positions = gnn_x[n_object_particles:].cpu().numpy()
+            gnn_robot_pcd.points = o3d.utility.Vector3dVector(gnn_robot_positions)
+            gnn_robot_pcd.paint_uniform_color([1, 0, 0])  # Red for GNN robot predictions
+            vis.add_geometry(gnn_robot_pcd, reset_bounding_box=False)
                 
-            # Add GNN edges
-            # adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
-            # gnn_edges = create_edges_for_points(gnn_obj_positions, adj_thresh)
-            # if len(gnn_edges) > 0:
-            #     gnn_line_set = o3d.geometry.LineSet()
-            #     gnn_line_set.points = o3d.utility.Vector3dVector(gnn_obj_positions)
-            #     gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
-            #     gnn_line_colors = np.tile([0, 1, 0], (len(gnn_edges), 1))  # Green for GNN edges
-            #     gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
-            #     vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+            # Add GNN edges for all particles (object + robot)
+            adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
+            gnn_all_positions = gnn_x.cpu().numpy()  # All particles (object + robot)
+            gnn_edges = create_edges_for_points(gnn_all_positions, adj_thresh)
+            if len(gnn_edges) > 0:
+                gnn_line_set = o3d.geometry.LineSet()
+                gnn_line_set.points = o3d.utility.Vector3dVector(gnn_all_positions)
+                gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
+                # Use more transparent/thinner edges for better visualization
+                gnn_line_colors = np.tile([0.5, 0.8, 0.5], (len(gnn_edges), 1))  # Lighter green for GNN edges
+                gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
+                vis.add_geometry(gnn_line_set, reset_bounding_box=False)
 
         while True:
 
@@ -1782,28 +1797,34 @@ class InvPhyTrainerWarp:
                 vis.update_geometry(object_pcd)
                 
                 # Update GNN prediction visualization
-                if gnn_pcd is not None and gnn_x is not None and frame_count % downsample_rate == 0:
+                if gnn_obj_pcd is not None and gnn_x is not None and frame_count % downsample_rate == 0:
                     # Remove old GNN edges
-                    # if gnn_line_set is not None:
-                    #     vis.remove_geometry(gnn_line_set, reset_bounding_box=False)
+                    if gnn_line_set is not None:
+                        vis.remove_geometry(gnn_line_set, reset_bounding_box=False)
                     
-                    # Update GNN object positions (only object particles)
-                    gnn_obj_positions = gnn_x[:self.num_all_points].cpu().numpy()
-                    gnn_pcd.points = o3d.utility.Vector3dVector(gnn_obj_positions)
-                    vis.update_geometry(gnn_pcd)
+                    # Update GNN object positions
+                    gnn_obj_positions = gnn_x[:n_object_particles].cpu().numpy()
+                    gnn_obj_pcd.points = o3d.utility.Vector3dVector(gnn_obj_positions)
+                    vis.update_geometry(gnn_obj_pcd)
                     
-                    # Create new GNN edges
-                    # adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
-                    # gnn_edges = create_edges_for_points(gnn_obj_positions, adj_thresh)
-                    # if len(gnn_edges) > 0:
-                    #     gnn_line_set = o3d.geometry.LineSet()
-                    #     gnn_line_set.points = o3d.utility.Vector3dVector(gnn_obj_positions)
-                    #     gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
-                    #     gnn_line_colors = np.tile([0, 1, 0], (len(gnn_edges), 1))  # Green for GNN edges
-                    #     gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
-                    #     vis.add_geometry(gnn_line_set, reset_bounding_box=False)
-                    # else:
-                    #     gnn_line_set = None
+                    # Update GNN robot positions
+                    gnn_robot_positions = gnn_x[n_object_particles:].cpu().numpy()
+                    gnn_robot_pcd.points = o3d.utility.Vector3dVector(gnn_robot_positions)
+                    vis.update_geometry(gnn_robot_pcd)
+                    
+                    # Create new GNN edges for all particles
+                    gnn_all_positions = gnn_x.cpu().numpy()  # All particles (object + robot)
+                    gnn_edges = create_edges_for_points(gnn_all_positions, adj_thresh)
+                    if len(gnn_edges) > 0:
+                        gnn_line_set = o3d.geometry.LineSet()
+                        gnn_line_set.points = o3d.utility.Vector3dVector(gnn_all_positions)
+                        gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
+                        # Use lighter/more transparent colors for better visualization
+                        gnn_line_colors = np.tile([0.5, 0.8, 0.5], (len(gnn_edges), 1))  # Lighter green for GNN edges
+                        gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
+                        vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+                    else:
+                        gnn_line_set = None
                 
                 for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                     dynamic_mesh.vertices = o3d.utility.Vector3dVector(
@@ -1980,7 +2001,7 @@ class InvPhyTrainerWarp:
             # GNN prediction logic
             if gnn_rollout is not None:
                 # Store current robot positions for delta calculation
-                robot_positions_history.append(interpolated_dynamic_points[-1].clone())
+                robot_positions_history.append(interpolated_dynamic_points[-1][robot_indices].clone())
                 
                 # Keep only the last downsample_rate+1 frames for delta calculation
                 if len(robot_positions_history) > downsample_rate + 1:
