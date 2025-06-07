@@ -1,5 +1,6 @@
 from ..data import RealData, SimpleData
 from ..utils import logger, visualize_pc, cfg
+from ..utils.misc import random_direction
 from ..model.diff_simulator import (
     SpringMassSystemWarp,
 )
@@ -1025,9 +1026,9 @@ class InvPhyTrainerWarp:
         min_idx = min_indices[torch.argmin(min_dist_per_ctrl_pts)]
         return self.structure_points[min_idx].unsqueeze(0)
     
-    def robot_translation(self, offset_dist, keep_off, multiplier, speed):
+    def push_rope_once(self, offset_dist, keep_off, multiplier, speed):
         """
-        Generate random robot translational movement parameters.
+        Select a point on the rope and move pusher towards it.
         
         Args:
             offset_dist: Distance to offset from the selected object point
@@ -1049,16 +1050,10 @@ class InvPhyTrainerWarp:
             selected_point = self.init_vertices[random_idx]
             
             # 2. Select a random direction
-            random_angle = torch.rand(1, device=self.init_vertices.device) * 2 * np.pi - np.pi
-            random_direction = torch.tensor([
-                torch.cos(random_angle),
-                torch.sin(random_angle),
-                torch.tensor(0.0, device=self.init_vertices.device)  # Assuming movement in the XY plane
-            ], device=self.init_vertices.device)
-            random_direction = random_direction / torch.norm(random_direction)
+            rd = random_direction(self.init_vertices.device)
             
             # 3. Set starting position with offset
-            start_position = selected_point + random_direction * offset_dist
+            start_position = selected_point + rd * offset_dist
             
             distances = torch.norm(self.init_vertices - start_position, dim=1)
             min_distance = torch.min(distances).item()
@@ -1079,6 +1074,55 @@ class InvPhyTrainerWarp:
         
         # 6. Calculate total movement distance and number of frames needed
         movement_vector = -random_direction.cpu().numpy() * offset_dist * multiplier
+        total_distance = np.linalg.norm(movement_vector)
+        n_frames = max(1, int(np.ceil(total_distance / speed)))
+        
+        # 7. Divide the movement into n_frames steps
+        step_movement = movement_vector / n_frames
+        target_changes = np.zeros((n_frames, self.n_ctrl_parts, 3))
+        for i in range(n_frames):
+            target_changes[i, 0] = step_movement
+                
+        return translation.astype(np.float32), target_changes.astype(np.float32)
+    
+    def push_once(self, offset_dist, keep_off, travel_dist, speed):
+        """
+        Select a point on the rope, offset it by offset_dist, and move the pusher in a random direction.  
+        """
+        # Get object points from the simulator
+        max_attempts = 100
+        for _ in range(max_attempts):
+            # 1. Select a random point on the object
+            random_idx = torch.randint(0, len(self.init_vertices), (1,)).item()
+            selected_point = self.init_vertices[random_idx]
+            
+            # 2. Select a random direction
+            rd = random_direction(self.init_vertices.device)
+            
+            # 3. Set starting position with offset
+            start_position = selected_point + rd * offset_dist
+            
+            distances = torch.norm(self.init_vertices - start_position, dim=1)
+            min_distance = torch.min(distances).item()
+            
+            if min_distance >= keep_off:
+                # Valid position found
+                break
+        else:
+            # If we couldn't find a valid position after max attempts
+            raise RuntimeError("Could not find valid robot position after maximum attempts")
+        
+        # 4. Find robot's current position and calculate translation
+        all_vertices = np.concatenate([vertices for vertices in self.dynamic_vertices], axis=0)
+        robot_position = np.mean(all_vertices, axis=0)
+        translation = start_position.cpu().numpy() - robot_position
+        translation = translation.reshape(self.n_ctrl_parts, 3)
+
+        # 5. Select a new random direction
+        rd = random_direction(self.init_vertices.device)
+
+        # 6. Move in the random direction for travel_dist
+        movement_vector = rd.cpu().numpy() * travel_dist
         total_distance = np.linalg.norm(movement_vector)
         n_frames = max(1, int(np.ceil(total_distance / speed)))
         
@@ -1191,7 +1235,7 @@ class InvPhyTrainerWarp:
         )
         
         # set robot position and movement parameters
-        translation, target_changes = self.robot_translation(offset_dist=cfg.offset_dist, keep_off=cfg.keep_off, multiplier=cfg.multiplier, speed=cfg.speed)
+        translation, target_changes = self.push_once(offset_dist=0.1, keep_off=0.025, travel_dist=0.3, speed=0.005)
         n_frames = target_changes.shape[0]
         current_finger = 0.0
         finger_changes = np.zeros((n_frames), dtype=np.float32)

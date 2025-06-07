@@ -1,11 +1,12 @@
 import functools
-from torch import distributed as dist
+import torch
+from numpy import pi
 
 
 def get_dist_info():
-    if dist.is_available() and dist.is_initialized():
-        rank = dist.get_rank()
-        world_size = dist.get_world_size()
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
     else:
         rank = 0
         world_size = 1
@@ -33,3 +34,13 @@ def singleton(cls):
         return _instance[cls]
 
     return inner
+
+def random_direction(device):
+    random_angle = torch.rand(1, device=device) * 2 * pi - pi
+    random_direction = torch.tensor([
+        torch.cos(random_angle),
+        torch.sin(random_angle),
+        torch.tensor(0.0, device=device)  # Assuming movement in the XY plane
+    ], device=device)
+    random_direction = random_direction / torch.norm(random_direction)
+    return random_direction
