@@ -363,14 +363,14 @@ class PropModuleDiffDen(nn.Module):
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
-    def forward(self, a_hist, s_hist, s_delta, Rr, Rs, verbose=False):
+    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, verbose=False):
         """
         Forward pass of the GNN dynamics model.
         
         Args:
-            a_hist: (B, n_history, particle_num) - particle attributes over history
-            s_hist: (B, n_history, particle_num, 3) - particle positions over history  
-            s_delta: (B, n_history, particle_num, 3) - particle displacements over history
+            a_cur: (B, particle_num) - current particle attributes
+            s_cur: (B, particle_num, 3) - current positions  
+            s_delta: (B, particle_num, 3) - particle displacements over history
             Rr: (B, rel_num, particle_num) - receiver matrix for graph edges
             Rs: (B, rel_num, particle_num) - sender matrix for graph edges
             verbose: bool - whether to print debug information
@@ -378,25 +378,18 @@ class PropModuleDiffDen(nn.Module):
         Returns:
             (B, particle_num, 3) - predicted next particle positions
         """
-        B, n_history, N = a_hist.size()
+        B, n_history, N = s_delta.size()
         _, rel_num, _ = Rr.size()
         nf_effect = self.nf_effect
         pstep = 3  # Number of message passing steps
 
         # Convert from data format (B x time x particles) to model format (B x particles x time)
-        a_hist = a_hist.transpose(1, 2)  # B x particle_num x n_history
-        s_hist = s_hist.transpose(1, 2)  # B x particle_num x n_history x 3
         s_delta = s_delta.transpose(1, 2)  # B x particle_num x n_history x 3
 
-        Rr_t = Rr.transpose(1, 2) # TODO: add .continuous()? # B x particle_num x rel_num
-
-        # Prepare features for encoding
         # Flatten displacement history for particle encoder
         s_delta_flat = s_delta.reshape(B, N, -1)  # B x particle_num x (3 * n_history)
 
-        # Extract current frame data for edge relations (edges use only latest positions)
-        a_cur = a_hist[:, :, -1]  # B x particle_num (most recent attributes)
-        s_cur = s_hist[:, :, -1, :]  # B x particle_num x 3 (most recent positions)
+        Rr_t = Rr.transpose(1, 2) # TODO: add .continuous()? # B x particle_num x rel_num
         
         # Compute relation features using edge matrices
         a_cur_r = Rr.bmm(a_cur[..., None])  # B x rel_num x 1 (receiver attributes)
@@ -406,7 +399,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Encode particle features (history-aware)
         particle_encode = self.particle_encoder(
-            torch.cat([s_delta_flat, a_hist], 2))  # B x particle_num x nf_effect
+            torch.cat([s_delta_flat, a_cur], 2))  # B x particle_num x nf_effect
         particle_effect = particle_encode
 
         # Encode relation features (current frame only)
@@ -457,14 +450,13 @@ class PropNetDiffDenModel(nn.Module):
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_hist, s_hist, s_delta, particle_nums=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, particle_nums=None):
         """
         Predict particle positions one step into the future.
         
         Args:
-            a_hist: (B, n_history, particle_num) - particle attributes over history
-                   (0 for objects, 1 for tools/robots)
-            s_hist: (B, n_history, particle_num, 3) - particle positions over history
+            a_cur: (B, particle_num) - current particle attributes
+            s_cur: (B, particle_num, 3) - current positions  
             s_delta: (B, n_history, particle_num, 3) - particle displacements over history
                     For t < n_history-1: consecutive frame differences
                     For t = n_history-1: 0 for objects, actual motion for robots
@@ -473,17 +465,13 @@ class PropNetDiffDenModel(nn.Module):
         Returns:
             (B, particle_num, 3) - predicted next particle positions
         """
-        assert type(a_hist) == torch.Tensor
-        assert type(s_hist) == torch.Tensor  
+        assert type(a_cur) == torch.Tensor
+        assert type(s_cur) == torch.Tensor  
         assert type(s_delta) == torch.Tensor
-        assert a_hist.shape == s_hist.shape[:3]
-        assert s_hist.shape == s_delta.shape
+        assert a_cur.shape == s_cur.shape
+        assert s_cur.shape == s_delta[:, -1].shape
 
-        B, n_history, N = a_hist.size()
-
-        # Use most recent frame for dynamic edge construction
-        a_cur = a_hist[:, -1, :]  # B x particle_num
-        s_cur = s_hist[:, -1, :, :]  # B x particle_num x 3
+        B, n_history, N = s_delta.size()
 
         # Create batch masks for valid particles and tools
         if particle_nums is not None:
@@ -509,7 +497,7 @@ class PropNetDiffDenModel(nn.Module):
             connect_tools_all=self.connect_tools_all
         )
 
-        # Forward pass through GNN with full history
-        s_pred = self.model.forward(a_hist, s_hist, s_delta, Rr_batch, Rs_batch)
+        # Forward pass through GNN
+        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch)
 
         return s_pred

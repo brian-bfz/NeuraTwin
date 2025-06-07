@@ -7,7 +7,7 @@ dataset:
   # - 'rand_spread': random spreaded object pile
   # - 'rand_sparse_spread': random sparse spreaded object pile
   global_scale: 24
-  n_episode: 3000
+  n_episode: 2000
   n_timestep: 60
   obj: "carrots"
   particle_r: 0.125
@@ -36,8 +36,8 @@ train:
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1
-  n_history: 4
-  n_rollout: 4
+  n_history: 1
+  n_rollout: 5
   rollout_decay: 1.0
   lr_scheduler:
     type: "ReduceLROnPlateau"
@@ -55,10 +55,10 @@ train:
   particle:
     nf_effect: 64
     resume:
-      active: true
-      epoch: 200
+      active: false
+      epoch: 0
       iter: 0
-      folder: 'new_data'
+      folder: 
     adj_thresh: 0.10
     add_delta: False
     connect_tools_all: False  # Connect all tool particles to all object particles regardless of distance

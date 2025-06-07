@@ -189,7 +189,7 @@ def train():
         else:
             raise ValueError("unknown scheduler type: %s" % config['train']['lr_scheduler']['type'])
 
-    st_epoch = config['train']['particle']['resume']['epoch'] if config['train']['particle']['resume']['epoch'] > 0 else 0
+    st_epoch = config['train']['particle']['resume']['epoch'] if config['train']['particle']['resume']['active'] else 0
     best_valid_loss = np.inf
 
     avg_timer = EpochTimer()
