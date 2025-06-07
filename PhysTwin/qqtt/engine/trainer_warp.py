@@ -1680,18 +1680,18 @@ class InvPhyTrainerWarp:
             gnn_obj_positions = gnn_x[:self.num_all_points].cpu().numpy()  # Only object particles
             gnn_pcd.points = o3d.utility.Vector3dVector(gnn_obj_positions)
             gnn_pcd.paint_uniform_color([0, 1, 0])  # Green for GNN predictions
-            vis.add_geometry(gnn_pcd)
+            vis.add_geometry(gnn_pcd, reset_bounding_box=False)
                 
             # Add GNN edges
-            adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
-            gnn_edges = create_edges_for_points(gnn_obj_positions, adj_thresh)
-            if len(gnn_edges) > 0:
-                gnn_line_set = o3d.geometry.LineSet()
-                gnn_line_set.points = o3d.utility.Vector3dVector(gnn_obj_positions)
-                gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
-                gnn_line_colors = np.tile([0, 1, 0], (len(gnn_edges), 1))  # Green for GNN edges
-                gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
-                vis.add_geometry(gnn_line_set)
+            # adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
+            # gnn_edges = create_edges_for_points(gnn_obj_positions, adj_thresh)
+            # if len(gnn_edges) > 0:
+            #     gnn_line_set = o3d.geometry.LineSet()
+            #     gnn_line_set.points = o3d.utility.Vector3dVector(gnn_obj_positions)
+            #     gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
+            #     gnn_line_colors = np.tile([0, 1, 0], (len(gnn_edges), 1))  # Green for GNN edges
+            #     gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
+            #     vis.add_geometry(gnn_line_set, reset_bounding_box=False)
 
         while True:
 
@@ -1784,8 +1784,8 @@ class InvPhyTrainerWarp:
                 # Update GNN prediction visualization
                 if gnn_pcd is not None and gnn_x is not None and frame_count % downsample_rate == 0:
                     # Remove old GNN edges
-                    if gnn_line_set is not None:
-                        vis.remove_geometry(gnn_line_set, reset_bounding_box=False)
+                    # if gnn_line_set is not None:
+                    #     vis.remove_geometry(gnn_line_set, reset_bounding_box=False)
                     
                     # Update GNN object positions (only object particles)
                     gnn_obj_positions = gnn_x[:self.num_all_points].cpu().numpy()
@@ -1793,17 +1793,17 @@ class InvPhyTrainerWarp:
                     vis.update_geometry(gnn_pcd)
                     
                     # Create new GNN edges
-                    adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
-                    gnn_edges = create_edges_for_points(gnn_obj_positions, adj_thresh)
-                    if len(gnn_edges) > 0:
-                        gnn_line_set = o3d.geometry.LineSet()
-                        gnn_line_set.points = o3d.utility.Vector3dVector(gnn_obj_positions)
-                        gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
-                        gnn_line_colors = np.tile([0, 1, 0], (len(gnn_edges), 1))  # Green for GNN edges
-                        gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
-                        vis.add_geometry(gnn_line_set, reset_bounding_box=False)
-                    else:
-                        gnn_line_set = None
+                    # adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
+                    # gnn_edges = create_edges_for_points(gnn_obj_positions, adj_thresh)
+                    # if len(gnn_edges) > 0:
+                    #     gnn_line_set = o3d.geometry.LineSet()
+                    #     gnn_line_set.points = o3d.utility.Vector3dVector(gnn_obj_positions)
+                    #     gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
+                    #     gnn_line_colors = np.tile([0, 1, 0], (len(gnn_edges), 1))  # Green for GNN edges
+                    #     gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
+                    #     vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+                    # else:
+                    #     gnn_line_set = None
                 
                 for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                     dynamic_mesh.vertices = o3d.utility.Vector3dVector(
