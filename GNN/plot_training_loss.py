@@ -300,7 +300,7 @@ def main():
         
         save_path = None
         if args.save_plots:
-            save_path = f"data/plots/multi_model_comparison.png"
+            save_path = str(DATA_ROOT / "plots" / "multi_model_comparison.png")
         
         plot_multi_model_comparison(model_names, save_path)
         
@@ -328,7 +328,7 @@ def main():
         # Set up save paths if requested
         save_path = None
         if args.save_plots:
-            save_path = f"data/plots/{model_name}_training_curves.png"
+            save_path = str(DATA_ROOT / "plots" / f"{model_name}_training_curves.png")
         
         # Create visualizations
         plot_training_curves(epochs, train_losses, valid_losses, best_valid_losses, 

@@ -135,7 +135,7 @@ if __name__ == "__main__":
     init_pose[:3, 3] = [0.0, 0.0, 0.0]
 
     exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
-    gaussians_path = str(get_gaussian_path(args.gaussian_path, case_name, exp_name))
+    gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
 
     logger.set_log_file(path=base_dir, name="inference_log")
 
