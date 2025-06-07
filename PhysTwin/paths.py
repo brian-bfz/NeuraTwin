@@ -7,6 +7,9 @@ from pathlib import Path
 # Get the directory where this file (paths.py) is located - this is the PhysTwin package root
 PHYSTWIN_ROOT = Path(__file__).parent
 
+# Assets directories
+ASSETS_ROOT = PHYSTWIN_ROOT / "assets"
+
 # Data directories
 DATA_ROOT = PHYSTWIN_ROOT / "data"
 DATA_DIFFERENT_TYPES = DATA_ROOT / "different_types"
@@ -46,23 +49,3 @@ def get_case_paths(case_name):
         'model_dir': EXPERIMENTS_DIR / case_name / "train",
         'data_dir': DATA_DIFFERENT_TYPES / case_name,
     }
-
-def get_gaussian_path(gaussian_path, case_name, exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"):
-    """
-    Get the path to gaussian splatting point cloud file.
-    
-    Args:
-        gaussian_path: str - base gaussian output path
-        case_name: str - case name
-        exp_name: str - experiment name
-        
-    Returns:
-        Path - path to the point cloud file
-    """
-    if gaussian_path.startswith('./'):
-        # Convert relative path to absolute based on PhysTwin root
-        gaussian_base = PHYSTWIN_ROOT / gaussian_path[2:]
-    else:
-        gaussian_base = Path(gaussian_path)
-    
-    return gaussian_base / case_name / exp_name / "point_cloud" / "iteration_10000" / "point_cloud.ply" 

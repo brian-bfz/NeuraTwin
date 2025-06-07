@@ -17,6 +17,7 @@ PhysTwin/xarm/
 PhysTwin/data_process/models/weights/
 PhysTwin/data_process/groundedSAM_checkpoints/
 PhysTwin/data_process/TRELLIS/
+PhysTwin/gaussian_splatting/submodules/
 
 # All
 *.egg-info
@@ -29,3 +30,4 @@ PhysTwin/data_process/TRELLIS/
 __pycache__/
 .DS_Store
 *.pth
+temp_experiments/single_push_rope/inference_log.log

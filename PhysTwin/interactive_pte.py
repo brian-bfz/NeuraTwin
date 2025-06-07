@@ -1,5 +1,5 @@
-from qqtt import InvPhyTrainerWarp
-from qqtt.utils import logger, cfg
+from .qqtt import InvPhyTrainerWarp
+from .qqtt.utils import logger, cfg
 from datetime import datetime
 import random
 import numpy as np
@@ -12,6 +12,7 @@ import json
 import open3d as o3d
 import sapien.core as sapien
 from urdfpy import URDF
+from .paths import *
 
 
 def set_all_seeds(seed):
@@ -158,17 +159,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_path",
         type=str,
-        default="./data/different_types",
+        default=str(DATA_DIFFERENT_TYPES),
     )
     parser.add_argument(
         "--gaussian_path",
         type=str,
-        default="./gaussian_output",
+        default=str(GAUSSIAN_OUTPUT_DIR),
     )
     parser.add_argument(
         "--bg_img_path",
         type=str,
-        default="./data/bg.png",
+        default=str(DATA_BG_IMG),
     )
     parser.add_argument("--case_name", type=str, default="double_lift_cloth_3")
     parser.add_argument("--n_ctrl_parts", type=int, default=2)
@@ -180,15 +181,17 @@ if __name__ == "__main__":
     base_path = args.base_path
     case_name = args.case_name
 
-    if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml("configs/cloth.yaml")
-    else:
-        cfg.load_from_yaml("configs/real.yaml")
+    case_paths = get_case_paths(case_name)
 
-    base_dir = f"./temp_experiments/{case_name}"
+    if "cloth" in case_name or "package" in case_name:
+        cfg.load_from_yaml(CONFIG_CLOTH)
+    else:
+        cfg.load_from_yaml(CONFIG_REAL)
+
+    base_dir = str(TEMP_EXPERIMENTS_DIR / case_name)
 
     # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = f"./experiments_optimization/{case_name}/optimal_params.pkl"
+    optimal_path = case_paths['optimal_params']
     logger.info(f"Load optimal parameters from: {optimal_path}")
     assert os.path.exists(
         optimal_path
@@ -198,12 +201,12 @@ if __name__ == "__main__":
     cfg.set_optimal_params(optimal_params)
 
     # Set the intrinsic and extrinsic parameters for visualization
-    with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
+    with open(case_paths["data_dir"] / "calibrate.pkl", "rb") as f:
         c2ws = pickle.load(f)
     w2cs = [np.linalg.inv(c2w) for c2w in c2ws]
     cfg.c2ws = np.array(c2ws)
     cfg.w2cs = np.array(w2cs)
-    with open(f"{base_path}/{case_name}/metadata.json", "r") as f:
+    with open(case_paths["data_dir"] / "metadata.json", "r") as f:
         data = json.load(f)
     cfg.intrinsics = np.array(data["intrinsics"])
     cfg.WH = data["WH"]
@@ -237,14 +240,13 @@ if __name__ == "__main__":
     # o3d.visualization.draw_geometries(static_meshes + [coordinate])
 
     # Load the robot finger
-    urdf_path = "xarm/xarm7_with_gripper.urdf"
     R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 
     init_pose = np.eye(4)
     init_pose[:3, :3] = R
     init_pose[:3, 3] = [0.2, 0.0, 0.23]
     sample_robot = RobotPcSampler(
-        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+        str(URDF_XARM7), link_names=["left_finger", "right_finger"], init_pose=init_pose
     )
     # meshes = sample_robot.get_finger_mesh(gripper_openness=1.0)
     # coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
@@ -255,14 +257,14 @@ if __name__ == "__main__":
 
     logger.set_log_file(path=base_dir, name="inference_log")
     trainer = InvPhyTrainerWarp(
-        data_path=f"{base_path}/{case_name}/final_data.pkl",
+        data_path=str(case_paths['data_dir'] / "final_data.pkl"),
         base_dir=base_dir,
         pure_inference_mode=True,
         static_meshes=static_meshes,
         robot=sample_robot,
     )
 
-    best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
+    best_model_path = glob.glob(str(case_paths['model_dir'] / "best_*.pth"))[0]
     trainer.interactive_robot(
         best_model_path,
         gaussians_path,
