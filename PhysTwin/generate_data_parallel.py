@@ -26,11 +26,12 @@ def generate_episode_on_gpu(args_tuple):
     Generate a single episode on a specified GPU.
     This function will be called in parallel processes.
     """
-    episode_id, gpu_id, case_name, data_file_path, n_ctrl_parts, include_gaussian, base_path = args_tuple
+    episode_id, gpu_id, case_name, data_file_path, n_ctrl_parts, include_gaussian, base_path, overwrite = args_tuple
     
     # Set the GPU for this process
     device = f"cuda:{gpu_id}"
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    # Don't restrict CUDA_VISIBLE_DEVICES - instead use explicit device assignment
+    # os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)  # This causes the error
     
     print(f"Episode {episode_id} starting on GPU {gpu_id}")
     
@@ -76,6 +77,17 @@ def generate_episode_on_gpu(args_tuple):
     exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
     gaussians_path = f"{GAUSSIAN_OUTPUT_DIR}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
     
+    # Check if episode already exists and handle overwrite
+    if not overwrite:
+        # Check if episode already exists
+        try:
+            with h5py.File(data_file_path, 'r') as f:
+                if f'episode_{episode_id:06d}' in f:
+                    print(f"Episode {episode_id} already exists, skipping (use --overwrite to replace)")
+                    return f"Episode {episode_id} skipped (already exists)"
+        except (FileNotFoundError, OSError):
+            pass  # File doesn't exist yet, continue
+    
     # Generate the episode
     try:
         trainer.generate_data(
@@ -84,6 +96,7 @@ def generate_episode_on_gpu(args_tuple):
             n_ctrl_parts, 
             data_file_path,
             episode_id,
+            overwrite=overwrite
         )
         print(f"Episode {episode_id} completed on GPU {gpu_id}")
         return f"Episode {episode_id} completed successfully"
@@ -107,6 +120,8 @@ def generate_data_parallel():
     parser.add_argument("--include_gaussian", action="store_true")
     parser.add_argument("--max_workers", type=int, default=None,
                        help="Maximum number of parallel workers (default: number of GPUs)")
+    parser.add_argument("--overwrite", action="store_true",
+                       help="Overwrite existing episode data if it already exists")
     args = parser.parse_args()
     
     # Parse episodes
@@ -149,7 +164,8 @@ def generate_data_parallel():
             args.data_file, 
             args.n_ctrl_parts, 
             args.include_gaussian,
-            args.base_path
+            args.base_path,
+            args.overwrite
         )
         args_list.append(args_tuple)
     

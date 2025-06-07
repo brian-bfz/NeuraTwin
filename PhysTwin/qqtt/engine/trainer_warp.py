@@ -188,7 +188,14 @@ class InvPhyTrainerWarp:
         """One-time initialization of the simulator with correct spring configuration"""
         # Load the model parameters
         logger.info(f"Load model from {model_path}")
-        checkpoint = torch.load(model_path, map_location=cfg.device)
+        
+        # Handle device mapping for multi-GPU environments
+        if hasattr(cfg, 'device'):
+            map_location = cfg.device
+        else:
+            map_location = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+        
+        checkpoint = torch.load(model_path, map_location=map_location)
         spring_Y = checkpoint["spring_Y"]
         collide_elas = checkpoint["collide_elas"]
         collide_fric = checkpoint["collide_fric"]
@@ -1145,7 +1152,7 @@ class InvPhyTrainerWarp:
                 
         return translation.astype(np.float32), target_changes.astype(np.float32)
     
-    def save_episode_data(self, data_file_path, episode_id, object_data, robot_data, gaussians_data=None):
+    def save_episode_data(self, data_file_path, episode_id, object_data, robot_data, gaussians_data=None, overwrite=False):
         """Save episode data to a shared HDF5 file with each episode as a group"""
         import h5py
         from datetime import datetime
@@ -1156,8 +1163,18 @@ class InvPhyTrainerWarp:
         
         # Open HDF5 file in append mode
         with h5py.File(data_file_path, 'a') as f:
+            # Handle existing episode groups
+            episode_name = f'episode_{episode_id:06d}'
+            if episode_name in f:
+                if overwrite:
+                    print(f"Overwriting existing episode {episode_id}")
+                    del f[episode_name]  # Remove existing group
+                else:
+                    print(f"Episode {episode_id} already exists, skipping save")
+                    return
+            
             # Create episode group
-            episode_group = f.create_group(f'episode_{episode_id:06d}')
+            episode_group = f.create_group(episode_name)
             
             # Create datasets with chunk size equal to the whole dataset
             episode_group.create_dataset(
@@ -1230,7 +1247,7 @@ class InvPhyTrainerWarp:
         print(f"Saved episode {episode_id} to {data_file_path}: object {object_array.shape}, robot {robot_array.shape}")
 
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, data_file_path=None, episode_id=0, custom_control_points=None, 
+        self, model_path, gs_path, n_ctrl_parts=1, data_file_path=None, episode_id=0, custom_control_points=None, overwrite=False
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
@@ -1433,7 +1450,7 @@ class InvPhyTrainerWarp:
                 })
 
         # Save all collected data to the shared HDF5 file
-        self.save_episode_data(data_file_path, episode_id, object_frames, robot_frames, gaussians_frames)
+        self.save_episode_data(data_file_path, episode_id, object_frames, robot_frames, gaussians_frames, overwrite=overwrite)
 
     def interactive_robot(self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, gnn_model=None, gnn_config=None):
         # Load the model
