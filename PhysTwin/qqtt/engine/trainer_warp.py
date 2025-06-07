@@ -64,7 +64,18 @@ class InvPhyTrainerWarp:
     ):
         cfg.data_path = data_path
         cfg.base_dir = base_dir
-        cfg.device = device
+        
+        # Multi-GPU setup
+        if device == "cuda:0" and torch.cuda.device_count() > 1:
+            print(f"Available GPUs: {torch.cuda.device_count()}")
+            # Use GPU 0 for main simulation, GPU 1 for additional computations
+            cfg.device = device
+            cfg.secondary_device = "cuda:1"
+            print(f"Using primary device: {cfg.device}, secondary device: {cfg.secondary_device}")
+        else:
+            cfg.device = device
+            cfg.secondary_device = device
+            
         cfg.run_name = base_dir.split("/")[-1]
         cfg.train_frame = train_frame
 
@@ -1252,6 +1263,12 @@ class InvPhyTrainerWarp:
             gaussians.load_ply(gs_path)
             gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
             gaussians.isotropic = True
+            
+            # Move Gaussian model to secondary GPU if available
+            if hasattr(cfg, 'secondary_device') and cfg.secondary_device != cfg.device:
+                print(f"Moving Gaussian model to {cfg.secondary_device}")
+                gaussians = gaussians.to(cfg.secondary_device)
+            
             current_pos = gaussians.get_xyz
             current_rot = gaussians.get_rotation
             prev_x = None
@@ -1273,6 +1290,9 @@ class InvPhyTrainerWarp:
         object_frames = []
         robot_frames = []
         gaussians_frames = [] if self.include_gaussian else None
+        
+        # Use secondary GPU for Gaussian processing if available
+        gaussian_device = cfg.secondary_device if hasattr(cfg, 'secondary_device') and self.include_gaussian else cfg.device
 
         for i in range(n_frames):
             # 1. Simulator step
@@ -1618,6 +1638,7 @@ class InvPhyTrainerWarp:
             vis.create_window(visible=False, width=width, height=height)
             render_option = vis.get_render_option()
             render_option.point_size = 10.0
+            render_option.line_width = 1.0  # Thinner edges for better visualization
 
             for static_mesh in self.static_meshes:
                 vis.add_geometry(static_mesh)
@@ -1703,7 +1724,15 @@ class InvPhyTrainerWarp:
             # Particle numbers [1]
             particle_nums = torch.tensor([total_particles], device=cfg.device)
             
-            # Initialize rollout
+            # Initialize rollout (move data to GNN's device if different)
+            gnn_device = next(gnn_model.parameters()).device
+            if gnn_device != cfg.device:
+                print(f"Moving GNN data from {cfg.device} to {gnn_device}")
+                initial_states = initial_states.to(gnn_device)
+                initial_deltas = initial_deltas.to(gnn_device)
+                initial_attrs = initial_attrs.to(gnn_device)
+                particle_nums = particle_nums.to(gnn_device)
+            
             gnn_rollout = Rollout(
                 gnn_model, 
                 gnn_config, 
@@ -2058,12 +2087,15 @@ class InvPhyTrainerWarp:
                     prev_robot_pos = robot_positions_history[-downsample_rate-1]  # downsample_rate frames ago
                     robot_delta = current_robot_pos - prev_robot_pos
                     
+                    # Get GNN device
+                    gnn_device = next(gnn_model.parameters()).device
+                    
                     # Create next_delta tensor (object particles get zero delta, robot gets calculated delta)
-                    next_delta = torch.zeros(1, len(gnn_x), 3, device=cfg.device)
-                    next_delta[0, -len(robot_delta):, :] = robot_delta
+                    next_delta = torch.zeros(1, len(gnn_x), 3, device=gnn_device)
+                    next_delta[0, -len(robot_delta):, :] = robot_delta.to(gnn_device)
                     
                     # Create next_attrs (same as before: 0 for object, 1 for robot)
-                    next_attrs = torch.zeros(1, len(gnn_x), device=cfg.device)
+                    next_attrs = torch.zeros(1, len(gnn_x), device=gnn_device)
                     next_attrs[0, -len(robot_delta):] = 1
                     
                     # Get GNN prediction

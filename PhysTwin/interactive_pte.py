@@ -285,8 +285,14 @@ if __name__ == "__main__":
             gnn_config = load_yaml(config_path)
             logger.info(f"Loaded GNN config from: {config_path}")
             
-            # Load model
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            # Load model with multi-GPU support
+            if torch.cuda.device_count() > 1:
+                # Use second GPU for GNN to balance load
+                device = torch.device('cuda:1')
+                print(f"Loading GNN model on GPU 1 (of {torch.cuda.device_count()} available GPUs)")
+            else:
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                
             gnn_model = PropNetDiffDenModel(gnn_config, torch.cuda.is_available())
             model_checkpoint = torch.load(str(model_paths['net_best']), map_location=device)
             gnn_model.load_state_dict(model_checkpoint)
