@@ -36,8 +36,8 @@ train:
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1
-  n_history: 1
-  n_rollout: 5
+  n_history: 4
+  n_rollout: 4
   rollout_decay: 1.0
   lr_scheduler:
     type: "ReduceLROnPlateau"
