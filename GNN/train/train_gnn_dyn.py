@@ -148,12 +148,6 @@ def train():
 
     model = PropNetDiffDenModel(config, use_gpu)
     print("model #params: %d" % count_trainable_parameters(model))
-    
-    if use_gpu:
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
-        else:
-            model = model.cuda()
 
     # resume training of a saved model (if given)
     if config['train']['particle']['resume']['active']:
@@ -163,6 +157,9 @@ def train():
 
         pretrained_dict = torch.load(model_path)
         model.load_state_dict(pretrained_dict)
+
+    if use_gpu:
+        model = model.cuda()
 
     # ========================================================================
     # OPTIMIZER, TIMER, ROLLBACK, AND SCHEDULER SETUP

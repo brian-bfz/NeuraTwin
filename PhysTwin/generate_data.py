@@ -86,7 +86,6 @@ if __name__ == "__main__":
         type=str,
         default=str(GAUSSIAN_OUTPUT_DIR),
     )
-    parser.add_argument("--data_file", type=str, default=str(GENERATED_DATA_DIR / "data.h5"))
     parser.add_argument("--case_name", type=str, default="double_lift_cloth_3")
     parser.add_argument("--n_ctrl_parts", type=int, default=1)
     parser.add_argument("--custom_ctrl_points", type=str, help="Path to directory containing custom control points")
@@ -158,7 +157,10 @@ if __name__ == "__main__":
     )
 
     # Initialize shared data file
-    initialize_data_file(args.data_file)
+    save_dir = GENERATED_DATA_DIR
+    os.makedirs(save_dir, exist_ok=True)
+    data_file_path = str(save_dir / "data.h5")
+    initialize_data_file(data_file_path)
 
     # Generate episodes
     for i in episode_list:
@@ -166,7 +168,7 @@ if __name__ == "__main__":
             best_model_path, 
             gaussians_path, 
             args.n_ctrl_parts, 
-            args.data_file,
+            data_file_path,
             i,
         )
 
