@@ -55,6 +55,20 @@ if [ "$1" == "--post" ]; then
 fi
 
 
+# STAGE 0: Download data
+echo ""
+echo "======================================================"
+echo "    STAGE 0: DOWNLOADING DATA                          "
+echo "======================================================"
+echo ""
+
+if ! [ -d "GNN/data" ]; then
+    cd GNN && bash scripts/download_data.sh
+fi
+if ! [ -d "PhysTwin/data_process/models/weights" ]; then
+    cd ../PhysTwin && bash scripts/download_pretrained_models.sh
+fi
+
 # STAGE 1: Create the base environment
 echo ""
 echo "======================================================"
