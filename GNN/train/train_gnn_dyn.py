@@ -270,6 +270,10 @@ def train():
                         # Predict next state using rollout
                         s_pred = rollout.forward(next_delta)  # [B, particles, 3]
 
+                        if epoch_timer and phase == 'train':
+                            rollout_timer = epoch_timer.time_rollout()
+                            rollout_timer.__enter__()
+
                         # Calculate loss only for valid object particles
                         for j in range(B):
                             # Get object particle mask (attr == 0)
@@ -279,7 +283,11 @@ def train():
                                     s_pred[j, :particle_nums[j]][object_mask], 
                                     s_nxt[j, :particle_nums[j]][object_mask]
                                 )                                                        
-                    
+
+                        if epoch_timer and phase == 'train':
+                            rollout_timer.__exit__(None, None, None)
+
+
                     # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)
                     
@@ -340,16 +348,13 @@ def train():
             
             if epoch_timer and phase == 'train':
                 epoch_timer.end_epoch()
-                if hasattr(model, '_edge_times'):
-                    epoch_timer.edge_time = sum(model._edge_times)
-                    model._edge_times = []
                 timing_summary = epoch_timer.get_summary()
                 
                 # Log detailed timing breakdown
                 timing_log = f'PROFILING [Epoch {epoch}] Total: {timing_summary["total_time"]:.2f}s | ' \
                            f'Data: {timing_summary["data_loading_time"]:.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
                            f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
-                           f'Edges: {timing_summary["edge_time"]:.2f}s ({timing_summary["edge_pct"]:.1f}%) | ' \
+                           f'Rollout: {timing_summary["rollout_time"]:.2f}s ({timing_summary["rollout_pct"]:.1f}%) | ' \
                            f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
                            f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB'
                 
@@ -361,7 +366,7 @@ def train():
                 timing_log += f'Avg Total: {timing_summary["total_time"] / (epoch + 1) :.2f}s | ' \
                            f'Avg Data: {timing_summary["data_loading_time"] / (epoch + 1):.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
                            f'Avg Forward: {timing_summary["forward_time"] / (epoch + 1):.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
-                           f'Avg Edges: {timing_summary["edge_time"] / (epoch + 1):.2f}s ({timing_summary["edge_pct"]:.1f}%) | ' \
+                           f'Avg Rollout: {timing_summary["rollout_time"] / (epoch + 1):.2f}s ({timing_summary["rollout_pct"]:.1f}%) | ' \
                            f'Avg Backward: {timing_summary["backward_time"] / (epoch + 1):.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
                            f'Avg GPU Mem: {timing_summary["gpu_memory_peak_mb"] / (epoch + 1):.0f}MB'
                 

@@ -10,9 +10,9 @@ class EpochTimer:
         self.data_loading_time = 0.0
         self.forward_time = 0.0
         self.backward_time = 0.0
+        self.rollout_time = 0.0
         self.total_time = 0.0
         self.gpu_memory_peak = 0.0
-        self.edge_time = 0.0
     
     def start_epoch(self):
         if torch.cuda.is_available():
@@ -36,6 +36,9 @@ class EpochTimer:
     def time_backward(self):
         return BackwardTimer(self)
     
+    def time_rollout(self):
+        return RolloutTimer(self)
+    
     def get_summary(self):
         return {
             'total_time': self.total_time,
@@ -43,11 +46,11 @@ class EpochTimer:
             'forward_time': self.forward_time,
             'backward_time': self.backward_time,
             'gpu_memory_peak_mb': self.gpu_memory_peak,
-            'edge_time': self.edge_time,
+            'rollout_time': self.rollout_time,
             'data_loading_pct': (self.data_loading_time / self.total_time) * 100 if self.total_time > 0 else 0,
             'forward_pct': (self.forward_time / self.total_time) * 100 if self.total_time > 0 else 0,
             'backward_pct': (self.backward_time / self.total_time) * 100 if self.total_time > 0 else 0,
-            'edge_pct': (self.edge_time / self.total_time) * 100 if self.total_time > 0 else 0,
+            'rollout_pct': (self.rollout_time / self.total_time) * 100 if self.total_time > 0 else 0,
         }
 
 class DataLoadingTimer:
@@ -79,6 +82,21 @@ class ForwardTimer:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         self.epoch_timer.forward_time += time.perf_counter() - self.start
+
+class RolloutTimer:
+    def __init__(self, epoch_timer):
+        self.epoch_timer = epoch_timer
+    
+    def __enter__(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.start = time.perf_counter()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.epoch_timer.rollout_time += time.perf_counter() - self.start
 
 class BackwardTimer:
     def __init__(self, epoch_timer):
