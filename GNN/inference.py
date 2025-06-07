@@ -8,7 +8,7 @@ import json
 from .dataset.dataset_gnn_dyn import ParticleDataset
 from .model.gnn_dyn import PropNetDiffDenModel
 from .model.rollout import Rollout
-from .utils import load_yaml, fps_rad_tensor
+from .utils import load_yaml, fps_rad_tensor, create_edges_for_points
 from .paths import *
 import argparse
 from scripts.utils import parse_episodes
@@ -153,28 +153,6 @@ class Visualizer:
         robot_states = states[:, n_obj_particles:, :]
         return object_states, robot_states
     
-    def create_edges_for_points(self, positions, distance_threshold):
-        """
-        Create connectivity edges between nearby particles for visualization.
-            
-        Args:
-            positions: [n_points, 3] - particle positions
-            distance_threshold: float - maximum distance for connections
-                
-        Returns:
-            edges: [n_edges, 2] - indices of connected particle pairs
-        """
-        edges = []
-        n_points = positions.shape[0]
-            
-        for i in range(n_points):
-            for j in range(i + 1, n_points):
-                distance = np.linalg.norm(positions[i] - positions[j])
-                if distance <= distance_threshold:
-                    edges.append([i, j])
-            
-        return np.array(edges) if edges else np.empty((0, 2), dtype=int)
-
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
                                episode_num, save_path):
         """
@@ -283,7 +261,7 @@ class Visualizer:
                 vis.remove_geometry(actual_line_set, reset_bounding_box=False)
     
             # Create new edges
-            pred_edges = self.create_edges_for_points(pred_obj_pos, self.adj_thresh)
+            pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
             if len(pred_edges) > 0:
                 pred_line_set = o3d.geometry.LineSet()
                 pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
@@ -294,7 +272,7 @@ class Visualizer:
             else:
                 pred_line_set = None            
 
-            actual_edges = self.create_edges_for_points(actual_obj_pos, self.adj_thresh)
+            actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
             if len(actual_edges) > 0:
                 actual_line_set = o3d.geometry.LineSet()
                 actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)

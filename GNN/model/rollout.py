@@ -15,8 +15,8 @@ class Rollout:
         Args:
             model: trained GNN model
             config: dict - training configuration
-            initial_states: [batch, n_history, particles, 3] - initial state history
-            initial_deltas: [batch, n_history - 1, particles, 3] - initial delta history
+            initial_states: [batch, n_history, particles, 3] - initial position history
+            initial_deltas: [batch, n_history - 1, particles, 3] - initial velocity history
             initial_attrs: [batch, n_history, particles] - initial attribute history
             particle_num: [batch] - total number of particles per batch
         """
@@ -38,11 +38,11 @@ class Rollout:
         Predict next frame states and update history buffers.
         
         Args:
-            next_delta: [batch, particles, 3] - next frame delta (robot motion)
-            next_attrs: [batch, particles] - next frame attributes (for history update only)
+            next_delta: [batch, particles, 3] - next frame robot velocity
+            next_attrs: [batch, particles] - next frame attributes (for history update)
             
         Returns:
-            predicted_states: [batch, particles, 3] - predicted next frame states
+            predicted_states: [batch, particles, 3] - predicted next frame positions
         """
         # Update delta buffer with the robot's motions
         self._update_deltas(next_delta)
@@ -82,7 +82,7 @@ class Rollout:
         Update sliding window history with new predictions.
         
         Args:
-            predicted_states: [batch, particles, 3] - predicted next frame states
+            predicted_states: [batch, particles, 3] - predicted next frame positions
             next_attrs: [batch, particles] - next frame attributes
         """
         # Update delta buffer with predicted particle motion

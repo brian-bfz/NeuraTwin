@@ -684,3 +684,25 @@ def np2o3d(pcd, color=None):
         assert color.min() >= 0
         pcd_o3d.colors = o3d.utility.Vector3dVector(color)
     return pcd_o3d
+
+def create_edges_for_points(positions, distance_threshold):
+    """
+    Create connectivity edges between nearby particles for visualization.
+        
+    Args:
+        positions: [n_points, 3] - particle positions
+        distance_threshold: float - maximum distance for connections
+            
+    Returns:
+        edges: [n_edges, 2] - indices of connected particle pairs
+    """
+    edges = []
+    n_points = positions.shape[0]
+        
+    for i in range(n_points):
+        for j in range(i + 1, n_points):
+            distance = np.linalg.norm(positions[i] - positions[j])
+            if distance <= distance_threshold:
+                edges.append([i, j])
+            
+    return np.array(edges) if edges else np.empty((0, 2), dtype=int)
