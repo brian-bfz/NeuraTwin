@@ -254,27 +254,26 @@ def train():
                     rollout = Rollout(
                         model, 
                         config,
-                        states[:, :n_history, :, :],      # [B, n_history, particles, 3]
+                        states[:, n_history - 1, :, :],      # [B, particles, 3]
                         states_delta[:, :n_history - 1, :, :], # [B, n_history - 1, particles, 3]
-                        attrs[:, :n_history, :],          # [B, n_history, particles]
+                        attrs[:, n_history - 1, :],          # [B, particles]
                         particle_nums           # [B]
                     )
 
                     for idx_step in range(n_rollout):
                         # Get next frame data
                         next_delta = states_delta[:, idx_step + n_history - 1, :, :]  # [B, particles, 3]
-                        next_attrs = attrs[:, idx_step + n_history, :]            # [B, particles]
                         
                         # Ground truth next state 
                         s_nxt = states[:, n_history + idx_step, :, :]  # B x particle_num x 3
 
                         # Predict next state using rollout
-                        s_pred = rollout.forward(next_delta, next_attrs)  # [B, particles, 3]
+                        s_pred = rollout.forward(next_delta)  # [B, particles, 3]
 
                         # Calculate loss only for valid object particles
                         for j in range(B):
                             # Get object particle mask (attr == 0)
-                            object_mask = (next_attrs[j] == 0)[:particle_nums[j]]
+                            object_mask = (rollout.a_cur[j] == 0)[:particle_nums[j]]
                             if object_mask.sum() > 0:  # Only add loss if there are object particles
                                 loss += F.mse_loss(
                                     s_pred[j, :particle_nums[j]][object_mask], 

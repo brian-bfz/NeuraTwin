@@ -93,9 +93,9 @@ class Visualizer:
         predictor = Rollout(
             self.model, 
             self.config,
-            states[:self.n_history].unsqueeze(0),      # [1, n_history, particles, 3]
+            states[self.n_history - 1].unsqueeze(0),      # [1, particles, 3]
             states_delta[:self.n_history - 1].unsqueeze(0), # [1, n_history - 1, particles, 3] 
-            attrs[:self.n_history].unsqueeze(0),       # [1, n_history, particles]
+            attrs[self.n_history - 1].unsqueeze(0),       # [1, particles]
             torch.tensor([particle_num], device=self.device)  # [1]
         )
         
@@ -108,10 +108,9 @@ class Visualizer:
             
             # Get next frame data and add batch dimension
             next_delta = states_delta[step_idx - 1].unsqueeze(0)     # [1, particles, 3]
-            next_attrs = attrs[step_idx].unsqueeze(0)            # [1, particles]
             
             # Predict next state and remove batch dimension
-            predicted_state = predictor.forward(next_delta, next_attrs)[0]  # [particles, 3]
+            predicted_state = predictor.forward(next_delta)[0]  # [particles, 3]
             predicted_states.append(predicted_state)
         
         # Stack predictions and return [timesteps, particles, 3]

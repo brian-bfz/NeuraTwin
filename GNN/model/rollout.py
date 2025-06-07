@@ -44,7 +44,10 @@ class Rollout:
             predicted_states: [batch, particles, 3] - predicted next frame positions
         """
         # Update delta buffer with the robot's motions
-        self._update_robot_delta(next_delta)
+        self.s_delta = torch.cat([
+            self.s_delta[:, 1:, :, :],  # Remove first frame
+            next_delta.unsqueeze(1)     # Add new delta [batch, 1, particles, 3]
+        ], dim=1)
             
         # Predict next state using current history
         predicted_states = self.model.predict_one_step(
@@ -54,39 +57,11 @@ class Rollout:
             self.particle_nums  # [batch]
         )  # [batch, particles, 3]
             
-        next_attrs = self.a_cur # TODO: determine attributes with predicted positions
-
         # Always force robot positions to ground truth
-        robot_mask = (next_attrs == 1)  # [batch, particles]
+        robot_mask = (self.a_cur == 1)  # [batch, particles]
         predicted_states[robot_mask] = next_delta[robot_mask] + self.s_cur[robot_mask]
 
-        # Update history buffers for next iteration
-        self._update_history(predicted_states, next_attrs)
-            
-        return predicted_states  # [batch, particles, 3]
-    
-    def _update_robot_delta(self, next_delta):
-        """
-        Update delta with the robot's motions.
-
-        Args:
-            next_delta: [batch, particles, 3] - next frame robot motion
-        """
-        # Slide windows: remove oldest, add new
-        self.s_delta = torch.cat([
-            self.s_delta[:, 1:, :, :],  # Remove first frame
-            next_delta.unsqueeze(1)     # Add new delta [batch, 1, particles, 3]
-        ], dim=1)
-
-    def _update_history(self, predicted_states, next_attrs):
-        """
-        Update sliding window history with new predictions.
-        
-        Args:
-            predicted_states: [batch, particles, 3] - predicted next frame positions
-            next_attrs: [batch, particles] - next frame attributes
-        """
         # Update delta buffer with predicted particle motion
         self.s_delta[:, -1, :, :] = predicted_states - self.s_cur
-        
-        self.a_cur = next_attrs
+            
+        return predicted_states  # [batch, particles, 3]

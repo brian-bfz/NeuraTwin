@@ -343,9 +343,9 @@ class PropModuleDiffDen(nn.Module):
         self.use_gpu = use_gpu
 
         # Particle encoder:
-        # Input: displacement (3 * n_history) + attributes (1 * n_history)
+        # Input: displacement (3 * n_history) + attributes (1)
         self.particle_encoder = ParticleEncoder(
-            (3 + 1) * self.n_history, nf_effect, nf_effect)
+            3 * self.n_history + 1, nf_effect, nf_effect)
 
         # Relation encoder:
         # Input: attributes of both particles (2) + position difference (3)
@@ -378,7 +378,7 @@ class PropModuleDiffDen(nn.Module):
         Returns:
             (B, particle_num, 3) - predicted next particle positions
         """
-        B, n_history, N = s_delta.size()
+        B, N = a_cur.size()
         _, rel_num, _ = Rr.size()
         nf_effect = self.nf_effect
         pstep = 3  # Number of message passing steps
@@ -399,7 +399,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Encode particle features (history-aware)
         particle_encode = self.particle_encoder(
-            torch.cat([s_delta_flat, a_cur], 2))  # B x particle_num x nf_effect
+            torch.cat([s_delta_flat, a_cur[..., None]], 2))  # B x particle_num x nf_effect
         particle_effect = particle_encode
 
         # Encode relation features (current frame only)
@@ -468,10 +468,10 @@ class PropNetDiffDenModel(nn.Module):
         assert type(a_cur) == torch.Tensor
         assert type(s_cur) == torch.Tensor  
         assert type(s_delta) == torch.Tensor
-        assert a_cur.shape == s_cur.shape
+        assert a_cur.shape == s_cur.shape[:2]
         assert s_cur.shape == s_delta[:, -1].shape
 
-        B, n_history, N = s_delta.size()
+        B, N = a_cur.size()
 
         # Create batch masks for valid particles and tools
         if particle_nums is not None:
