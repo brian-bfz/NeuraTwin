@@ -93,8 +93,6 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", nargs='+', type=str, required=True,
                        help="Episodes to generate. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--include_gaussian", action="store_true")
-    parser.add_argument("--overwrite", action="store_true",
-                       help="Overwrite existing episode data if it already exists")
     args = parser.parse_args()
 
     # Parse episode specification
@@ -164,23 +162,12 @@ if __name__ == "__main__":
 
     # Generate episodes
     for i in episode_list:
-        # Check if episode already exists and handle overwrite
-        if not args.overwrite:
-            try:
-                with h5py.File(args.data_file, 'r') as f:
-                    if f'episode_{i:06d}' in f:
-                        print(f"Episode {i} already exists, skipping (use --overwrite to replace)")
-                        continue
-            except (FileNotFoundError, OSError):
-                pass  # File doesn't exist yet, continue
-        
         trainer.generate_data(
             best_model_path, 
             gaussians_path, 
             args.n_ctrl_parts, 
             args.data_file,
             i,
-            overwrite=args.overwrite
         )
 
     # Load custom control points if provided
