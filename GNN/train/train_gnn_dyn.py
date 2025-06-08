@@ -274,15 +274,12 @@ def train():
                             rollout_timer = epoch_timer.time_rollout()
                             rollout_timer.__enter__()
 
-                        # Calculate loss only for valid object particles
+                        # Calculate loss only for valid particles
                         for j in range(B):
-                            # Get object particle mask (attr == 0)
-                            object_mask = (rollout.a_cur[j] == 0)[:particle_nums[j]]
-                            if object_mask.sum() > 0:  # Only add loss if there are object particles
-                                loss += F.mse_loss(
-                                    s_pred[j, :particle_nums[j]][object_mask], 
-                                    s_nxt[j, :particle_nums[j]][object_mask]
-                                )                                                        
+                            loss += F.mse_loss(
+                                s_pred[j, :particle_nums[j]], 
+                                s_nxt[j, :particle_nums[j]]
+                            )
 
                         if epoch_timer and phase == 'train':
                             rollout_timer.__exit__(None, None, None)
