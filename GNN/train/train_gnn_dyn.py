@@ -353,7 +353,7 @@ def train():
                            f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
                            f'Rollout: {timing_summary["rollout_time"]:.2f}s ({timing_summary["rollout_pct"]:.1f}%) | ' \
                            f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
-                           f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB'
+                           f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB \n' 
                 
                 # Calculate running averages
                 for attr in epoch_timer.__dict__:
@@ -365,7 +365,7 @@ def train():
                            f'Avg Forward: {timing_summary["forward_time"] / (epoch + 1):.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
                            f'Avg Rollout: {timing_summary["rollout_time"] / (epoch + 1):.2f}s ({timing_summary["rollout_pct"]:.1f}%) | ' \
                            f'Avg Backward: {timing_summary["backward_time"] / (epoch + 1):.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
-                           f'Avg GPU Mem: {timing_summary["gpu_memory_peak_mb"] / (epoch + 1):.0f}MB'
+                           f'Avg GPU Mem: {timing_summary["gpu_memory_peak_mb"] / (epoch + 1):.0f}MB \n'
                 
                 print(timing_log)
                 log_fout.write(timing_log + '\n')

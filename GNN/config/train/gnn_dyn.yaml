@@ -7,7 +7,7 @@ dataset:
   # - 'rand_spread': random spreaded object pile
   # - 'rand_sparse_spread': random sparse spreaded object pile
   global_scale: 24
-  n_episode: 2000
+  n_episode: 3000
   n_timestep: 60
   obj: "carrots"
   particle_r: 0.125
@@ -25,18 +25,18 @@ dataset:
 
 train:
   random_seed: 42
-  n_epoch: 20
+  n_epoch: 300
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
   nf_hidden: 64
-  num_workers: 16
+  num_workers: 10
   train_valid_ratio: 0.9
   log_per_iter: 350
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1
-  n_history: 1
+  n_history: 4
   n_rollout: 4
   rollout_decay: 1.0
   lr_scheduler:
