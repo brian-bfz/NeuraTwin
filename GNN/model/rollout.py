@@ -28,8 +28,11 @@ class Rollout:
         
         # Initialize history buffers
         self.s_cur = initial_states    # [batch, particles, 3]
-        filler = torch.zeros_like(initial_deltas[:, :1, :, :])    #  first frame gets discarded by _update_deltas 
-        self.s_delta = torch.cat([filler, initial_deltas], dim=1) # [batch, n_history, particles, 3]
+        if initial_deltas.shape[1] == 0:
+            self.s_delta = torch.zeros_like(initial_states.unsqueeze(1))
+        else:
+            filler = torch.zeros_like(initial_deltas[:, :1, :, :])    #  first frame gets discarded by _update_deltas 
+            self.s_delta = torch.cat([filler, initial_deltas], dim=1) # [batch, n_history, particles, 3]
         self.a_cur = initial_attrs     # [batch, particles]
         self.particle_nums = particle_num # [batch]
         
