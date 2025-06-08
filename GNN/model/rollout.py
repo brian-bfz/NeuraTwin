@@ -57,12 +57,14 @@ class Rollout:
             self.s_delta,       # [batch, n_history, particles, 3]
             self.particle_nums  # [batch]
         )  # [batch, particles, 3]
-            
+
         # Always force robot positions to ground truth
         robot_mask = (self.a_cur == 1)  # [batch, particles]
         predicted_states[robot_mask] = next_delta[robot_mask] + self.s_cur[robot_mask]
 
         # Update delta buffer with predicted particle motion
         self.s_delta[:, -1, :, :] = predicted_states - self.s_cur
+        self.s_cur = predicted_states
+        # self.a_cur = self.a_cur
             
         return predicted_states  # [batch, particles, 3]

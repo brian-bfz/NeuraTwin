@@ -25,7 +25,7 @@ dataset:
 
 train:
   random_seed: 42
-  n_epoch: 300
+  n_epoch: 20
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
@@ -36,7 +36,7 @@ train:
   ckp_per_iter: 1000
   resume_epoch: -1
   resume_iter: -1
-  n_history: 4
+  n_history: 1
   n_rollout: 4
   rollout_decay: 1.0
   lr_scheduler:
