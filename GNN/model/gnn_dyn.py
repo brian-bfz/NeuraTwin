@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import time
-from ..utils import construct_edges_from_states_batch
+from ..utils import construct_edges_with_attrs
 
 # ============================================================================
 # NEURAL NETWORK MODULES
@@ -193,9 +193,9 @@ class PropModuleDiffDen(nn.Module):
             3 * self.n_history + 1, nf_effect, nf_effect)
 
         # Relation encoder:
-        # Input: attributes of both particles (2) + position difference (3)
+        # Input: attributes of both particles (2) + position difference (3) + edge attributes (1)
         self.relation_encoder = RelationEncoder(
-            2 + 3, nf_effect, nf_effect)
+            2 + 3 + 1, nf_effect, nf_effect)
 
         # Propagators for message passing
         self.particle_propagator = Propagator(
@@ -208,7 +208,7 @@ class PropModuleDiffDen(nn.Module):
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
-    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, verbose=False):
+    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, edge_attrs, verbose=False):
         """
         Forward pass of the GNN dynamics model.
         
@@ -218,6 +218,7 @@ class PropModuleDiffDen(nn.Module):
             s_delta: (B, particle_num, 3) - particle displacements over history
             Rr: (B, rel_num, particle_num) - receiver matrix for graph edges
             Rs: (B, rel_num, particle_num) - sender matrix for graph edges
+            edge_attrs: (B, rel_num, 1) - edge attributes (1 for topological, 0 for collision)
             verbose: bool - whether to print debug information
             
         Returns:
@@ -249,7 +250,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Encode relation features (current frame only)
         relation_encode = self.relation_encoder(
-            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s], 2))  # B x rel_num x nf_effect
+            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s, edge_attrs], 2))  # B x rel_num x nf_effect
 
         # Message passing iterations
         for i in range(pstep):
@@ -295,7 +296,7 @@ class PropNetDiffDenModel(nn.Module):
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_cur, s_cur, s_delta, particle_nums=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges=None, particle_nums=None):
         """
         Predict particle positions one step into the future.
         
@@ -305,6 +306,7 @@ class PropNetDiffDenModel(nn.Module):
             s_delta: (B, n_history, particle_num, 3) - particle displacements over history
                     For t < n_history-1: consecutive frame differences
                     For t = n_history-1: 0 for objects, actual motion for robots
+            topological_edges: (B, particle_num, particle_num) - adjacency matrix of topological edges
             particle_nums: (B,) - number of valid particles per batch sample
             
         Returns:
@@ -333,16 +335,17 @@ class PropNetDiffDenModel(nn.Module):
         tool_mask = (a_cur > 0.5) & mask
                 
         # Construct graph edges based on current particle positions
-        Rr_batch, Rs_batch = construct_edges_from_states_batch(
+        Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
             s_cur, 
             self.adj_thresh, 
             mask, 
             tool_mask, 
             topk=self.topk,
-            connect_tools_all=self.connect_tools_all
+            connect_tools_all=self.connect_tools_all,
+            topological_edges=topological_edges
         )
 
         # Forward pass through GNN
-        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch)
+        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
 
         return s_pred

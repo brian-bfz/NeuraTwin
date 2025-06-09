@@ -87,7 +87,7 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
     
     return Rr, Rs
 
-def construct_edges_with_attrs(states, adj_thresh, mask, tool_mask, topk, topological_edges=None):
+def construct_edges_with_attrs(states, adj_thresh, mask, tool_mask, topk, connect_tools_all, topological_edges=None):
     """
     Construct collision edges between particles based on distance and topology
     
@@ -97,6 +97,7 @@ def construct_edges_with_attrs(states, adj_thresh, mask, tool_mask, topk, topolo
         mask: (B, N) torch tensor - true when index is a valid particle
         tool_mask: (B, N) torch tensor - true when index is a valid tool particle
         topk: int - maximum number of neighbors per particle
+        connect_tools_all: bool - if True, connect all tool particles to all object particles
         topological_edges: [B, N, N] torch tensor - adjacency matrix of topological edges 
 
     Returns:
@@ -145,13 +146,26 @@ def construct_edges_with_attrs(states, adj_thresh, mask, tool_mask, topk, topolo
     topk_matrix.scatter_(-1, topk_idx, 1)
     adj_matrix = adj_matrix * topk_matrix
 
+    # Handle tool connectivity rules
+    if connect_tools_all:
+        # Only connect tools to objects if there are neighboring tool - non-tool particles in batch
+        batch_mask = (adj_matrix[obj_pad_tool_mask_1].reshape(B, -1).sum(-1) > 0)[:, None, None].repeat(1, N, N)
+        batch_obj_tool_mask_1 = obj_tool_mask_1 * batch_mask  # (B, N, N)
+        neg_batch_obj_tool_mask_1 = obj_tool_mask_1 * (~batch_mask)  # (B, N, N)
+        batch_obj_tool_mask_2 = obj_tool_mask_2 * batch_mask  # (B, N, N)
+        neg_batch_obj_tool_mask_2 = obj_tool_mask_2 * (~batch_mask)  # (B, N, N)
+
+        adj_matrix[batch_obj_tool_mask_1] = 0  # Clear object-to-tool edges
+        adj_matrix[batch_obj_tool_mask_2] = 1  # Add all tool-to-object edges
+        adj_matrix[neg_batch_obj_tool_mask_1] = 0
+        adj_matrix[neg_batch_obj_tool_mask_2] = 0
+    else:
+        adj_matrix[obj_tool_mask_1] = 0  # Clear object-to-tool edges
+
     # Combine with topological edges
     if topological_edges is not None:
         adj_matrix = adj_matrix + topological_edges
         adj_matrix = adj_matrix.clamp(0, 1)
-        edge_attrs = topological_edges[rels[:, 0], rels[:, 1], rels[:, 2]]
-    else:
-        edge_attrs = torch.zeros_like(adj_matrix)
 
     # Convert adjacency matrix to sparse edge representation
     n_rels = adj_matrix.sum(dim=(1,2))  # [B] - Number of edges per batch
@@ -165,6 +179,18 @@ def construct_edges_with_attrs(states, adj_thresh, mask, tool_mask, topk, topolo
     Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1 # receiver matrix [B, n_rel, N]
     Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1 # sender matrix [B, n_rel, N]
+    
+    # Extract edge attributes: 1 for topological edges, 0 for collision edges
+    if topological_edges is not None:
+        # Check if each edge is topological by looking up in the topological_edges matrix
+        edge_attrs_flat = topological_edges[rels[:, 0], rels[:, 1], rels[:, 2]]  # [n_rels.sum()]
+        
+        # Reshape to match the sparse edge format (B, n_rel, 1)
+        edge_attrs = torch.zeros((B, n_rel, 1), device=states.device, dtype=states.dtype)
+        edge_attrs[rels[:, 0], rels_idx, 0] = edge_attrs_flat
+    else:
+        # All edges are collision edges (attribute = 0)
+        edge_attrs = torch.zeros((B, n_rel, 1), device=states.device, dtype=states.dtype)
     
     return Rr, Rs, edge_attrs
 
