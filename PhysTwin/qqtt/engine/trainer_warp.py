@@ -1690,15 +1690,14 @@ class InvPhyTrainerWarp:
             # Create initial state by concatenating object and robot positions
             initial_positions = torch.cat([initial_x[object_indices], current_trans_dynamic_points[robot_indices]], dim=0)
             
-            # Repeat initial positions n_history times [1, n_history, particles, 3]
-            initial_states = initial_positions.unsqueeze(0).unsqueeze(0).repeat(1, n_history, 1, 1)
-            
+            initial_states = initial_positions.unsqueeze(0) # [1, particles, 3]
+
             # Initialize deltas to zero [1, n_history-1, particles, 3]
             initial_deltas = torch.zeros(1, n_history-1, total_particles, 3, device=cfg.device)
             
-            # Initialize attributes: 0 for object, 1 for robot [1, n_history, particles]
-            initial_attrs = torch.zeros(1, n_history, total_particles, device=cfg.device)
-            initial_attrs[:, :, n_object_particles:] = 1  # Robot particles
+            # Initialize attributes: 0 for object, 1 for robot [1, particles]
+            initial_attrs = torch.zeros(1, total_particles, device=cfg.device)
+            initial_attrs[:, n_object_particles:] = 1.0  # Robot particles
             
             # Particle numbers [1]
             particle_nums = torch.tensor([total_particles], device=cfg.device)
@@ -2062,13 +2061,9 @@ class InvPhyTrainerWarp:
                     next_delta = torch.zeros(1, len(gnn_x), 3, device=cfg.device)
                     next_delta[0, -len(robot_delta):, :] = robot_delta
                     
-                    # Create next_attrs (same as before: 0 for object, 1 for robot)
-                    next_attrs = torch.zeros(1, len(gnn_x), device=cfg.device)
-                    next_attrs[0, -len(robot_delta):] = 1
-                    
                     # Get GNN prediction
                     with torch.no_grad():
-                        gnn_x = gnn_rollout.forward(next_delta, next_attrs).squeeze(0)
+                        gnn_x = gnn_rollout.forward(next_delta).squeeze(0)
                         
                     logger.info(f"GNN prediction updated at frame {frame_count}")
                 

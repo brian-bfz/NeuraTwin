@@ -218,7 +218,7 @@ def plot_multi_model_comparison(model_names, save_path=None):
     all_model_data = []
     
     for i, model_name in enumerate(model_names):
-        model_dir = f"data/gnn_dyn_model/{model_name}"
+        model_dir = str(GNN_DYN_MODEL_ROOT/ model_name)
         
         if not os.path.exists(model_dir):
             print(f"Warning: Model directory '{model_dir}' does not exist, skipping...")
