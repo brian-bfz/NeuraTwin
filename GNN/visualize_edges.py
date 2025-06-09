@@ -8,8 +8,8 @@ import yaml
 # Add the model directory to path to import the edge construction function
 sys.path.append('model')
 sys.path.append('dataset')
-from gnn_dyn import construct_edges_from_states_batch
-from dataset_gnn_dyn import ParticleDataset
+from .utils import construct_edges_from_states_batch
+from .dataset.dataset_gnn_dyn import ParticleDataset
 
 def load_yaml(file_path):
     """Load YAML configuration file"""

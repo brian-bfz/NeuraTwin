@@ -1,162 +1,7 @@
 import torch
 import torch.nn as nn
 import time
-
-def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
-    """
-    Construct edges between particles based on distance and tool connectivity rules (batch version).
-    
-    Args:
-        states: (B, N, state_dim) torch tensor - particle positions
-        adj_thresh: float or (B,) torch tensor - distance threshold for connections
-        mask: (B, N) torch tensor - true when index is a valid particle
-        tool_mask: (B, N) torch tensor - true when index is a valid tool particle
-        topk: int - maximum number of neighbors per particle
-        connect_tools_all: bool - if True, connect all tool particles to all object particles
-        
-    Returns:
-        Rr: (B, n_rel, N) torch tensor - receiver matrix for graph edges
-        Rs: (B, n_rel, N) torch tensor - sender matrix for graph edges
-    """
-    B, N, state_dim = states.shape
-    
-    # Create pairwise particle combinations for distance calculation
-    s_receiv = states[:, :, None, :].repeat(1, 1, N, 1)  # Receiver particles
-    s_sender = states[:, None, :, :].repeat(1, N, 1, 1)   # Sender particles
-
-    # Calculate squared distances between all particle pairs and the squared distance threshold
-    if isinstance(adj_thresh, float):
-        adj_thresh = torch.tensor(adj_thresh, device=states.device, dtype=states.dtype).repeat(B)
-    threshold = adj_thresh * adj_thresh
-    s_diff = s_receiv - s_sender  # Position differences
-    dis = torch.sum(s_diff ** 2, -1)  # Squared distances (B, N, N)
-    
-    # Create validity masks for particle connections
-    mask_1 = mask[:, :, None].repeat(1, 1, N)  # Receiver validity
-    mask_2 = mask[:, None, :].repeat(1, N, 1)  # Sender validity
-    mask_12 = mask_1 * mask_2  # Both particles are valid
-    dis[~mask_12] = 1e10  # Exclude invalid particle pairs
-    
-    # Prevent tool-to-tool connections
-    tool_mask_1 = tool_mask[:, :, None].repeat(1, 1, N)
-    tool_mask_2 = tool_mask[:, None, :].repeat(1, N, 1)
-    tool_mask_12 = tool_mask_1 * tool_mask_2
-    dis[tool_mask_12] = 1e10  # Avoid tool to tool relations
-
-    # Create adjacency matrix based on distance threshold
-    adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
-
-    # Define tool-object interaction masks
-    obj_tool_mask_1 = tool_mask_1 * mask_2  # Particle sender, tool receiver
-    obj_tool_mask_2 = tool_mask_2 * mask_1  # Tool sender, particle receiver
-    obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2) # Tool receiver, non-tool sender
-
-    # Apply topk constraint to limit connections per particle
-    topk = min(dis.shape[-1], topk)
-    topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
-    topk_matrix = torch.zeros_like(adj_matrix)
-    topk_matrix.scatter_(-1, topk_idx, 1)
-    adj_matrix = adj_matrix * topk_matrix
-
-    # Handle tool connectivity rules
-    if connect_tools_all:
-        # Only connect tools to objects if there are neighboring tool - non-tool particles in batch
-        batch_mask = (adj_matrix[obj_pad_tool_mask_1].reshape(B, -1).sum(-1) > 0)[:, None, None].repeat(1, N, N)
-        batch_obj_tool_mask_1 = obj_tool_mask_1 * batch_mask  # (B, N, N)
-        neg_batch_obj_tool_mask_1 = obj_tool_mask_1 * (~batch_mask)  # (B, N, N)
-        batch_obj_tool_mask_2 = obj_tool_mask_2 * batch_mask  # (B, N, N)
-        neg_batch_obj_tool_mask_2 = obj_tool_mask_2 * (~batch_mask)  # (B, N, N)
-
-        adj_matrix[batch_obj_tool_mask_1] = 0  # Clear object-to-tool edges
-        adj_matrix[batch_obj_tool_mask_2] = 1  # Add all tool-to-object edges
-        adj_matrix[neg_batch_obj_tool_mask_1] = 0
-        adj_matrix[neg_batch_obj_tool_mask_2] = 0
-    else:
-        adj_matrix[obj_tool_mask_1] = 0  # Clear object-to-tool edges
-
-    # Convert adjacency matrix to sparse edge representation
-    n_rels = adj_matrix.sum(dim=(1,2))  # Number of edges per batch
-    n_rel = n_rels.max().long().item()  # Maximum edges across batch
-    rels_idx = [torch.arange(n_rels[i]) for i in range(B)]
-    rels_idx = torch.hstack(rels_idx).to(device=states.device, dtype=torch.long)
-    rels = adj_matrix.nonzero()  # Get edge indices
-    
-    # Create receiver and sender matrices
-    Rr = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
-    Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
-    Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1
-    Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1    
-    
-    return Rr, Rs
-
-def construct_edges_from_states(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
-    """
-    Construct edges between particles based on distance and tool connectivity rules (NOT USED).
-    
-    Args:
-        states: (N, state_dim) torch tensor - particle positions
-        adj_thresh: float - distance threshold for connections
-        mask: (N) torch tensor - true when index is a valid particle
-        tool_mask: (N) torch tensor - true when index is a valid tool particle
-        topk: int - maximum number of neighbors per particle
-        connect_tools_all: bool - if True, connect all tool particles to all object particles
-        
-    Returns:
-        Rr: (n_rel, N) torch tensor - receiver matrix for graph edges
-        Rs: (n_rel, N) torch tensor - sender matrix for graph edges
-    """
-    N, state_dim = states.shape
-    
-    # Create pairwise particle combinations
-    s_receiv = states[:, None, :].repeat(1, N, 1)
-    s_sender = states[None, :, :].repeat(N, 1, 1)
-
-    # Calculate distances and create adjacency matrix
-    threshold = adj_thresh * adj_thresh
-    s_diff = s_receiv - s_sender
-    dis = torch.sum(s_diff ** 2, -1)
-    
-    # Apply validity masks
-    mask_1 = mask[:, None].repeat(1, N)
-    mask_2 = mask[None, :].repeat(N, 1)
-    mask_12 = mask_1 * mask_2
-    dis[~mask_12] = 1e10
-    
-    # Prevent tool-to-tool connections
-    tool_mask_1 = tool_mask[:, None].repeat(1, N)
-    tool_mask_2 = tool_mask[None, :].repeat(N, 1)
-    tool_mask_12 = tool_mask_1 * tool_mask_2
-    dis[tool_mask_12] = 1e10
-
-    # Define interaction masks
-    obj_tool_mask_1 = tool_mask_1 * mask_2
-    obj_tool_mask_2 = tool_mask_2 * mask_1
-
-    adj_matrix = ((dis - threshold) < 0).float()
-
-    # Apply topk constraint
-    topk = min(dis.shape[-1], topk)
-    topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
-    topk_matrix = torch.zeros_like(adj_matrix)
-    topk_matrix.scatter_(-1, topk_idx, 1)
-    adj_matrix = adj_matrix * topk_matrix
-
-    # Handle tool connectivity
-    if connect_tools_all:
-        adj_matrix[obj_tool_mask_1] = 0  # Clear existing tool receiver connections
-        adj_matrix[obj_tool_mask_2] = 1  # Connect all object particles to all tool particles
-        adj_matrix[tool_mask_12] = 0     # Avoid tool to tool relations
-
-    # Convert to sparse representation
-    n_rels = adj_matrix.sum().long().item()
-    rels_idx = torch.arange(n_rels).to(device=states.device, dtype=torch.long)
-    rels = adj_matrix.nonzero()
-    Rr = torch.zeros((n_rels, N), device=states.device, dtype=states.dtype)
-    Rs = torch.zeros((n_rels, N), device=states.device, dtype=states.dtype)
-    Rr[rels_idx, rels[:, 0]] = 1
-    Rs[rels_idx, rels[:, 1]] = 1
-    
-    return Rr, Rs
+from ..utils import construct_edges_with_attrs
 
 # ============================================================================
 # NEURAL NETWORK MODULES
@@ -348,9 +193,9 @@ class PropModuleDiffDen(nn.Module):
             3 * self.n_history + 1, nf_effect, nf_effect)
 
         # Relation encoder:
-        # Input: attributes of both particles (2) + position difference (3)
+        # Input: attributes of both particles (2) + position difference (3) + edge attributes (1)
         self.relation_encoder = RelationEncoder(
-            2 + 3, nf_effect, nf_effect)
+            2 + 3 + 1, nf_effect, nf_effect)
 
         # Propagators for message passing
         self.particle_propagator = Propagator(
@@ -363,7 +208,7 @@ class PropModuleDiffDen(nn.Module):
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
-    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, verbose=False):
+    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, edge_attrs, verbose=False):
         """
         Forward pass of the GNN dynamics model.
         
@@ -373,6 +218,7 @@ class PropModuleDiffDen(nn.Module):
             s_delta: (B, particle_num, 3) - particle displacements over history
             Rr: (B, rel_num, particle_num) - receiver matrix for graph edges
             Rs: (B, rel_num, particle_num) - sender matrix for graph edges
+            edge_attrs: (B, rel_num, 1) - edge attributes (1 for topological, 0 for collision)
             verbose: bool - whether to print debug information
             
         Returns:
@@ -404,7 +250,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Encode relation features (current frame only)
         relation_encode = self.relation_encoder(
-            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s], 2))  # B x rel_num x nf_effect
+            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s, edge_attrs], 2))  # B x rel_num x nf_effect
 
         # Message passing iterations
         for i in range(pstep):
@@ -450,7 +296,7 @@ class PropNetDiffDenModel(nn.Module):
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_cur, s_cur, s_delta, particle_nums=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None):
         """
         Predict particle positions one step into the future.
         
@@ -460,6 +306,7 @@ class PropNetDiffDenModel(nn.Module):
             s_delta: (B, n_history, particle_num, 3) - particle displacements over history
                     For t < n_history-1: consecutive frame differences
                     For t = n_history-1: 0 for objects, actual motion for robots
+            topological_edges: (B, particle_num, particle_num) - adjacency matrix of topological edges
             particle_nums: (B,) - number of valid particles per batch sample
             
         Returns:
@@ -488,16 +335,17 @@ class PropNetDiffDenModel(nn.Module):
         tool_mask = (a_cur > 0.5) & mask
                 
         # Construct graph edges based on current particle positions
-        Rr_batch, Rs_batch = construct_edges_from_states_batch(
+        Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
             s_cur, 
             self.adj_thresh, 
             mask, 
             tool_mask, 
             topk=self.topk,
-            connect_tools_all=self.connect_tools_all
+            connect_tools_all=self.connect_tools_all,
+            topological_edges=topological_edges
         )
 
         # Forward pass through GNN
-        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch)
+        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
 
         return s_pred

@@ -1,20 +1,12 @@
 # Using new version
 
 import os
-import cv2
-import pickle
 import numpy as np
 from env.flex_env import FlexEnv
-import multiprocessing as mp
-import time
 import torch
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as font_manager
-import matplotlib
-from scipy.special import softmax
 
 # utils
-from utils import load_yaml, save_yaml, get_current_YYYY_MM_DD_hh_mm_ss_ms, set_seed, pcd2pix, gen_goal_shape, gen_subgoal, gt_rewards, gt_rewards_norm_by_sum, lighten_img, rmbg
+from utils import load_yaml, gen_goal_shape, gen_subgoal
 from model.gnn_dyn import PropNetDiffDenModel
 
 def main():

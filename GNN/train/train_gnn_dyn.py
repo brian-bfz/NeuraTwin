@@ -28,19 +28,21 @@ def collate_fn(data):
     Pads sequences to maximum particle count in batch and handles temporal structure.
     
     Args:
-        data: list of tuples - [(states, states_delta, attrs, particle_num), ...] where:
+        data: list of tuples - [(states, states_delta, attrs, particle_num, topological_edges), ...] where:
             states: [particle_num, time, 3] - particle positions over time
             states_delta: [particle_num, time-1, 3] - particle displacements
             attrs: [particle_num, time] - particle attributes (0=object, 1=robot)
             particle_num: int - number of particles in this sample
+            topological_edges: [particle_num, particle_num] - adjacency matrix for topological edges
             
     Returns:
         states_tensor: [batch_size, time, max_particles, 3] - padded position sequences
         states_delta_tensor: [batch_size, time-1, max_particles, 3] - padded displacement sequences
         attr: [batch_size, time, max_particles] - padded attribute sequences
         particle_num_tensor: [batch_size] - particle counts per sample
+        topological_edges_tensor: [batch_size, max_particles, max_particles] - padded topological edges
     """
-    states, states_delta, attrs, particle_num = zip(*data)
+    states, states_delta, attrs, particle_num, topological_edges = zip(*data)
     max_len = max(particle_num)  # Maximum particles in this batch
     batch_size = len(data)
     n_time, _, n_dim = states[0].shape
@@ -50,14 +52,16 @@ def collate_fn(data):
     states_delta_tensor = torch.zeros((batch_size, n_time - 1, max_len, n_dim), dtype=torch.float32)
     attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
     particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
+    topological_edges_tensor = torch.zeros((batch_size, max_len, max_len), dtype=torch.float32)
 
     # Fill tensors with actual data (rest remains zero-padded)
     for i in range(len(data)):
         states_tensor[i, :, :particle_num[i], :] = states[i]
         states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
         attr[i, :, :particle_num[i]] = attrs[i]
+        topological_edges_tensor[i, :particle_num[i], :particle_num[i]] = topological_edges[i]
 
-    return states_tensor, states_delta_tensor, attr, particle_num_tensor
+    return states_tensor, states_delta_tensor, attr, particle_num_tensor, topological_edges_tensor
 
 # ============================================================================
 # MAIN TRAINING FUNCTION
@@ -94,9 +98,9 @@ def train():
     
     TRAIN_ROOT = GNN_DYN_MODEL_ROOT
     
-    if config['train']['particle']['resume']['active']:
+    if config['train']['resume']['active']:
         # Resume from existing checkpoint
-        TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['particle']['resume']['folder'])
+        TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['resume']['folder'])
     else:
         # Create new training directory
         if args.name:
@@ -121,11 +125,11 @@ def train():
     if args.profiling:
         print("Profiling enabled - will log timing breakdown each epoch")
 
-    if not config['train']['particle']['resume']['active']:
+    if not config['train']['resume']['active']:
         log_fout = open(os.path.join(TRAIN_DIR, 'log.txt'), 'w')
     else:
         log_fout = open(os.path.join(TRAIN_DIR, 'log_resume_epoch_%d_iter_%d.txt' % (
-            config['train']['particle']['resume']['epoch'], config['train']['particle']['resume']['iter'])), 'w')
+            config['train']['resume']['epoch'], config['train']['resume']['iter'])), 'w')
 
     # ========================================================================
     # DATA LOADING SETUP
@@ -150,9 +154,9 @@ def train():
     print("model #params: %d" % count_trainable_parameters(model))
 
     # resume training of a saved model (if given)
-    if config['train']['particle']['resume']['active']:
+    if config['train']['resume']['active']:
         model_path = os.path.join(TRAIN_DIR, 'net_epoch_%d_iter_%d.pth' % (
-            config['train']['particle']['resume']['epoch'], config['train']['particle']['resume']['iter']))
+            config['train']['resume']['epoch'], config['train']['resume']['iter']))
         print("Loading saved ckp from %s" % model_path)
 
         pretrained_dict = torch.load(model_path)
@@ -189,7 +193,7 @@ def train():
         else:
             raise ValueError("unknown scheduler type: %s" % config['train']['lr_scheduler']['type'])
 
-    st_epoch = config['train']['particle']['resume']['epoch'] if config['train']['particle']['resume']['active'] else 0
+    st_epoch = config['train']['resume']['epoch'] if config['train']['resume']['active'] else 0
     best_valid_loss = np.inf
 
     avg_timer = EpochTimer()
@@ -223,7 +227,7 @@ def train():
 
             for i, data in enumerate(dataloaders[phase]):
                 # Data format: B x (n_his + n_roll) x particle_num x 3
-                states, states_delta, attrs, particle_nums = data
+                states, states_delta, attrs, particle_nums, topological_edges = data
 
                 B, length, max_particles, _ = states.size()
                 assert length == n_rollout + n_history
@@ -232,6 +236,8 @@ def train():
                     states = states.cuda()
                     attrs = attrs.cuda()
                     states_delta = states_delta.cuda()
+                    if topological_edges is not None:
+                        topological_edges = topological_edges.cuda()
 
                 # End data loading timing
                 if epoch_timer and phase == 'train':
@@ -257,7 +263,8 @@ def train():
                         states[:, n_history - 1, :, :],      # [B, particles, 3]
                         states_delta[:, :n_history - 1, :, :], # [B, n_history - 1, particles, 3]
                         attrs[:, n_history - 1, :],          # [B, particles]
-                        particle_nums           # [B]
+                        particle_nums,           # [B]
+                        topological_edges        # [B, particles, particles]
                     )
 
                     for idx_step in range(n_rollout):
