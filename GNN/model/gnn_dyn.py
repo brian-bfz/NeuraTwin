@@ -75,19 +75,100 @@ def construct_edges_from_states_batch(states, adj_thresh, mask, tool_mask, topk,
         adj_matrix[obj_tool_mask_1] = 0  # Clear object-to-tool edges
 
     # Convert adjacency matrix to sparse edge representation
-    n_rels = adj_matrix.sum(dim=(1,2))  # Number of edges per batch
-    n_rel = n_rels.max().long().item()  # Maximum edges across batch
-    rels_idx = [torch.arange(n_rels[i]) for i in range(B)]
-    rels_idx = torch.hstack(rels_idx).to(device=states.device, dtype=torch.long)
-    rels = adj_matrix.nonzero()  # Get edge indices
+    n_rels = adj_matrix.sum(dim=(1,2))  # [B] - Number of edges per batch
+    n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
+    rels_idx = [torch.arange(n_rels[i]) for i in range(B)] # list of [n_rel] - example: [tensor([0, 1, 2, 3]), tensor([0, 1, 2])]
+    rels_idx = torch.hstack(rels_idx).to(device=states.device, dtype=torch.long) # [n_rels.sum()] - example: tensor([0, 1, 2, 3, 0, 1, 2])
+    rels = adj_matrix.nonzero()  # [n_rels.sum(), 3] - each row is [batch_idx, sender_idx, receiver_idx]
     
     # Create receiver and sender matrices
     Rr = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
-    Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1
-    Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1    
+    Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1 # receiver matrix [B, n_rel, N]
+    Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1 # sender matrix [B, n_rel, N]
     
     return Rr, Rs
+
+def construct_edges_with_attrs(states, adj_thresh, mask, tool_mask, topk, topological_edges=None):
+    """
+    Construct collision edges between particles based on distance and topology
+    
+    Args:
+        states: (B, N, state_dim) torch tensor - particle positions
+        adj_thresh: float or (B,) torch tensor - distance threshold for connections
+        mask: (B, N) torch tensor - true when index is a valid particle
+        tool_mask: (B, N) torch tensor - true when index is a valid tool particle
+        topk: int - maximum number of neighbors per particle
+        topological_edges: [B, N, N] torch tensor - adjacency matrix of topological edges 
+
+    Returns:
+        Rr: (B, n_rel, N) torch tensor - receiver matrix for graph edges
+        Rs: (B, n_rel, N) torch tensor - sender matrix for graph edges
+        edge_attrs: (B, n_rel, 1) torch tensor - edge attributes, 1 for topological, 0 for collision
+    """
+
+    B, N, state_dim = states.shape
+    
+    # Create pairwise particle combinations for distance calculation
+    s_receiv = states[:, :, None, :].repeat(1, 1, N, 1)  # Receiver particles
+    s_sender = states[:, None, :, :].repeat(1, N, 1, 1)   # Sender particles
+
+    # Calculate squared distances between all particle pairs and the squared distance threshold
+    if isinstance(adj_thresh, float):
+        adj_thresh = torch.tensor(adj_thresh, device=states.device, dtype=states.dtype).repeat(B)
+    threshold = adj_thresh * adj_thresh
+    s_diff = s_receiv - s_sender  # Position differences
+    dis = torch.sum(s_diff ** 2, -1)  # Squared distances (B, N, N)
+    
+    # Create validity masks for particle connections
+    mask_1 = mask[:, :, None].repeat(1, 1, N)  # Receiver validity
+    mask_2 = mask[:, None, :].repeat(1, N, 1)  # Sender validity
+    mask_12 = mask_1 * mask_2  # Both particles are valid
+    dis[~mask_12] = 1e10  # Exclude invalid particle pairs
+    
+    # Prevent tool-to-tool connections
+    tool_mask_1 = tool_mask[:, :, None].repeat(1, 1, N)
+    tool_mask_2 = tool_mask[:, None, :].repeat(1, N, 1)
+    tool_mask_12 = tool_mask_1 * tool_mask_2
+    dis[tool_mask_12] = 1e10  # Avoid tool to tool relations
+
+    # Create adjacency matrix based on distance threshold
+    adj_matrix = ((dis - threshold[:, None, None]) < 0).float()
+
+    # Define tool-object interaction masks
+    obj_tool_mask_1 = tool_mask_1 * mask_2  # Particle sender, tool receiver
+    obj_tool_mask_2 = tool_mask_2 * mask_1  # Tool sender, particle receiver
+    obj_pad_tool_mask_1 = tool_mask_1 * (~tool_mask_2) # Tool receiver, non-tool sender
+
+    # Apply topk constraint to limit connections per particle
+    topk = min(dis.shape[-1], topk)
+    topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
+    topk_matrix = torch.zeros_like(adj_matrix)
+    topk_matrix.scatter_(-1, topk_idx, 1)
+    adj_matrix = adj_matrix * topk_matrix
+
+    # Combine with topological edges
+    if topological_edges is not None:
+        adj_matrix = adj_matrix + topological_edges
+        adj_matrix = adj_matrix.clamp(0, 1)
+        edge_attrs = topological_edges[rels[:, 0], rels[:, 1], rels[:, 2]]
+    else:
+        edge_attrs = torch.zeros_like(adj_matrix)
+
+    # Convert adjacency matrix to sparse edge representation
+    n_rels = adj_matrix.sum(dim=(1,2))  # [B] - Number of edges per batch
+    n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
+    rels_idx = [torch.arange(n_rels[i]) for i in range(B)] # list of [n_rel] - example: [tensor([0, 1, 2, 3]), tensor([0, 1, 2])]
+    rels_idx = torch.hstack(rels_idx).to(device=states.device, dtype=torch.long) # [E_c] - example: tensor([0, 1, 2, 3, 0, 1, 2])
+    rels = adj_matrix.nonzero()  # [E_c, 3] - each row is [batch_idx, receiver_idx, sender_idx]
+    
+    # Create receiver and sender matrices
+    Rr = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
+    Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
+    Rr[rels[:, 0], rels_idx, rels[:, 1]] = 1 # receiver matrix [B, n_rel, N]
+    Rs[rels[:, 0], rels_idx, rels[:, 2]] = 1 # sender matrix [B, n_rel, N]
+    
+    return Rr, Rs, edge_attrs
 
 def construct_edges_from_states(states, adj_thresh, mask, tool_mask, topk, connect_tools_all):
     """

@@ -1677,8 +1677,8 @@ class InvPhyTrainerWarp:
             
             # Get initial positions
             initial_x = wp.to_torch(self.simulator.wp_states[0].wp_x, requires_grad=False).clone()
-            object_indices = fps_rad_tensor(initial_x[:self.num_all_points], gnn_config['train']['fps_radius'])
-            robot_indices = fps_rad_tensor(current_trans_dynamic_points, gnn_config['train']['fps_radius']) 
+            object_indices = fps_rad_tensor(initial_x[:self.num_all_points], gnn_config['train']['particle']['fps_radius'])
+            robot_indices = fps_rad_tensor(current_trans_dynamic_points, gnn_config['train']['particle']['fps_radius']) 
 
             n_history = gnn_config['train']['n_history']
             

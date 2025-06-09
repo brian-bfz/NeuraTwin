@@ -94,9 +94,9 @@ def train():
     
     TRAIN_ROOT = GNN_DYN_MODEL_ROOT
     
-    if config['train']['particle']['resume']['active']:
+    if config['train']['resume']['active']:
         # Resume from existing checkpoint
-        TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['particle']['resume']['folder'])
+        TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['resume']['folder'])
     else:
         # Create new training directory
         if args.name:
@@ -121,11 +121,11 @@ def train():
     if args.profiling:
         print("Profiling enabled - will log timing breakdown each epoch")
 
-    if not config['train']['particle']['resume']['active']:
+    if not config['train']['resume']['active']:
         log_fout = open(os.path.join(TRAIN_DIR, 'log.txt'), 'w')
     else:
         log_fout = open(os.path.join(TRAIN_DIR, 'log_resume_epoch_%d_iter_%d.txt' % (
-            config['train']['particle']['resume']['epoch'], config['train']['particle']['resume']['iter'])), 'w')
+            config['train']['resume']['epoch'], config['train']['resume']['iter'])), 'w')
 
     # ========================================================================
     # DATA LOADING SETUP
@@ -150,9 +150,9 @@ def train():
     print("model #params: %d" % count_trainable_parameters(model))
 
     # resume training of a saved model (if given)
-    if config['train']['particle']['resume']['active']:
+    if config['train']['resume']['active']:
         model_path = os.path.join(TRAIN_DIR, 'net_epoch_%d_iter_%d.pth' % (
-            config['train']['particle']['resume']['epoch'], config['train']['particle']['resume']['iter']))
+            config['train']['resume']['epoch'], config['train']['resume']['iter']))
         print("Loading saved ckp from %s" % model_path)
 
         pretrained_dict = torch.load(model_path)
@@ -189,7 +189,7 @@ def train():
         else:
             raise ValueError("unknown scheduler type: %s" % config['train']['lr_scheduler']['type'])
 
-    st_epoch = config['train']['particle']['resume']['epoch'] if config['train']['particle']['resume']['active'] else 0
+    st_epoch = config['train']['resume']['epoch'] if config['train']['resume']['active'] else 0
     best_valid_loss = np.inf
 
     avg_timer = EpochTimer()

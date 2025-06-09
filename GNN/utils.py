@@ -436,6 +436,14 @@ def findClosestPoint(pcd, point):
 #     return pcd_fps, dist.max()
 
 def fps_rad(pcd, radius):
+    """
+    Farthest point sampling on numpy array
+    Args:
+        pcd: (n, 3) numpy array
+        radius: float
+    Returns:
+        pcd_fps: (-1, 3) numpy array
+    """
     # pcd: (n, 3) numpy array
     # pcd_fps: (-1, 3) numpy array
     # radius: float

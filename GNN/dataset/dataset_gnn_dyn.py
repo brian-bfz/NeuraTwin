@@ -75,7 +75,7 @@ class ParticleDataset(Dataset):
         self.add_randomness = config['dataset']['randomness']['use']
         self.state_noise = config['dataset']['randomness']['state_noise'][phase]
 
-        self.fps_radius = config['train']['fps_radius']
+        self.fps_radius = config['train']['particle']['fps_radius']
         
         self._hdf5_file = None
         self.hdf5_path = data_file

@@ -51,8 +51,8 @@ class Visualizer:
         
         # Extract model parameters
         self.n_history = self.config['train']['n_history']
-        self.fps_radius = self.config['train']['fps_radius']
-        self.adj_thresh = self.config['train']['particle']['adj_thresh']
+        self.fps_radius = self.config['train']['particle']['fps_radius']
+        self.adj_thresh = self.config['train']['edges']['topological']['adj_thresh']
         
         # Load trained model
         self.model = PropNetDiffDenModel(self.config, torch.cuda.is_available())
