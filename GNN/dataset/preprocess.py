@@ -35,7 +35,7 @@ def sample_points(data_file, output_file, config):
 
 def construct_edges_from_dataset(dataset):
     if isinstance(dataset, h5py.Dataset) and "object" in dataset.name:
-        
+
         parent = dataset.parent
 
 

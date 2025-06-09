@@ -1,24 +1,13 @@
-import os
 import numpy as np
-import json
 import cv2
-import pdb
-import pickle
-import json
-import random
 import h5py
 
 import torch
-import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 # from env.flex_env import FlexEnv
-from ..utils import load_yaml, set_seed, fps_rad_tensor, fps_np, recenter, opengl2cam, depth2fgpcd, pcd2pix
+from ..utils import load_yaml, fps_rad_tensor, depth2fgpcd, pcd2pix
 
-import matplotlib.pyplot as plt
-# from dgl.geometry import farthest_point_sampler
-
-from torch.utils.data import DataLoader
 
 np.seterr(divide='ignore', invalid='ignore')
 
