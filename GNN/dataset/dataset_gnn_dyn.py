@@ -147,17 +147,19 @@ class ParticleDataset(Dataset):
             
         n_obj_particles = episode_group.attrs['n_obj_particles']
         n_bot_particles = episode_group.attrs['n_bot_particles']
+        particle_num = n_obj_particles + n_bot_particles
             
         # Load topological edges if they exist and are enabled
         if self.config['train']['edges']['topological']['enabled'] and 'object_edges' in episode_group:
             object_edges = torch.from_numpy(episode_group['object_edges'][:])  # [n_obj_particles, n_obj_particles]
                 
             # Create full topological edges matrix for all particles
-            particle_num = n_obj_particles + n_bot_particles
             topological_edges = torch.zeros(particle_num, particle_num)
             topological_edges[:n_obj_particles, :n_obj_particles] = object_edges
         else:
-            topological_edges = None
+            # Initialize as zero matrix for compatibility
+            topological_edges = torch.zeros(particle_num, particle_num, dtype=torch.float32)
+
         # Prepend history padding: repeat first frame (n_history-1) times
         # This enables inference to start with proper temporal context
         first_obj_frame = object_data[:1].repeat(self.n_his - 1, 1, 1)
@@ -227,7 +229,8 @@ class ParticleDataset(Dataset):
             topological_edges = torch.zeros(particle_num, particle_num)
             topological_edges[:n_object, :n_object] = object_edges
         else:
-            topological_edges = None
+            # Initialize as zero matrix for compatibility
+            topological_edges = torch.zeros(particle_num, particle_num, dtype=torch.float32)
         
         # Combine sampled particles: [object_particles, robot_particles]
         states = torch.cat([object_data, robot_data], dim=1)  # [time, total_sampled, 3]
@@ -253,13 +256,7 @@ class ParticleDataset(Dataset):
         attrs = torch.zeros(n_frames, particle_num)
         attrs[:, n_object:] = 1.0   # Robot particles
                 
-        # Convert to float tensors
-        states = states.float()
-        states_delta = states_delta.float()
-        attrs = attrs.float()
-        topological_edges = topological_edges.float()
-        
-        return states, states_delta, attrs, particle_num, topological_edges
+        return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float()
 
 # ============================================================================
 # LEGACY TESTING AND CALIBRATION FUNCTIONS

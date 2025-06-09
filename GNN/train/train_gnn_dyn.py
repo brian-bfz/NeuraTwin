@@ -159,7 +159,7 @@ def train():
             config['train']['resume']['epoch'], config['train']['resume']['iter']))
         print("Loading saved ckp from %s" % model_path)
 
-        pretrained_dict = torch.load(model_path)
+        pretrained_dict = torch.load(model_path, weights_only=True)
         model.load_state_dict(pretrained_dict)
 
     if use_gpu:
@@ -195,9 +195,6 @@ def train():
 
     st_epoch = config['train']['resume']['epoch'] if config['train']['resume']['active'] else 0
     best_valid_loss = np.inf
-
-    avg_timer = EpochTimer()
-    avg_timer.reset()
 
     # Early stopping and rollback configuration
     if config['train']['rollback']['enabled']:
@@ -236,8 +233,7 @@ def train():
                     states = states.cuda()
                     attrs = attrs.cuda()
                     states_delta = states_delta.cuda()
-                    if topological_edges is not None:
-                        topological_edges = topological_edges.cuda()
+                    topological_edges = topological_edges.cuda()
 
                 # End data loading timing
                 if epoch_timer and phase == 'train':
@@ -264,7 +260,8 @@ def train():
                         states_delta[:, :n_history - 1, :, :], # [B, n_history - 1, particles, 3]
                         attrs[:, n_history - 1, :],          # [B, particles]
                         particle_nums,           # [B]
-                        topological_edges        # [B, particles, particles]
+                        topological_edges,       # [B, particles, particles]
+                        epoch_timer=epoch_timer if phase == 'train' else None  # Pass timer for profiling
                     )
 
                     for idx_step in range(n_rollout):
@@ -274,12 +271,15 @@ def train():
                         # Ground truth next state 
                         s_nxt = states[:, n_history + idx_step, :, :]  # B x particle_num x 3
 
+                        if epoch_timer and phase == 'train':
+                            rollout_timer = epoch_timer.time_rollout()
+                            rollout_timer.__enter__()
+
                         # Predict next state using rollout
                         s_pred = rollout.forward(next_delta)  # [B, particles, 3]
 
                         if epoch_timer and phase == 'train':
-                            rollout_timer = epoch_timer.time_rollout()
-                            rollout_timer.__enter__()
+                            rollout_timer.__exit__(None, None, None)
 
                         # Calculate loss only for valid particles
                         for j in range(B):
@@ -288,8 +288,6 @@ def train():
                                 s_nxt[j, :particle_nums[j]]
                             )
 
-                        if epoch_timer and phase == 'train':
-                            rollout_timer.__exit__(None, None, None)
 
 
                     # Normalize loss by batch size and rollout steps
@@ -352,27 +350,9 @@ def train():
             
             if epoch_timer and phase == 'train':
                 epoch_timer.end_epoch()
-                timing_summary = epoch_timer.get_summary()
                 
-                # Log detailed timing breakdown
-                timing_log = f'PROFILING [Epoch {epoch}] Total: {timing_summary["total_time"]:.2f}s | ' \
-                           f'Data: {timing_summary["data_loading_time"]:.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
-                           f'Forward: {timing_summary["forward_time"]:.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
-                           f'Rollout: {timing_summary["rollout_time"]:.2f}s ({timing_summary["rollout_pct"]:.1f}%) | ' \
-                           f'Backward: {timing_summary["backward_time"]:.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
-                           f'GPU Mem: {timing_summary["gpu_memory_peak_mb"]:.0f}MB \n' 
-                
-                # Calculate running averages
-                for attr in epoch_timer.__dict__:
-                    if hasattr(avg_timer, attr):
-                        avg_timer.__dict__[attr] += epoch_timer.__dict__[attr]
-                timing_summary = avg_timer.get_summary()
-                timing_log += f'Avg Total: {timing_summary["total_time"] / (epoch + 1) :.2f}s | ' \
-                           f'Avg Data: {timing_summary["data_loading_time"] / (epoch + 1):.2f}s ({timing_summary["data_loading_pct"]:.1f}%) | ' \
-                           f'Avg Forward: {timing_summary["forward_time"] / (epoch + 1):.2f}s ({timing_summary["forward_pct"]:.1f}%) | ' \
-                           f'Avg Rollout: {timing_summary["rollout_time"] / (epoch + 1):.2f}s ({timing_summary["rollout_pct"]:.1f}%) | ' \
-                           f'Avg Backward: {timing_summary["backward_time"] / (epoch + 1):.2f}s ({timing_summary["backward_pct"]:.1f}%) | ' \
-                           f'Avg GPU Mem: {timing_summary["gpu_memory_peak_mb"] / (epoch + 1):.0f}MB \n'
+                # Generate formatted timing log automatically
+                timing_log = epoch_timer.get_timing_log(epoch)
                 
                 print(timing_log)
                 log_fout.write(timing_log + '\n')

@@ -6,7 +6,7 @@ Download PhysTwin/data, PhysTwin/experiments, PhysTwin/experiments_optimization,
 ```conda activate NeuraTwin```
 
 ## PhysTwin
-```python -m PhysTwin.interactive_pte --case_name single_push_rope```
+```python -m PhysTwin.interactive_pte --case_name single_push_rope --gnn_model```
 
 When error pops up, click on the problematic file, and change ```np.float``` to ```float```
 

@@ -26,6 +26,9 @@ def fps_rad(pcd, radius):
         farthest_idx = dist.argmax()
         selected_indices.append(farthest_idx)
         dist = np.minimum(dist, np.linalg.norm(pcd - pcd[farthest_idx], axis=1))
+
+    # Sort indices for HDF5 compatibility (indices must be in increasing order)
+    selected_indices = np.sort(selected_indices)
     
     return np.array(selected_indices)
 

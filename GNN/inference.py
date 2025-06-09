@@ -370,9 +370,8 @@ def main():
             attrs = attrs.to(visualizer.device)
             
             # Handle topological edges
-            if topological_edges is not None:
-                topological_edges = topological_edges.to(visualizer.device)
-                print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
+            topological_edges = topological_edges.to(visualizer.device)
+            print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
 
             
             # Determine particle counts from attributes (0=object, 1=robot)

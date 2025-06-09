@@ -181,7 +181,6 @@ class PropModuleDiffDen(nn.Module):
         self.config = config
         nf_effect = config['train']['particle']['nf_effect']
         self.nf_effect = nf_effect
-        self.add_delta = config['train']['particle']['add_delta']
         
         # History length for temporal modeling
         self.n_history = config['train']['n_history']
@@ -291,12 +290,12 @@ class PropNetDiffDenModel(nn.Module):
         super(PropNetDiffDenModel, self).__init__()
 
         self.config = config
-        self.adj_thresh = config['train']['particle']['adj_thresh']
-        self.connect_tools_all = config['train']['particle']['connect_tools_all']
-        self.topk = config['train']['particle']['topk']
+        self.adj_thresh = config['train']['edges']['collision']['adj_thresh']
+        self.topk = config['train']['edges']['collision']['topk']
+        self.connect_tools_all = config['train']['edges']['collision']['connect_tools_all']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None, epoch_timer=None):
         """
         Predict particle positions one step into the future.
         
@@ -308,6 +307,7 @@ class PropNetDiffDenModel(nn.Module):
                     For t = n_history-1: 0 for objects, actual motion for robots
             topological_edges: (B, particle_num, particle_num) - adjacency matrix of topological edges
             particle_nums: (B,) - number of valid particles per batch sample
+            epoch_timer: optional EpochTimer for profiling edge construction time
             
         Returns:
             (B, particle_num, 3) - predicted next particle positions
@@ -335,17 +335,33 @@ class PropNetDiffDenModel(nn.Module):
         tool_mask = (a_cur > 0.5) & mask
                 
         # Construct graph edges based on current particle positions
-        Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
-            s_cur, 
-            self.adj_thresh, 
-            mask, 
-            tool_mask, 
-            topk=self.topk,
-            connect_tools_all=self.connect_tools_all,
-            topological_edges=topological_edges
-        )
+        if epoch_timer is not None:
+            with epoch_timer.timer('edge'):
+                Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
+                    s_cur, 
+                    self.adj_thresh, 
+                    mask, 
+                    tool_mask, 
+                    topk=self.topk,
+                    connect_tools_all=self.connect_tools_all,
+                    topological_edges=topological_edges
+                )
+        else:
+            Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
+                s_cur, 
+                self.adj_thresh, 
+                mask, 
+                tool_mask, 
+                topk=self.topk,
+                connect_tools_all=self.connect_tools_all,
+                topological_edges=topological_edges
+            )
 
         # Forward pass through GNN
-        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
+        if epoch_timer is not None:
+            with epoch_timer.timer('gnn_forward'):
+                s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
+        else:
+            s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
 
         return s_pred

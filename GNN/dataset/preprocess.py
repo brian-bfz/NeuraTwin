@@ -1,7 +1,9 @@
 import h5py
-from ..utils import fps_rad, load_config
+from ..utils import fps_rad, load_yaml, construct_edges_from_numpy
 import numpy as np
 import argparse
+import os
+from ..paths import CONFIG_TRAIN_GNN_DYN
 
 
 def sample_points(data_file, output_file, config):
@@ -53,33 +55,12 @@ def sample_points(data_file, output_file, config):
 
 def construct_edges_from_dataset(name, points, adj_thresh, topk):
     """
-    Construct topological edges for points in object dataset
-    Saves edges to parent group
-
-    Args:
-        name: str - path to the dataset
-        points: h5py.Dataset - object dataset, skip if not
-        adj_thresh: float - radius of neighborhood
-        topk: int - maximum number of neighbors
+    Wrapper function for h5py.File.visititems
     """
     if isinstance(points, h5py.Dataset) and "object" in name:
         # Use first frame for computing topological edges
         points_data = points[0, :, :]  # [n_sampled_obj, 3] - first frame positions
-        N = points_data.shape[0]
-        
-        # Compute pairwise squared distances
-        diff = points_data[:, None, :] - points_data[None, :, :]
-        distances_sq = np.sum(diff ** 2, axis=-1)
-        
-        # Threshold-based adjacency
-        adj_matrix = (distances_sq < adj_thresh ** 2).astype(float)
-        
-        # Apply topk constraint
-        topk = min(N, topk)
-        topk_idx = np.argpartition(distances_sq, topk, axis=-1)[:, :topk]
-        topk_matrix = np.zeros_like(adj_matrix)
-        np.put_along_axis(topk_matrix, topk_idx, 1, axis=-1)
-        adj_matrix = adj_matrix * topk_matrix
+        adj_matrix = construct_edges_from_numpy(points_data, adj_thresh, topk)
         
         # Save edges
         name = name.split('/')[-1]
@@ -112,13 +93,25 @@ def construct_edges_from_file(data_file, config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str, default="PhysTwin/generated_data")
     parser.add_argument('--data_file', type=str, required=True)
-    parser.add_argument('--output_file', type=str, required=True)
-    parser.add_argument('--config', type=str, required=True)
+    parser.add_argument('--output_file', type=str, default=None)
+    parser.add_argument('--config', type=str, default=str(CONFIG_TRAIN_GNN_DYN))
     args = parser.parse_args()
 
     # Load config
-    config = load_config(args.config)
+    config = load_yaml(args.config)
+
+    # Create data files paths
+    args.data_file = args.data_dir + '/' + args.data_file
+    if args.output_file is None:
+        args.output_file = config['dataset']['file']
+    else: 
+        args.output_file = args.data_dir + '/' + args.output_file
+    
+    # Check that output file is empty
+    if os.path.exists(args.output_file):
+        raise ValueError(f"Output file {args.output_file} already exists")
 
     # Sample points and create output file
     sample_points(args.data_file, args.output_file, config)

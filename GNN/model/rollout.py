@@ -8,7 +8,7 @@ class Rollout:
     Assume tensors are already on the correct device and with gradients enabled / disabled.
     """
     
-    def __init__(self, model, config, initial_states, initial_deltas, initial_attrs, particle_num, topological_edges):
+    def __init__(self, model, config, initial_states, initial_deltas, initial_attrs, particle_num, topological_edges, epoch_timer=None):
         """
         Initialize the predictor with trained model and initial history data.
         
@@ -20,9 +20,11 @@ class Rollout:
             initial_attrs: [batch, particles] - initial attribute
             particle_num: [batch] - total number of particles per batch
             topological_edges: [batch, particles, particles] - adjacency matrix of topological edges
+            epoch_timer: optional EpochTimer for profiling edge construction time
         """
         self.model = model
         self.config = config
+        self.epoch_timer = epoch_timer
         
         # Extract model parameters
         self.n_history = config['train']['n_history']
@@ -58,7 +60,8 @@ class Rollout:
             self.s_cur,        # [batch, particles, 3]
             self.s_delta,       # [batch, n_history, particles, 3]
             topological_edges=self.topological_edges,  # [batch, particles, particles]
-            particle_nums=self.particle_nums  # [batch]
+            particle_nums=self.particle_nums,  # [batch]
+            epoch_timer=self.epoch_timer  # optional timer for profiling
         )  # [batch, particles, 3]
 
         # Always force robot positions to ground truth

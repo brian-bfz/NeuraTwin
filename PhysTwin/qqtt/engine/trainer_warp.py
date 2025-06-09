@@ -46,7 +46,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 from GNN.model.rollout import Rollout
-from GNN.utils import create_edges_for_points, fps_rad_tensor
+from GNN.utils import create_edges_for_points, fps_rad_tensor, construct_edges_from_tensor
 
 class InvPhyTrainerWarp:
     def __init__(
@@ -1702,6 +1702,20 @@ class InvPhyTrainerWarp:
             # Particle numbers [1]
             particle_nums = torch.tensor([total_particles], device=cfg.device)
             
+            # Construct topological edges if enabled
+            if gnn_config['train']['edges']['topological']['enabled']:
+                adj_thresh = gnn_config['train']['edges']['topological']['adj_thresh']
+                topk = gnn_config['train']['edges']['topological']['topk']
+                
+                # Construct topological edges using first frame positions
+                adj_matrix = construct_edges_from_tensor(initial_positions, adj_thresh, topk)
+                topological_edges = adj_matrix.unsqueeze(0)  # [1, particles, particles]
+                logger.info(f"Constructed topological edges with adj_thresh={adj_thresh}, topk={topk}")
+            else:
+                # Initialize as zero matrix for compatibility
+                topological_edges = torch.zeros(1, total_particles, total_particles, device=cfg.device)
+                logger.info("Topological edges disabled in config - initialized as zero matrix")
+            
             # Initialize rollout
             gnn_rollout = Rollout(
                 gnn_model, 
@@ -1709,7 +1723,8 @@ class InvPhyTrainerWarp:
                 initial_states, 
                 initial_deltas, 
                 initial_attrs, 
-                particle_nums
+                particle_nums,
+                topological_edges=topological_edges
             )
             
             # Initialize GNN prediction with first frame
