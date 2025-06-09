@@ -2,28 +2,68 @@ import numpy as np
 import cv2 
 from PIL import Image, ImageEnhance
 import os
+import torch
+from .edges import construct_edges_with_attrs
+import open3d as o3d
 
-def create_edges_for_points(positions, distance_threshold):
-    """
-    Create connectivity edges between nearby particles for visualization.
-        
-    Args:
-        positions: [n_points, 3] - particle positions
-        distance_threshold: float - maximum distance for connections
+
+
+def visualize_edges(positions, adj_thresh, topk, connect_tools_all, topological_edges, colors):
+    # Create new edges for predicted objects
+    # Convert to torch tensors for construct_edges_with_attrs
+    positions = torch.tensor(positions, dtype=torch.float32, device='cpu').unsqueeze(0)  # [1, N, 3]
+    N = positions.shape[1]
             
-    Returns:
-        edges: [n_edges, 2] - indices of connected particle pairs
-    """
-    edges = []
-    n_points = positions.shape[0]
-        
-    for i in range(n_points):
-        for j in range(i + 1, n_points):
-            distance = np.linalg.norm(positions[i] - positions[j])
-            if distance <= distance_threshold:
-                edges.append([i, j])
+    # Create masks - all particles are valid objects (not tools)
+    mask = torch.ones(1, N, dtype=torch.bool)
+    tool_mask = torch.zeros(1, N, dtype=torch.bool)
+
+    # Use construct_edges_with_attrs to get collision edges
+    Rr, Rs, edge_attrs = construct_edges_with_attrs(
+        positions, adj_thresh, mask, tool_mask, 
+        topk=topk, connect_tools_all=connect_tools_all, topological_edges=topological_edges
+    )
+
+    return create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions)
+
+
+def create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions):
+    # Convert sparse matrices to edge list
+    # Find non-zero entries in Rr and Rs to get the actual edges
+    rr_nonzero = Rr[0].nonzero()  # [n_edges, 2] where columns are [edge_idx, receiver_idx]
+    rs_nonzero = Rs[0].nonzero()  # [n_edges, 2] where columns are [edge_idx, sender_idx]
             
-    return np.array(edges) if edges else np.empty((0, 2), dtype=int)
+    if len(rr_nonzero) > 0 and len(rs_nonzero) > 0:
+        # Match edge indices to ensure we get correct sender-receiver pairs
+        edge_indices = rr_nonzero[:, 0]  # Edge indices from receiver matrix
+        receiver_indices = rr_nonzero[:, 1]  # Receiver particle indices
+                
+        # Find corresponding sender indices for the same edge indices
+        rs_dict = {edge_idx.item(): sender_idx.item() for edge_idx, sender_idx in rs_nonzero}
+        sender_indices = [rs_dict.get(edge_idx.item(), -1) for edge_idx in edge_indices]
+                
+        # Filter out any edges where sender index wasn't found
+        valid_edges = [(s, r) for s, r in zip(sender_indices, receiver_indices.tolist()) if s != -1]
+                
+        if len(valid_edges) > 0:
+            edges = np.array(valid_edges)
+            edge_attrs_flat = edge_attrs[0, edge_indices, 0].numpy()
+                    
+            lineset = o3d.geometry.LineSet()
+            lineset.points = o3d.utility.Vector3dVector(positions)
+            lineset.lines = o3d.utility.Vector2iVector(edges)
+                    
+            # Color edges based on type: lighter red for topological (1), even lighter for collision (0)
+            # Base color is red [1.0, 0.0, 0.0] to match predicted object points
+            line_colors = []
+            for attr in edge_attrs_flat:
+                if attr > 0.5:  # Topological edge
+                    line_colors.append(colors[0]) 
+                else:  # Collision edge
+                    line_colors.append(colors[1]) 
+                    
+            lineset.colors = o3d.utility.Vector3dVector(np.array(line_colors))
+            return lineset
 
 
 def gen_goal_shape(name, h, w, font_name='helvetica_thin'):
@@ -51,6 +91,29 @@ def gen_goal_shape(name, h, w, font_name='helvetica_thin'):
 # ============================================================================
 # DEPRECATED
 # ============================================================================
+
+def create_edges_for_points(positions, distance_threshold):
+    """
+    Create connectivity edges between nearby particles for visualization.
+        
+    Args:
+        positions: [n_points, 3] - particle positions
+        distance_threshold: float - maximum distance for connections
+            
+    Returns:
+        edges: [n_edges, 2] - indices of connected particle pairs
+    """
+    edges = []
+    n_points = positions.shape[0]
+        
+    for i in range(n_points):
+        for j in range(i + 1, n_points):
+            distance = np.linalg.norm(positions[i] - positions[j])
+            if distance <= distance_threshold:
+                edges.append([i, j])
+            
+    return np.array(edges) if edges else np.empty((0, 2), dtype=int)
+
 
 def drawRotatedRect(img, s, e, width=1):
     """

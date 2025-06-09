@@ -55,7 +55,7 @@ train:
     fps_radius: 0.02
   resume:
     active: true
-    epoch: 25
+    epoch: 28
     iter: 0
     folder: "test_no_edges"
   edges:

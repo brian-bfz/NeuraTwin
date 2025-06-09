@@ -46,7 +46,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 from GNN.model.rollout import Rollout
-from GNN.utils import create_edges_for_points, fps_rad_tensor, construct_edges_from_tensor
+from GNN.utils import visualize_edges, fps_rad_tensor, construct_edges_from_tensor, construct_edges_with_attrs
 
 class InvPhyTrainerWarp:
     def __init__(
@@ -1754,17 +1754,11 @@ class InvPhyTrainerWarp:
             vis.add_geometry(gnn_robot_pcd, reset_bounding_box=False)
                 
             # Add GNN edges for all particles (object + robot)
-            adj_thresh = gnn_config['train']['particle']['adj_thresh'] if gnn_config else 0.02
-            gnn_all_positions = gnn_x.cpu().numpy()  # All particles (object + robot)
-            gnn_edges = create_edges_for_points(gnn_all_positions, adj_thresh)
-            if len(gnn_edges) > 0:
-                gnn_line_set = o3d.geometry.LineSet()
-                gnn_line_set.points = o3d.utility.Vector3dVector(gnn_all_positions)
-                gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
-                # Use more transparent/thinner edges for better visualization
-                gnn_line_colors = np.tile([0.5, 0.8, 0.5], (len(gnn_edges), 1))  # Lighter green for GNN edges
-                gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
-                vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+            adj_thresh = gnn_config['train']['edges']['collision']['adj_thresh']
+            topk = gnn_config['train']['edges']['collision']['topk']
+
+            gnn_line_set = visualize_edges(gnn_x, adj_thresh, topk, False, topological_edges, [[0.4, 0.8, 0.4], [0.3, 0.6, 0.3]]) # light green, lighter green\
+            vis.add_geometry(gnn_line_set, reset_bounding_box=False)
 
         while True:
 
@@ -1870,17 +1864,61 @@ class InvPhyTrainerWarp:
                     gnn_robot_pcd.points = o3d.utility.Vector3dVector(gnn_robot_positions)
                     vis.update_geometry(gnn_robot_pcd)
                     
-                    # Create new GNN edges for all particles
-                    gnn_all_positions = gnn_x.cpu().numpy()  # All particles (object + robot)
-                    gnn_edges = create_edges_for_points(gnn_all_positions, adj_thresh)
-                    if len(gnn_edges) > 0:
-                        gnn_line_set = o3d.geometry.LineSet()
-                        gnn_line_set.points = o3d.utility.Vector3dVector(gnn_all_positions)
-                        gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
-                        # Use lighter/more transparent colors for better visualization
-                        gnn_line_colors = np.tile([0.5, 0.8, 0.5], (len(gnn_edges), 1))  # Lighter green for GNN edges
-                        gnn_line_set.colors = o3d.utility.Vector3dVector(gnn_line_colors)
-                        vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+                    # Create new GNN edges using construct_edges_with_attrs
+                    gnn_all_tensor = gnn_x.unsqueeze(0)  # [1, N, 3]
+                    total_particles = gnn_x.shape[0]
+                    
+                    # Create masks - objects are not tools, robots are tools
+                    mask = torch.ones(1, total_particles, dtype=torch.bool, device=gnn_x.device)
+                    tool_mask = torch.zeros(1, total_particles, dtype=torch.bool, device=gnn_x.device)
+                    tool_mask[0, n_object_particles:] = True  # Robot particles are tools
+                    
+                    # Use the same topological edges as the GNN model
+                    topo_edges = gnn_rollout.topological_edges if hasattr(gnn_rollout, 'topological_edges') else torch.zeros(1, total_particles, total_particles, device=gnn_x.device)
+                    
+                    # Use construct_edges_with_attrs to get both collision and topological edges
+                    Rr, Rs, edge_attrs = construct_edges_with_attrs(
+                        gnn_all_tensor, adj_thresh, mask, tool_mask, 
+                        topk=30, connect_tools_all=False, topological_edges=topo_edges
+                    )
+                    
+                    # Convert sparse matrices to edge list
+                    rr_nonzero = Rr[0].nonzero()  # [n_edges, 2] where columns are [edge_idx, receiver_idx]
+                    rs_nonzero = Rs[0].nonzero()  # [n_edges, 2] where columns are [edge_idx, sender_idx]
+                    
+                    if len(rr_nonzero) > 0 and len(rs_nonzero) > 0:
+                        # Match edge indices to ensure we get correct sender-receiver pairs
+                        edge_indices = rr_nonzero[:, 0]  # Edge indices from receiver matrix
+                        receiver_indices = rr_nonzero[:, 1]  # Receiver particle indices
+                        
+                        # Find corresponding sender indices for the same edge indices
+                        rs_dict = {edge_idx.item(): sender_idx.item() for edge_idx, sender_idx in rs_nonzero}
+                        sender_indices = [rs_dict.get(edge_idx.item(), -1) for edge_idx in edge_indices]
+                        
+                        # Filter out any edges where sender index wasn't found
+                        valid_edges = [(s, r) for s, r in zip(sender_indices, receiver_indices.tolist()) if s != -1]
+                        
+                        if len(valid_edges) > 0:
+                            gnn_edges = np.array(valid_edges)
+                            edge_attrs_flat = edge_attrs[0, edge_indices, 0].cpu().numpy()
+                            
+                            gnn_line_set = o3d.geometry.LineSet()
+                            gnn_line_set.points = o3d.utility.Vector3dVector(gnn_x.cpu().numpy())
+                            gnn_line_set.lines = o3d.utility.Vector2iVector(gnn_edges)
+                            
+                            # Color edges based on type: lighter green for topological (1), even lighter for collision (0)
+                            # Base color is green [0, 1, 0] to match GNN object points
+                            gnn_line_colors = []
+                            for attr in edge_attrs_flat:
+                                if attr > 0.5:  # Topological edge
+                                    gnn_line_colors.append([0.4, 0.8, 0.4])  # Lighter green
+                                else:  # Collision edge
+                                    gnn_line_colors.append([0.3, 0.6, 0.3])  # Even lighter green
+                            
+                            gnn_line_set.colors = o3d.utility.Vector3dVector(np.array(gnn_line_colors))
+                            vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+                        else:
+                            gnn_line_set = None
                     else:
                         gnn_line_set = None
                 

@@ -8,7 +8,7 @@ import json
 from .dataset.dataset_gnn_dyn import ParticleDataset
 from .model.gnn_dyn import PropNetDiffDenModel
 from .model.rollout import Rollout
-from .utils import load_yaml, fps_rad_tensor, create_edges_for_points
+from .utils import load_yaml, visualize_edges
 from .paths import *
 import argparse
 from scripts.utils import parse_episodes
@@ -47,16 +47,19 @@ class Visualizer:
         self.FPS = data["fps"] / self.config['dataset']['downsample_rate']
         
         # Initialize dataset for consistent data loading
+        if data_file is None:
+            data_file = self.config['dataset']['file']
         self.dataset = ParticleDataset(data_file, self.config, 'train')  # Use train to access all episodes
         
         # Extract model parameters
         self.n_history = self.config['train']['n_history']
         self.fps_radius = self.config['train']['particle']['fps_radius']
-        self.adj_thresh = self.config['train']['edges']['topological']['adj_thresh']
+        self.adj_thresh = self.config['train']['edges']['collision']['adj_thresh']
+        self.topk = self.config['train']['edges']['collision']['topk']
         
         # Load trained model
         self.model = PropNetDiffDenModel(self.config, torch.cuda.is_available())
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
         
@@ -97,7 +100,7 @@ class Visualizer:
             states_delta[:self.n_history - 1].unsqueeze(0), # [1, n_history - 1, particles, 3] 
             attrs[self.n_history - 1].unsqueeze(0),       # [1, particles]
             torch.tensor([particle_num], device=self.device),  # [1]
-            topological_edges  # [1, particles, particles] or None
+            topological_edges.unsqueeze(0)  # [1, particles, particles] or None
         )
         
         # Initialize prediction storage with history
@@ -154,7 +157,7 @@ class Visualizer:
         return object_states, robot_states
     
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
-                               episode_num, save_path):
+                               episode_num, save_path, topological_edges):
         """
         Create 3D visualization comparing predicted vs actual object motion.
         Renders particles as colored point clouds with connectivity edges.
@@ -164,7 +167,8 @@ class Visualizer:
             actual_objects: [timesteps, n_obj, 3] - ground truth object trajectory  
             robot_trajectory: [timesteps, n_robot, 3] - robot trajectory for context
             episode_num: int - episode number for labeling
-            save_path: str - output video file path
+            save_path: str - outut video file path
+            topological_edges: [n_obj, n_obj] - adjacency matrix for topological edges
             
         Returns:
             save_path: str - path where video was saved
@@ -232,7 +236,6 @@ class Visualizer:
 
         # Initialize edge sets
         pred_line_set = None
-        actual_line_set = None
 
         # Render each frame
         for frame_idx in range(n_frames):
@@ -257,31 +260,10 @@ class Visualizer:
             # Remove old edges
             if pred_line_set is not None:
                 vis.remove_geometry(pred_line_set, reset_bounding_box=False)
-            if actual_line_set is not None:
-                vis.remove_geometry(actual_line_set, reset_bounding_box=False)
-    
-            # Create new edges
-            pred_edges = create_edges_for_points(pred_obj_pos, self.adj_thresh)
-            if len(pred_edges) > 0:
-                pred_line_set = o3d.geometry.LineSet()
-                pred_line_set.points = o3d.utility.Vector3dVector(pred_obj_pos)
-                pred_line_set.lines = o3d.utility.Vector2iVector(pred_edges)
-                pred_line_colors = np.tile([1.0, 0.0, 0.0], (len(pred_edges), 1)) # Blue for predicted
-                pred_line_set.colors = o3d.utility.Vector3dVector(pred_line_colors)
-                vis.add_geometry(pred_line_set, reset_bounding_box=False)   
-            else:
-                pred_line_set = None            
 
-            actual_edges = create_edges_for_points(actual_obj_pos, self.adj_thresh)
-            if len(actual_edges) > 0:
-                actual_line_set = o3d.geometry.LineSet()
-                actual_line_set.points = o3d.utility.Vector3dVector(actual_obj_pos)
-                actual_line_set.lines = o3d.utility.Vector2iVector(actual_edges)
-                actual_line_colors = np.tile([0.0, 0.0, 1.0], (len(actual_edges), 1)) # Red for actual
-                actual_line_set.colors = o3d.utility.Vector3dVector(actual_line_colors)
-                vis.add_geometry(actual_line_set, reset_bounding_box=False)
-            else:
-                actual_line_set = None
+            # Create new edges for predicted objects
+            pred_line_set = visualize_edges(pred_obj_pos, self.adj_thresh, self.topk, False, topological_edges, [[0.8, 0.4, 0.4], [0.6, 0.3, 0.3]]) # light red, lighter red
+            vis.add_geometry(pred_line_set, reset_bounding_box=False)
                         
             # Render frame
             vis.poll_events()
@@ -314,12 +296,12 @@ def main():
     """
     # Parse command line arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="2025-05-31-21-01-09-427982",
+    parser.add_argument("--model", type=str, required=True,
                        help="Model name (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)")
     parser.add_argument("--camera_calib_path", type=str, default="PhysTwin/data/different_types/single_push_rope")
     parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
                        help="Episodes to test. Format: space-separated list (0 1 2 3 4) or range (0-4)")
-    parser.add_argument("--data_file", type=str, default="PhysTwin/generated_data/less_empty_data.h5")
+    parser.add_argument("--data_file", type=str, default=None)
     parser.add_argument("--video", action='store_true',
                        help="Generate visualization videos (optional)")
     parser.add_argument("--config_path", type=str, default=None)
@@ -342,6 +324,7 @@ def main():
         config_path = str(model_paths['config'])
     else:
         config_path = args.config_path
+        
     data_file = args.data_file 
     camera_calib_path = args.camera_calib_path
     
