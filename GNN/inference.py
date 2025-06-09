@@ -139,23 +139,7 @@ class Visualizer:
             errors.append(error)
             
         return errors
-    
-    def split_object_robot_states(self, states, n_obj_particles):
-        """
-        Split combined particle states into separate object and robot trajectories.
         
-        Args:
-            states: [timesteps, total_particles, 3] - combined particle states
-            n_obj_particles: int - number of object particles
-            
-        Returns:
-            object_states: [timesteps, n_obj, 3] - object particle trajectory
-            robot_states: [timesteps, n_robot, 3] - robot particle trajectory
-        """
-        object_states = states[:, :n_obj_particles, :]
-        robot_states = states[:, n_obj_particles:, :]
-        return object_states, robot_states
-    
     def visualize_object_motion(self, predicted_states, tool_mask, actual_objects, 
                                episode_num, save_path, topological_edges=None):
         """
@@ -163,12 +147,12 @@ class Visualizer:
         Renders particles as colored point clouds with connectivity edges.
         
         Args:
-            predicted_states: [timesteps, total_particles, 3] - predicted trajectory (objects + robots)
-            tool_mask: [total_particles] - boolean mask (False=object, True=robot)
-            actual_objects: [timesteps, n_obj, 3] - ground truth object trajectory  
+            predicted_states: [timesteps, total_particles, 3] tensor - predicted trajectory (objects + robots)
+            tool_mask: [total_particles] tensor - boolean mask (False=object, True=robot)
+            actual_objects: [timesteps, n_obj, 3] tensor - ground truth object trajectory  
             episode_num: int - episode number for labeling
             save_path: str - output video file path
-            topological_edges: [N, N] tensor or None - topological edges for object and robot particles
+            topological_edges: [N, N] tensor - topological edges for object and robot particles
             
         Returns:
             save_path: str - path where video was saved
@@ -190,15 +174,15 @@ class Visualizer:
         render_option = vis.get_render_option()
         render_option.point_size = 10.0
 
-        # Convert tensors to numpy for Open3D
-        predicted_states = predicted_states.cpu().numpy()
-        actual_objects = actual_objects.cpu().numpy()
-        tool_mask = tool_mask.cpu().numpy()
+        # Move tensors to CPU
+        predicted_states = predicted_states.cpu()
+        tool_mask = tool_mask.cpu()
+        topological_edges = topological_edges.cpu()
         
-        # Split predicted states into objects and robots using tool_mask
-        n_obj = (~tool_mask).sum().item()  # Count False values (objects)
-        pred_objects = predicted_states[:, :n_obj, :]
-        pred_robots = predicted_states[:, n_obj:, :]
+        # Split predicted states into objects and robots using tool_mask. Convert to numpy for o3d. Keep predicted_states as tensor. 
+        actual_objects = actual_objects.cpu().numpy()
+        pred_objects = predicted_states[:, ~tool_mask, :].numpy()
+        pred_robots = predicted_states[:, tool_mask, :].numpy()
         
         # Create point clouds            
         actual_pcd = o3d.geometry.PointCloud()
@@ -264,7 +248,7 @@ class Visualizer:
             pred_line_set = visualize_edges(
                 predicted_states[frame_idx], topological_edges, tool_mask, 
                 self.adj_thresh, self.topk, False, 
-                [[0.6, 0.3, 0.3], [0.8, 0.4, 0.4]]  # collision, topological
+                [[0.2, 0.6, 1.0], [0.3, 0.6, 0.3]]  # light orange (BGR), light green
             )
             
             if pred_line_set is not None:
@@ -356,31 +340,28 @@ def main():
             states = states.to(visualizer.device)
             states_delta = states_delta.to(visualizer.device)
             attrs = attrs.to(visualizer.device)
-            
-            # Handle topological edges
             topological_edges = topological_edges.to(visualizer.device)
-            print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
 
-            
             # Determine particle counts from attributes (0=object, 1=robot)
-            n_obj_particles = (attrs[0] == 0).sum().item()
-            n_robot_particles = (attrs[0] == 1).sum().item()
+            n_obj = (attrs[0] == 0).sum().item()
+            n_robot = (attrs[0] == 1).sum().item()
             
-            print(f"Loaded episode with {n_obj_particles} object particles, {n_robot_particles} robot particles")
+            print(f"Loaded episode with {n_obj} object particles, {n_robot} robot particles")
+            print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
                         
             # Run autoregressive rollout prediction
             predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges)
             
             # Split into object and robot components for evaluation
-            predicted_objects, predicted_robots = visualizer.split_object_robot_states(predicted_states, n_obj_particles)
-            actual_objects, actual_robots = visualizer.split_object_robot_states(states, n_obj_particles)
+            predicted_objects = predicted_states[:, :n_obj, :]
+            actual_objects = states[:, :n_obj, :]
             
             # Calculate prediction errors (evaluate object motion only)
             errors = visualizer.calculate_prediction_error(predicted_objects, actual_objects)
             all_errors.extend(errors)
             
             avg_error = np.mean(errors)
-            print(f"Average MSE: {avg_error:.6f} | RMSE: {np.sqrt(avg_error):.6f} | Timesteps predicted: {len(errors)}")
+            print(f"RMSE: {np.sqrt(avg_error):.6f} | Timesteps predicted: {len(errors)}")
             
             # Generate video only if --video flag is provided
             if args.video:

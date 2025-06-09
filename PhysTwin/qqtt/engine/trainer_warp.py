@@ -1753,15 +1753,18 @@ class InvPhyTrainerWarp:
             gnn_robot_pcd.paint_uniform_color([1, 0, 0])  # Red for GNN robot predictions
             vis.add_geometry(gnn_robot_pcd, reset_bounding_box=False)
                 
-            # Add GNN edges for all particles (object + robot)
+            # Initialize GNN edge visualization parameters
             adj_thresh = gnn_config['train']['edges']['collision']['adj_thresh']
             topk = gnn_config['train']['edges']['collision']['topk']
-            tool_mask = torch.zeros(gnn_x.shape[0], dtype=torch.bool, device=gnn_x.device)
+            tool_mask = torch.zeros(gnn_x.shape[0], dtype=torch.bool, device='cpu')
             tool_mask[n_object_particles:] = True
 
-            gnn_line_set = visualize_edges(gnn_x, topological_edges.squeeze(0), tool_mask, adj_thresh, topk, False, [[0.4, 0.8, 0.4], [0.3, 0.6, 0.3]])  # light green, lighter green
-            if gnn_line_set is not None:
-                vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+            # Initialize edge set to None - will be created in the loop
+            gnn_line_set = None
+
+            # Move data to CPU
+            topological_edges = topological_edges.squeeze(0).cpu()
+            tool_mask = tool_mask.cpu()
 
         while True:
 
@@ -1857,6 +1860,9 @@ class InvPhyTrainerWarp:
                     if gnn_line_set is not None:
                         vis.remove_geometry(gnn_line_set, reset_bounding_box=False)
                     
+                    # Move data to CPU
+                    gnn_x = gnn_x.cpu()
+
                     # Update GNN object positions
                     gnn_obj_positions = gnn_x[:n_object_particles].cpu().numpy()
                     gnn_obj_pcd.points = o3d.utility.Vector3dVector(gnn_obj_positions)
@@ -1868,7 +1874,7 @@ class InvPhyTrainerWarp:
                     vis.update_geometry(gnn_robot_pcd)
                     
                     # Update GNN edges
-                    gnn_line_set = visualize_edges(gnn_x, topological_edges.squeeze(0), tool_mask, adj_thresh, topk, False, [[0.3, 0.6, 0.3], [0.4, 0.8, 0.4]])  # collision, topological
+                    gnn_line_set = visualize_edges(gnn_x, topological_edges, tool_mask, adj_thresh, topk, False, [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]])  # light orange, light green
                     if gnn_line_set is not None:
                         vis.add_geometry(gnn_line_set, reset_bounding_box=False)
                     

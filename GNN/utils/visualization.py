@@ -13,41 +13,24 @@ def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, c
     Create edges visualization using construct_edges_with_attrs
     
     Args:
-        positions: [B, N, 3] or [N, 3] tensor/array - particle positions
-        topological_edges: [B, N, N] tensor - topological adjacency matrix
-        tool_mask: [B, N] tensor - boolean mask for tool particles
+        positions: tensor [N, 3] - particle positions
+        topological_edges: tensor [N, N] - topological adjacency matrix
+        tool_mask: tensor [N] - boolean mask for tool particles
         adj_thresh: float - distance threshold for collision edges
         topk: int - maximum neighbors per particle
         connect_tools_all: bool - whether to connect tools to all objects
-        colors: list of [r,g,b] colors for [topological, collision] edges
+        colors: list of [b,g,r] colors for [collision, topological] edges
         
     Returns:
         o3d.geometry.LineSet - line set for visualization or None
     """
-    # Convert inputs to tensors if needed
-    if not isinstance(positions, torch.Tensor):
-        positions = torch.tensor(positions, dtype=torch.float32)
     
-    # Ensure positions has batch dimension
-    if len(positions.shape) == 2:
-        positions = positions.unsqueeze(0)  # [N, 3] -> [1, N, 3]
+    # Add batch dimension for construct_edges_with_attrs
+    positions = positions.unsqueeze(0)  # [N, 3] -> [1, N, 3]
+    topological_edges = topological_edges.unsqueeze(0)  # [N, N] -> [1, N, N]
+    tool_mask = tool_mask.unsqueeze(0)  # [N] -> [1, N]
     
     B, N, _ = positions.shape
-    
-    # Ensure topological_edges has correct shape
-    if topological_edges is None:
-        topological_edges = torch.zeros(B, N, N, dtype=torch.float32, device=positions.device)
-    elif len(topological_edges.shape) == 2:
-        topological_edges = topological_edges.unsqueeze(0)  # [N, N] -> [1, N, N]
-    topological_edges = topological_edges.to(positions.device)
-    
-    # Ensure tool_mask has correct shape and type
-    if not isinstance(tool_mask, torch.Tensor):
-        tool_mask = torch.tensor(tool_mask, device=positions.device)
-    tool_mask = tool_mask.to(positions.device)
-    
-    if len(tool_mask.shape) == 1:
-        tool_mask = tool_mask.unsqueeze(0)  # [N] -> [1, N]
     
     # Create mask for valid particles
     mask = torch.ones(B, N, dtype=torch.bool, device=positions.device)
