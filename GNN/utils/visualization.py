@@ -9,23 +9,72 @@ import open3d as o3d
 
 
 def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, connect_tools_all, colors):
-    # Create new edges for predicted objects
-    # Convert to torch tensors for construct_edges_with_attrs
-    N = positions.shape[1]
-            
-    # Create masks - all particles are valid objects
-    mask = torch.ones(1, N, dtype=torch.bool)
-
-    # Use construct_edges_with_attrs to get collision edges
+    """
+    Create edges visualization using construct_edges_with_attrs
+    
+    Args:
+        positions: [B, N, 3] or [N, 3] tensor/array - particle positions
+        topological_edges: [B, N, N] tensor - topological adjacency matrix
+        tool_mask: [B, N] tensor - boolean mask for tool particles
+        adj_thresh: float - distance threshold for collision edges
+        topk: int - maximum neighbors per particle
+        connect_tools_all: bool - whether to connect tools to all objects
+        colors: list of [r,g,b] colors for [topological, collision] edges
+        
+    Returns:
+        o3d.geometry.LineSet - line set for visualization or None
+    """
+    # Convert inputs to tensors if needed
+    if not isinstance(positions, torch.Tensor):
+        positions = torch.tensor(positions, dtype=torch.float32)
+    
+    # Ensure positions has batch dimension
+    if len(positions.shape) == 2:
+        positions = positions.unsqueeze(0)  # [N, 3] -> [1, N, 3]
+    
+    B, N, _ = positions.shape
+    
+    # Ensure topological_edges has correct shape
+    if topological_edges is None:
+        topological_edges = torch.zeros(B, N, N, dtype=torch.float32, device=positions.device)
+    elif len(topological_edges.shape) == 2:
+        topological_edges = topological_edges.unsqueeze(0)  # [N, N] -> [1, N, N]
+    
+    # Ensure tool_mask has correct shape and type
+    if not isinstance(tool_mask, torch.Tensor):
+        tool_mask = torch.tensor(tool_mask, dtype=torch.bool)
+    elif tool_mask.dtype == torch.float32:
+        tool_mask = tool_mask.bool()
+    
+    if len(tool_mask.shape) == 1:
+        tool_mask = tool_mask.unsqueeze(0)  # [N] -> [1, N]
+    
+    # Create mask for valid particles
+    mask = torch.ones(B, N, dtype=torch.bool, device=positions.device)
+    
+    # Use construct_edges_with_attrs to get edges
     Rr, Rs, edge_attrs = construct_edges_with_attrs(
         positions, adj_thresh, mask, tool_mask, 
         topk=topk, connect_tools_all=connect_tools_all, topological_edges=topological_edges
     )
-
-    return create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions)
+    
+    return create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions[0])  # Pass first batch
 
 
 def create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions):
+    """
+    Create Open3D LineSet from sparse receiver/sender matrices
+    
+    Args:
+        Rr: [B, n_rel, N] tensor - receiver matrix
+        Rs: [B, n_rel, N] tensor - sender matrix  
+        edge_attrs: [B, n_rel, 1] tensor - edge attributes
+        colors: list of [r,g,b] colors for [collision, topological] edges
+        positions: [N, 3] tensor - particle positions
+        
+    Returns:
+        o3d.geometry.LineSet or None
+    """
     # Convert sparse matrices to edge list
     # Find non-zero entries in Rr and Rs to get the actual edges
     rr_nonzero = Rr[0].nonzero()  # [n_edges, 2] where columns are [edge_idx, receiver_idx]
@@ -46,22 +95,19 @@ def create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions):
         if len(valid_edges) > 0:
             edges = np.array(valid_edges)
             edge_attrs_flat = edge_attrs[0, edge_indices, 0].numpy()
+            positions = positions.numpy()
                     
             lineset = o3d.geometry.LineSet()
             lineset.points = o3d.utility.Vector3dVector(positions)
             lineset.lines = o3d.utility.Vector2iVector(edges)
                     
-            # Color edges based on type: lighter red for topological (1), even lighter for collision (0)
-            # Base color is red [1.0, 0.0, 0.0] to match predicted object points
-            line_colors = []
-            for attr in edge_attrs_flat:
-                if attr > 0.5:  # Topological edge
-                    line_colors.append(colors[0]) 
-                else:  # Collision edge
-                    line_colors.append(colors[1]) 
+            # Color edges based on type: collision (0) vs topological (1)
+            line_colors = colors[edge_attrs_flat]
                     
             lineset.colors = o3d.utility.Vector3dVector(np.array(line_colors))
             return lineset
+    
+    return None
 
 
 def gen_goal_shape(name, h, w, font_name='helvetica_thin'):

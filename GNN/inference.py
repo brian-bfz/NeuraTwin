@@ -157,7 +157,7 @@ class Visualizer:
         return object_states, robot_states
     
     def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
-                               episode_num, save_path, topological_edges):
+                               episode_num, save_path, topological_edges=None):
         """
         Create 3D visualization comparing predicted vs actual object motion.
         Renders particles as colored point clouds with connectivity edges.
@@ -167,8 +167,8 @@ class Visualizer:
             actual_objects: [timesteps, n_obj, 3] - ground truth object trajectory  
             robot_trajectory: [timesteps, n_robot, 3] - robot trajectory for context
             episode_num: int - episode number for labeling
-            save_path: str - outut video file path
-            topological_edges: [n_obj, n_obj] - adjacency matrix for topological edges
+            save_path: str - output video file path
+            topological_edges: [N, N] tensor or None - topological edges for object and robot particles
             
         Returns:
             save_path: str - path where video was saved
@@ -262,10 +262,22 @@ class Visualizer:
                 vis.remove_geometry(pred_line_set, reset_bounding_box=False)
 
             # Create new edges for predicted object and robot
-            both_parts = torch.cat([torch.tensor(pred_obj_pos), torch.tensor(robot_pos)], dim=0)
+            both_parts = np.concatenate([pred_obj_pos, robot_pos], axis=0)
             n_obj = pred_obj_pos.shape[0]
-            pred_line_set = visualize_edges(both_parts, self.adj_thresh, self.topk, False, topological_edges, [[0.8, 0.4, 0.4], [0.6, 0.3, 0.3]], n_obj) # light red, lighter red
-            vis.add_geometry(pred_line_set, reset_bounding_box=False)
+            n_total = both_parts.shape[0]
+            
+            # Create tool mask: False for objects, True for robots
+            tool_mask = np.zeros(n_total, dtype=bool)
+            tool_mask[n_obj:] = True
+                        
+            pred_line_set = visualize_edges(
+                both_parts, topological_edges, tool_mask, 
+                self.adj_thresh, self.topk, False, 
+                [[0.6, 0.3, 0.3], [0.8, 0.4, 0.4]]  # collision, topological
+            )
+            
+            if pred_line_set is not None:
+                vis.add_geometry(pred_line_set, reset_bounding_box=False)
                         
             # Render frame
             vis.poll_events()

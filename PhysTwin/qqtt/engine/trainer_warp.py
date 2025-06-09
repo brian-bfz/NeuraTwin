@@ -1756,11 +1756,12 @@ class InvPhyTrainerWarp:
             # Add GNN edges for all particles (object + robot)
             adj_thresh = gnn_config['train']['edges']['collision']['adj_thresh']
             topk = gnn_config['train']['edges']['collision']['topk']
-            tool_mask = torch.zeros(1, total_particles, dtype=torch.bool, device=gnn_x.device)
-            tool_mask[0, n_object_particles:] = True 
+            tool_mask = torch.zeros(gnn_x.shape[0], dtype=torch.bool, device=gnn_x.device)
+            tool_mask[n_object_particles:] = True
 
-            gnn_line_set = visualize_edges(gnn_x, topological_edges, tool_mask, adj_thresh, topk, False, [[0.4, 0.8, 0.4], [0.3, 0.6, 0.3]]) # light green, lighter green\
-            vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+            gnn_line_set = visualize_edges(gnn_x, topological_edges.squeeze(0), tool_mask, adj_thresh, topk, False, [[0.4, 0.8, 0.4], [0.3, 0.6, 0.3]])  # light green, lighter green
+            if gnn_line_set is not None:
+                vis.add_geometry(gnn_line_set, reset_bounding_box=False)
 
         while True:
 
@@ -1867,8 +1868,9 @@ class InvPhyTrainerWarp:
                     vis.update_geometry(gnn_robot_pcd)
                     
                     # Update GNN edges
-                    gnn_line_set = visualize_edges(gnn_x, topological_edges, tool_mask, adj_thresh, topk, False, [[0.4, 0.8, 0.4], [0.3, 0.6, 0.3]]) # light green, lighter green\
-                    vis.update_geometry(gnn_line_set)
+                    gnn_line_set = visualize_edges(gnn_x, topological_edges.squeeze(0), tool_mask, adj_thresh, topk, False, [[0.3, 0.6, 0.3], [0.4, 0.8, 0.4]])  # collision, topological
+                    if gnn_line_set is not None:
+                        vis.add_geometry(gnn_line_set, reset_bounding_box=False)
                     
                 for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                     dynamic_mesh.vertices = o3d.utility.Vector3dVector(
