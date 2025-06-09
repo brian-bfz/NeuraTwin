@@ -1,7 +1,9 @@
 import h5py
-from ..utils import fps_rad
+from ..utils import fps_rad, load_config
 import numpy as np
 import torch
+import argparse
+
 
 def sample_points(data_file, output_file, config):
     """
@@ -35,47 +37,42 @@ def sample_points(data_file, output_file, config):
                 episode_group.create_dataset(f'object', data=sampled_object)
                 episode_group.create_dataset(f'robot', data=sampled_robot)
 
-def construct_edges_from_dataset(points, adj_thresh, topk):
+
+def construct_edges_from_dataset(name, points, adj_thresh, topk):
     """
     Construct topological edges for points in object dataset
+    Saves edges to parent group
 
     Args:
+        name: str - path to the dataset
         points: h5py.Dataset - object dataset, skip if not
         adj_thresh: float - radius of neighborhood
         topk: int - maximum number of neighbors
-
-    Returns:
-        adj_matrix: [n_points, n_points] numpy array - adjacency matrix
     """
-    # TODO: do this in numpy entirely
-    if isinstance(points, h5py.Dataset) and "object" in points.name:
-        # Convert points to torch tensor
-        points = torch.from_numpy(points[:]).float()
-        N, state_dim = points.shape
-
-        # Create pairwise particle combinations
-        s_receiv = points[:, None, :].repeat(1, N, 1)
-        s_sender = points[None, :, :].repeat(N, 1, 1)
-
-        # Create adjacency matrix based on distance threshold
-        threshold = adj_thresh * adj_thresh
-        s_diff = s_receiv - s_sender  # Position differences
-        dis = torch.sum(s_diff ** 2, -1)  # Squared distances (N, N)
-        adj_matrix = ((dis - threshold) < 0).float()
-
+    if isinstance(points, h5py.Dataset) and "object" in name:
+        points_data = points[:]
+        N = points_data.shape[0]
+        
+        # Compute pairwise squared distances
+        diff = points_data[:, None, :] - points_data[None, :, :]
+        distances_sq = np.sum(diff ** 2, axis=-1)
+        
+        # Threshold-based adjacency
+        adj_matrix = (distances_sq < adj_thresh ** 2).astype(float)
+        
         # Apply topk constraint
-        topk = min(dis.shape[-1], topk)
-        topk_idx = torch.topk(dis, k=topk, dim=-1, largest=False)[1]
-        topk_matrix = torch.zeros_like(adj_matrix)
-        topk_matrix.scatter_(-1, topk_idx, 1)
+        topk = min(N, topk)
+        topk_idx = np.argpartition(distances_sq, topk, axis=-1)[:, :topk]
+        topk_matrix = np.zeros_like(adj_matrix)
+        np.put_along_axis(topk_matrix, topk_idx, 1, axis=-1)
         adj_matrix = adj_matrix * topk_matrix
-
-        # Convert to numpy array 
-        adj_matrix = adj_matrix.numpy()
-
-        # Save to parent group
-        name = points.name.split('/')[-1]
-        points.parent.create_dataset(f'{name}_edges', data=adj_matrix)
+        
+        # Save edges
+        name = name.split('/')[-1]
+        edge_name = f'{name}_edges'
+        if edge_name in points.parent:
+            del points.parent[edge_name]
+        points.parent.create_dataset(edge_name, data=adj_matrix)
 
 
 def construct_edges_from_file(data_file, config):
@@ -96,4 +93,21 @@ def construct_edges_from_file(data_file, config):
     # Load data
     with h5py.File(data_file, 'r+') as f:
         # iterate over all groups in file 
-        f.visititems(lambda name, obj: construct_edges_from_dataset(obj, adj_thresh, topk))
+        f.visititems(lambda name, obj: construct_edges_from_dataset(name, obj, adj_thresh, topk))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_file', type=str, required=True)
+    parser.add_argument('--output_file', type=str, required=True)
+    parser.add_argument('--config', type=str, required=True)
+    args = parser.parse_args()
+
+    # Load config
+    config = load_config(args.config)
+
+    # Sample points and create output file
+    sample_points(args.data_file, args.output_file, config)
+
+    # Construct edges
+    construct_edges_from_file(args.output_file, config)
