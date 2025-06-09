@@ -261,8 +261,10 @@ class Visualizer:
             if pred_line_set is not None:
                 vis.remove_geometry(pred_line_set, reset_bounding_box=False)
 
-            # Create new edges for predicted objects
-            pred_line_set = visualize_edges(pred_obj_pos, self.adj_thresh, self.topk, False, topological_edges, [[0.8, 0.4, 0.4], [0.6, 0.3, 0.3]]) # light red, lighter red
+            # Create new edges for predicted object and robot
+            both_parts = torch.cat([torch.tensor(pred_obj_pos), torch.tensor(robot_pos)], dim=0)
+            n_obj = pred_obj_pos.shape[0]
+            pred_line_set = visualize_edges(both_parts, self.adj_thresh, self.topk, False, topological_edges, [[0.8, 0.4, 0.4], [0.6, 0.3, 0.3]], n_obj) # light red, lighter red
             vis.add_geometry(pred_line_set, reset_bounding_box=False)
                         
             # Render frame
@@ -382,7 +384,7 @@ def main():
                 video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
                 visualizer.visualize_object_motion(
                     predicted_objects, actual_objects, actual_robots, 
-                    episode_num, video_path
+                    episode_num, video_path, topological_edges
                 )
                 
     # Overall results

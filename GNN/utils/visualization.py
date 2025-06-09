@@ -8,15 +8,13 @@ import open3d as o3d
 
 
 
-def visualize_edges(positions, adj_thresh, topk, connect_tools_all, topological_edges, colors):
+def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, connect_tools_all, colors):
     # Create new edges for predicted objects
     # Convert to torch tensors for construct_edges_with_attrs
-    positions = torch.tensor(positions, dtype=torch.float32, device='cpu').unsqueeze(0)  # [1, N, 3]
     N = positions.shape[1]
             
-    # Create masks - all particles are valid objects (not tools)
+    # Create masks - all particles are valid objects
     mask = torch.ones(1, N, dtype=torch.bool)
-    tool_mask = torch.zeros(1, N, dtype=torch.bool)
 
     # Use construct_edges_with_attrs to get collision edges
     Rr, Rs, edge_attrs = construct_edges_with_attrs(
