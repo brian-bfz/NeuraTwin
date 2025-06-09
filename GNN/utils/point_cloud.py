@@ -16,16 +16,19 @@ def fps_rad(pcd, radius):
         radius: float - sampling radius constraint
         
     Returns:
-        numpy array - sampled points with radius constraint
+        (n) numpy array - indices of sampled points
     """
     rand_idx = np.random.randint(pcd.shape[0])
-    pcd_fps_lst = [pcd[rand_idx]]
-    dist = np.linalg.norm(pcd - pcd_fps_lst[0], axis=1)
+    selected_indices = [rand_idx]
+    dist = np.linalg.norm(pcd - pcd[rand_idx], axis=1)
+    
     while dist.max() > radius:
-        pcd_fps_lst.append(pcd[dist.argmax()])
-        dist = np.minimum(dist, np.linalg.norm(pcd - pcd_fps_lst[-1], axis=1))
-    pcd_fps = np.stack(pcd_fps_lst, axis=0)
-    return pcd_fps
+        farthest_idx = dist.argmax()
+        selected_indices.append(farthest_idx)
+        dist = np.minimum(dist, np.linalg.norm(pcd - pcd[farthest_idx], axis=1))
+    
+    return np.array(selected_indices)
+
 
 
 def fps_rad_tensor(points, radius):
@@ -81,6 +84,27 @@ def fps_rad_tensor(points, radius):
 #     dist = np.linalg.norm(pcd[:, None] - pcd_fps[None, :], axis=-1)
 #     dist = dist.min(axis=1)
 #     return pcd_fps, dist.max()
+
+
+def fps_rad_old(pcd, radius):
+    """
+    Farthest point sampling on numpy array with radius constraint.
+    
+    Args:
+        pcd: (n, 3) numpy array - input point cloud
+        radius: float - sampling radius constraint
+        
+    Returns:
+        numpy array - sampled points with radius constraint
+    """
+    rand_idx = np.random.randint(pcd.shape[0])
+    pcd_fps_lst = [pcd[rand_idx]]
+    dist = np.linalg.norm(pcd - pcd_fps_lst[0], axis=1)
+    while dist.max() > radius:
+        pcd_fps_lst.append(pcd[dist.argmax()])
+        dist = np.minimum(dist, np.linalg.norm(pcd - pcd_fps_lst[-1], axis=1))
+    pcd_fps = np.stack(pcd_fps_lst, axis=0)
+    return pcd_fps
 
 
 def fps_rad_tensor_old(pcd_tensor, radius):

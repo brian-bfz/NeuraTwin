@@ -8,7 +8,7 @@ class Rollout:
     Assume tensors are already on the correct device and with gradients enabled / disabled.
     """
     
-    def __init__(self, model, config, initial_states, initial_deltas, initial_attrs, particle_num):
+    def __init__(self, model, config, initial_states, initial_deltas, initial_attrs, particle_num, topological_edges):
         """
         Initialize the predictor with trained model and initial history data.
         
@@ -19,6 +19,7 @@ class Rollout:
             initial_deltas: [batch, n_history - 1, particles, 3] - initial velocity history
             initial_attrs: [batch, particles] - initial attribute
             particle_num: [batch] - total number of particles per batch
+            topological_edges: [batch, particles, particles] - adjacency matrix of topological edges
         """
         self.model = model
         self.config = config
@@ -35,6 +36,7 @@ class Rollout:
             self.s_delta = torch.cat([filler, initial_deltas], dim=1) # [batch, n_history, particles, 3]
         self.a_cur = initial_attrs     # [batch, particles]
         self.particle_nums = particle_num # [batch]
+        self.topological_edges = topological_edges  # [batch, particles, particles]
         
     def forward(self, next_delta):
         """
@@ -55,7 +57,8 @@ class Rollout:
             self.a_cur,        # [batch, particles]
             self.s_cur,        # [batch, particles, 3]
             self.s_delta,       # [batch, n_history, particles, 3]
-            self.particle_nums  # [batch]
+            topological_edges=self.topological_edges,  # [batch, particles, particles]
+            particle_nums=self.particle_nums  # [batch]
         )  # [batch, particles, 3]
 
         # Always force robot positions to ground truth

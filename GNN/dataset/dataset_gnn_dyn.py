@@ -192,7 +192,7 @@ class ParticleDataset(Dataset):
     def __getitem__(self, idx):
         """
         Get single training sample with temporal history and rollout structure.
-        Implements the core data loading logic for autoregressive training.
+        Loads pre-sampled trajectories and topological edges from preprocessed data.
         
         Args:
             idx: int - dataset index
@@ -202,6 +202,7 @@ class ParticleDataset(Dataset):
             states_delta: [time-1, particles, 3] - particle displacements with temporal logic
             attrs: [time, particles] - particle attributes
             particle_num: int - number of particles in this sample
+            topological_edges: [particles, particles] - adjacency matrix for topological edges
         """
         # Calculate which episode and timestep this index corresponds to
         idx_episode = idx // self.offset + self.epi_st_idx
@@ -210,7 +211,7 @@ class ParticleDataset(Dataset):
         # Get HDF5 file handle
         f = self._get_hdf5_file()
         episode_group = f[f'episode_{idx_episode:06d}']
-                
+        
         # Generate downsampled frame indices for history + rollout
         frame_indices = [idx_timestep + i * self.downsample_rate for i in range(self.n_his + self.n_roll)]
         object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_obj, 3]
@@ -218,22 +219,23 @@ class ParticleDataset(Dataset):
         
         n_frames = self.n_his + self.n_roll
         
-        # Get first frame data for FPS sampling
-        first_object = object_data[0]  # [n_obj, 3]
-        first_robot = robot_data[0]    # [n_bot, 3]
+        n_object = object_data.shape[1]
+        n_robot = robot_data.shape[1]
+        particle_num = n_object + n_robot
         
-        sampled_object_indices = fps_rad_tensor(first_object, self.fps_radius)
-        sampled_robot_indices = fps_rad_tensor(first_robot, self.fps_radius)
-        
-        n_sampled_object = sampled_object_indices.shape[0]
-        n_sampled_robot = sampled_robot_indices.shape[0]
-        particle_num = n_sampled_object + n_sampled_robot
-                
-        sampled_object_states = object_data[:, sampled_object_indices, :]  # [time, sampled_object, 3]
-        sampled_robot_states = robot_data[:, sampled_robot_indices, :]     # [time, sampled_robot, 3]
+        if self.config['train']['edges']['topological']['enabled']:
+            # Load topological edges for object particles (computed from first frame)
+            object_edges = torch.from_numpy(episode_group['object_edges'][:])  # [n_sampled_obj, n_sampled_obj]
+
+            # Create full topological edges matrix for all particles
+            # Objects have topological edges, robots don't connect to each other topologically
+            topological_edges = torch.zeros(particle_num, particle_num)
+            topological_edges[:n_object, :n_object] = object_edges
+        else:
+            topological_edges = None
         
         # Combine sampled particles: [object_particles, robot_particles]
-        states = torch.cat([sampled_object_states, sampled_robot_states], dim=1)  # [time, total_sampled, 3]
+        states = torch.cat([object_data, robot_data], dim=1)  # [time, total_sampled, 3]
         
         # Apply data augmentation noise to history frames only
         if self.add_randomness:
@@ -250,18 +252,19 @@ class ParticleDataset(Dataset):
         states_delta[:self.n_his - 1] = states[1:self.n_his] - states[:self.n_his - 1]
         
         # Future frames: only robots get motion deltas
-        states_delta[self.n_his - 1:n_frames - 1, n_sampled_object:] = states[self.n_his:n_frames, n_sampled_object:] - states[self.n_his - 1:n_frames - 1, n_sampled_object:]
+        states_delta[self.n_his - 1:n_frames - 1, n_object:] = states[self.n_his:n_frames, n_object:] - states[self.n_his - 1:n_frames - 1, n_object:]
         
-        # Create attribute tensor (0=object, 1=robot)
+        # Create particle attribute tensor (0=object, 1=robot)
         attrs = torch.zeros(n_frames, particle_num)
-        attrs[:, n_sampled_object:] = 1.0   # Robot particles
-        
+        attrs[:, n_object:] = 1.0   # Robot particles
+                
         # Convert to float tensors
         states = states.float()
         states_delta = states_delta.float()
         attrs = attrs.float()
+        topological_edges = topological_edges.float()
         
-        return states, states_delta, attrs, particle_num
+        return states, states_delta, attrs, particle_num, topological_edges
 
 # ============================================================================
 # LEGACY TESTING AND CALIBRATION FUNCTIONS

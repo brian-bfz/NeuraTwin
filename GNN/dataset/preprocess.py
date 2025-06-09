@@ -1,7 +1,6 @@
 import h5py
 from ..utils import fps_rad, load_config
 import numpy as np
-import torch
 import argparse
 
 
@@ -28,14 +27,28 @@ def sample_points(data_file, output_file, config):
                 object_data = episode_group['object'] # [timesteps, n_obj, 3] numpy array
                 robot_data = episode_group['robot'] # [timesteps, n_bot, 3] numpy array
 
-                # Sample points using FPS on first frame
-                sampled_object = fps_rad(object_data[0], fps_radius)
-                sampled_robot = fps_rad(robot_data[0], fps_radius)
+                # Get original episode metadata
+                n_frames = episode_group.attrs['n_frames']
+                n_obj_particles = episode_group.attrs['n_obj_particles']
+                n_bot_particles = episode_group.attrs['n_bot_particles']
 
-                # Save sampled points
-                episode_group = f_out.create_group(f'episode_{i:06d}')
-                episode_group.create_dataset(f'object', data=sampled_object)
-                episode_group.create_dataset(f'robot', data=sampled_robot)
+                # Sample points using FPS on first frame to get indices
+                object_indices = fps_rad(object_data[0], fps_radius)
+                robot_indices = fps_rad(robot_data[0], fps_radius)
+                
+                # Extract full trajectories for sampled particles
+                sampled_object_trajectory = object_data[:, object_indices, :]  # [timesteps, n_sampled_obj, 3]
+                sampled_robot_trajectory = robot_data[:, robot_indices, :]     # [timesteps, n_sampled_robot, 3]
+
+                # Create output episode group and save metadata
+                episode_group_out = f_out.create_group(f'episode_{i:06d}')
+                episode_group_out.attrs['n_frames'] = n_frames
+                episode_group_out.attrs['n_obj_particles'] = len(object_indices) 
+                episode_group_out.attrs['n_bot_particles'] = len(robot_indices)
+
+                # Save full sampled trajectories
+                episode_group_out.create_dataset('object', data=sampled_object_trajectory)
+                episode_group_out.create_dataset('robot', data=sampled_robot_trajectory)
 
 
 def construct_edges_from_dataset(name, points, adj_thresh, topk):
@@ -50,7 +63,8 @@ def construct_edges_from_dataset(name, points, adj_thresh, topk):
         topk: int - maximum number of neighbors
     """
     if isinstance(points, h5py.Dataset) and "object" in name:
-        points_data = points[:]
+        # Use first frame for computing topological edges
+        points_data = points[0, :, :]  # [n_sampled_obj, 3] - first frame positions
         N = points_data.shape[0]
         
         # Compute pairwise squared distances
@@ -110,4 +124,5 @@ if __name__ == "__main__":
     sample_points(args.data_file, args.output_file, config)
 
     # Construct edges
-    construct_edges_from_file(args.output_file, config)
+    if config['train']['edges']['topological']['enabled']:
+        construct_edges_from_file(args.output_file, config)

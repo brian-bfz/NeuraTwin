@@ -296,7 +296,7 @@ class PropNetDiffDenModel(nn.Module):
         self.topk = config['train']['particle']['topk']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges=None, particle_nums=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None):
         """
         Predict particle positions one step into the future.
         
