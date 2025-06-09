@@ -39,12 +39,12 @@ def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, c
         topological_edges = torch.zeros(B, N, N, dtype=torch.float32, device=positions.device)
     elif len(topological_edges.shape) == 2:
         topological_edges = topological_edges.unsqueeze(0)  # [N, N] -> [1, N, N]
+    topological_edges = topological_edges.to(positions.device)
     
     # Ensure tool_mask has correct shape and type
     if not isinstance(tool_mask, torch.Tensor):
-        tool_mask = torch.tensor(tool_mask, dtype=torch.bool)
-    elif tool_mask.dtype == torch.float32:
-        tool_mask = tool_mask.bool()
+        tool_mask = torch.tensor(tool_mask, device=positions.device)
+    tool_mask = tool_mask.to(positions.device)
     
     if len(tool_mask.shape) == 1:
         tool_mask = tool_mask.unsqueeze(0)  # [N] -> [1, N]
@@ -102,7 +102,12 @@ def create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions):
             lineset.lines = o3d.utility.Vector2iVector(edges)
                     
             # Color edges based on type: collision (0) vs topological (1)
-            line_colors = colors[edge_attrs_flat]
+            line_colors = []
+            for attr in edge_attrs_flat:
+                if attr > 0.5:  # Topological edge
+                    line_colors.append(colors[1])  # topological color
+                else:  # Collision edge
+                    line_colors.append(colors[0])  # collision color
                     
             lineset.colors = o3d.utility.Vector3dVector(np.array(line_colors))
             return lineset

@@ -17,6 +17,8 @@ When error pops up, click on the problematic file, and change ```np.float``` to 
 ```python -m PhysTwin.html_video```
 
 ## GNN
+```python -m GNN.dataset.preprocess --data_file```
+
 ```python -m GNN.train.train_gnn_dyn --name```
 
 ```python -m GNN.inference --model --episodes --video```

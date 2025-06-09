@@ -156,16 +156,16 @@ class Visualizer:
         robot_states = states[:, n_obj_particles:, :]
         return object_states, robot_states
     
-    def visualize_object_motion(self, predicted_objects, actual_objects, robot_trajectory, 
+    def visualize_object_motion(self, predicted_states, tool_mask, actual_objects, 
                                episode_num, save_path, topological_edges=None):
         """
         Create 3D visualization comparing predicted vs actual object motion.
         Renders particles as colored point clouds with connectivity edges.
         
         Args:
-            predicted_objects: [timesteps, n_obj, 3] - predicted object trajectory
+            predicted_states: [timesteps, total_particles, 3] - predicted trajectory (objects + robots)
+            tool_mask: [total_particles] - boolean mask (False=object, True=robot)
             actual_objects: [timesteps, n_obj, 3] - ground truth object trajectory  
-            robot_trajectory: [timesteps, n_robot, 3] - robot trajectory for context
             episode_num: int - episode number for labeling
             save_path: str - output video file path
             topological_edges: [N, N] tensor or None - topological edges for object and robot particles
@@ -191,9 +191,14 @@ class Visualizer:
         render_option.point_size = 10.0
 
         # Convert tensors to numpy for Open3D
+        predicted_states = predicted_states.cpu().numpy()
         actual_objects = actual_objects.cpu().numpy()
-        robot_trajectory = robot_trajectory.cpu().numpy()
-        predicted_objects = predicted_objects.cpu().numpy()
+        tool_mask = tool_mask.cpu().numpy()
+        
+        # Split predicted states into objects and robots using tool_mask
+        n_obj = (~tool_mask).sum().item()  # Count False values (objects)
+        pred_objects = predicted_states[:, :n_obj, :]
+        pred_robots = predicted_states[:, n_obj:, :]
         
         # Create point clouds            
         actual_pcd = o3d.geometry.PointCloud()
@@ -201,11 +206,11 @@ class Visualizer:
         actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Red for actual
             
         robot_pcd = o3d.geometry.PointCloud()
-        robot_pcd.points = o3d.utility.Vector3dVector(robot_trajectory[0])
+        robot_pcd.points = o3d.utility.Vector3dVector(pred_robots[0])
         robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
         
         pred_pcd = o3d.geometry.PointCloud()
-        pred_pcd.points = o3d.utility.Vector3dVector(predicted_objects[0])
+        pred_pcd.points = o3d.utility.Vector3dVector(pred_objects[0])
         pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Blue for predicted
 
         # Add geometries to visualizer
@@ -213,7 +218,7 @@ class Visualizer:
         vis.add_geometry(robot_pcd)
         vis.add_geometry(pred_pcd)
 
-        n_frames = min(len(predicted_objects), len(actual_objects), len(robot_trajectory))
+        n_frames = min(len(predicted_states), len(actual_objects))
         print(f"Rendering {n_frames} frames...")
         
         # Set up camera parameters if available
@@ -228,11 +233,6 @@ class Visualizer:
             view_control.convert_from_pinhole_camera_parameters(
                 camera_params, allow_arbitrary=True
             )
-        # Print camera parameters for debugging
-        # print("[gnn_inference] Camera intrinsic:")
-        # print(self.intrinsics[0])
-        # print("[gnn_inference] Camera extrinsic (w2c):")
-        # print(self.w2cs[0])
 
         # Initialize edge sets
         pred_line_set = None
@@ -240,12 +240,12 @@ class Visualizer:
         # Render each frame
         for frame_idx in range(n_frames):
             # Update particle positions
-            pred_obj_pos = predicted_objects[frame_idx]
+            pred_obj_pos = pred_objects[frame_idx]
             actual_obj_pos = actual_objects[frame_idx]
-            robot_pos = robot_trajectory[frame_idx]
+            robot_pos = pred_robots[frame_idx]
             
             if frame_idx == 0:
-                print(f"Sampled object particles: {actual_obj_pos.shape[0]}")
+                print(f"Sampled object particles: {pred_obj_pos.shape[0]}")
                 print(f"Robot particles: {robot_pos.shape[0]}")
             
             # Update point cloud positions
@@ -260,18 +260,9 @@ class Visualizer:
             # Remove old edges
             if pred_line_set is not None:
                 vis.remove_geometry(pred_line_set, reset_bounding_box=False)
-
-            # Create new edges for predicted object and robot
-            both_parts = np.concatenate([pred_obj_pos, robot_pos], axis=0)
-            n_obj = pred_obj_pos.shape[0]
-            n_total = both_parts.shape[0]
             
-            # Create tool mask: False for objects, True for robots
-            tool_mask = np.zeros(n_total, dtype=bool)
-            tool_mask[n_obj:] = True
-                        
             pred_line_set = visualize_edges(
-                both_parts, topological_edges, tool_mask, 
+                predicted_states[frame_idx], topological_edges, tool_mask, 
                 self.adj_thresh, self.topk, False, 
                 [[0.6, 0.3, 0.3], [0.8, 0.4, 0.4]]  # collision, topological
             )
@@ -376,7 +367,7 @@ def main():
             n_robot_particles = (attrs[0] == 1).sum().item()
             
             print(f"Loaded episode with {n_obj_particles} object particles, {n_robot_particles} robot particles")
-            
+                        
             # Run autoregressive rollout prediction
             predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges)
             
@@ -393,9 +384,10 @@ def main():
             
             # Generate video only if --video flag is provided
             if args.video:
+                tool_mask = (attrs[0] > 0.5).bool()  # attrs is 0 for objects, 1 for robots; use first timestep only
                 video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
                 visualizer.visualize_object_motion(
-                    predicted_objects, actual_objects, actual_robots, 
+                    predicted_states, tool_mask, actual_objects, 
                     episode_num, video_path, topological_edges
                 )
                 

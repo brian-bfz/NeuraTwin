@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/sampled_no_edges.h5"
+  file: "PhysTwin/generated_data/sampled_with_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -25,7 +25,7 @@ dataset:
 
 train:
   random_seed: 42
-  n_epoch: 30
+  n_epoch: 10
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
@@ -60,7 +60,7 @@ train:
     folder: "test_no_edges"
   edges:
     topological: 
-      enabled: false
+      enabled: true
       adj_thresh: 0.10
       topk: 10
     collision:  

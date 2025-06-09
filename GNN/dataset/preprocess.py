@@ -85,10 +85,28 @@ def construct_edges_from_file(data_file, config):
     adj_thresh = config['train']['edges']['topological']['adj_thresh']
     topk = config['train']['edges']['topological']['topk']
 
-    # Load data
+    # First, collect all object datasets that need edge construction
+    object_datasets = []
+    with h5py.File(data_file, 'r') as f:
+        def collect_object_datasets(name, obj):
+            if isinstance(obj, h5py.Dataset) and "object" in name:
+                object_datasets.append(name)
+        f.visititems(collect_object_datasets)
+
+    # Now process each dataset and create edges
     with h5py.File(data_file, 'r+') as f:
-        # iterate over all groups in file 
-        f.visititems(lambda name, obj: construct_edges_from_dataset(name, obj, adj_thresh, topk))
+        for dataset_name in object_datasets:
+            points = f[dataset_name]
+            # Use first frame for computing topological edges
+            points_data = points[0, :, :]  # [n_sampled_obj, 3] - first frame positions
+            adj_matrix = construct_edges_from_numpy(points_data, adj_thresh, topk)
+            
+            # Save edges
+            name = dataset_name.split('/')[-1]
+            edge_name = f'{name}_edges'
+            if edge_name in points.parent:
+                del points.parent[edge_name]
+            points.parent.create_dataset(edge_name, data=adj_matrix)
 
 
 if __name__ == "__main__":
