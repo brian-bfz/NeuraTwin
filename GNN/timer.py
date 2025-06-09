@@ -33,6 +33,9 @@ class EpochTimer:
         
         # Update totals for averaging
         self.epoch_count += 1
+        # Add total time to totals
+        self.total_timers['total'] = self.total_timers.get('total', 0.0) + self.total_time
+        # Add individual timer values
         for name, time_val in self.timers.items():
             self.total_timers[name] = self.total_timers.get(name, 0.0) + time_val
     
@@ -56,22 +59,6 @@ class EpochTimer:
         """Get a context manager for timing an operation"""
         return TimerContext(self, name)
     
-    # Backward compatibility methods
-    def time_data_loading(self):
-        return TimerContext(self, 'data_loading')
-    
-    def time_forward(self):
-        return TimerContext(self, 'forward')
-    
-    def time_backward(self):
-        return TimerContext(self, 'backward')
-    
-    def time_rollout(self):
-        return TimerContext(self, 'rollout')
-    
-    def time_edge(self):
-        return TimerContext(self, 'edge')
-    
     def get_summary(self):
         """Get timing summary for current epoch with averages"""
         summary = {
@@ -86,12 +73,13 @@ class EpochTimer:
         
         # Add averages
         if self.epoch_count > 0:
-            summary['avg_total_time'] = (self.total_timers.get('total', 0.0) + self.total_time) / self.epoch_count
+            summary['avg_total_time'] = self.total_timers.get('total', 0.0) / self.epoch_count
             summary['avg_gpu_memory_peak_mb'] = self.gpu_memory_peak
             for name, total_time in self.total_timers.items():
-                avg_time = (total_time + self.timers.get(name, 0.0)) / self.epoch_count
-                summary[f'avg_{name}_time'] = avg_time
-                summary[f'avg_{name}_pct'] = (avg_time / summary['avg_total_time']) * 100 if summary['avg_total_time'] > 0 else 0
+                if name != 'total':  # Skip total since we already calculated it
+                    avg_time = total_time / self.epoch_count
+                    summary[f'avg_{name}_time'] = avg_time
+                    summary[f'avg_{name}_pct'] = (avg_time / summary['avg_total_time']) * 100 if summary['avg_total_time'] > 0 else 0
         
         return summary
     

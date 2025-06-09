@@ -219,8 +219,7 @@ def train():
 
             # Start data loading timing
             if epoch_timer and phase == 'train':
-                data_timer = epoch_timer.time_data_loading()
-                data_timer.__enter__()
+                epoch_timer.start_timer('data_loading')
 
             for i, data in enumerate(dataloaders[phase]):
                 # Data format: B x (n_his + n_roll) x particle_num x 3
@@ -237,7 +236,7 @@ def train():
 
                 # End data loading timing
                 if epoch_timer and phase == 'train':
-                    data_timer.__exit__(None, None, None)
+                    epoch_timer.end_timer('data_loading')
 
                 loss = 0.
 
@@ -245,8 +244,7 @@ def train():
                     
                     # Start forward pass timing
                     if epoch_timer and phase == 'train':
-                        forward_timer = epoch_timer.time_forward()
-                        forward_timer.__enter__()
+                        epoch_timer.start_timer('forward')
 
                     # ============================================================
                     # AUTOREGRESSIVE ROLLOUT PREDICTION
@@ -272,14 +270,13 @@ def train():
                         s_nxt = states[:, n_history + idx_step, :, :]  # B x particle_num x 3
 
                         if epoch_timer and phase == 'train':
-                            rollout_timer = epoch_timer.time_rollout()
-                            rollout_timer.__enter__()
+                            epoch_timer.start_timer('rollout')
 
                         # Predict next state using rollout
                         s_pred = rollout.forward(next_delta)  # [B, particles, 3]
 
                         if epoch_timer and phase == 'train':
-                            rollout_timer.__exit__(None, None, None)
+                            epoch_timer.end_timer('rollout')
 
                         # Calculate loss only for valid particles
                         for j in range(B):
@@ -295,7 +292,7 @@ def train():
                     
                     # End forward pass timing
                     if epoch_timer and phase == 'train':
-                        forward_timer.__exit__(None, None, None)
+                        epoch_timer.end_timer('forward')
 
                 meter_loss.update(loss.item(), B)
 
@@ -306,8 +303,7 @@ def train():
                 if phase == 'train':
                     # Start backward pass timing
                     if epoch_timer:
-                        backward_timer = epoch_timer.time_backward()
-                        backward_timer.__enter__()
+                        epoch_timer.start_timer('backward')
                     
                     optimizer.zero_grad()
                     loss.backward()
@@ -315,7 +311,7 @@ def train():
                     
                     # End backward pass timing
                     if epoch_timer:
-                        backward_timer.__exit__(None, None, None)
+                        epoch_timer.end_timer('backward')
 
                 # ============================================================
                 # LOGGING AND CHECKPOINTING
@@ -337,12 +333,11 @@ def train():
                 
                 # Start data loading timing for next iteration
                 if epoch_timer and phase == 'train':
-                    data_timer = epoch_timer.time_data_loading()
-                    data_timer.__enter__()
+                    epoch_timer.start_timer('data_loading')
 
             # End data loading timing
             if epoch_timer and phase == 'train':
-                data_timer.__exit__(None, None, None)
+                epoch_timer.end_timer('data_loading')
 
             # ============================================================
             # EPOCH-END PROFILING AND LOGGING

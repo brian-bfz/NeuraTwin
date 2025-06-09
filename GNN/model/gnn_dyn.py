@@ -336,32 +336,28 @@ class PropNetDiffDenModel(nn.Module):
                 
         # Construct graph edges based on current particle positions
         if epoch_timer is not None:
-            with epoch_timer.timer('edge'):
-                Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
-                    s_cur, 
-                    self.adj_thresh, 
-                    mask, 
-                    tool_mask, 
-                    topk=self.topk,
-                    connect_tools_all=self.connect_tools_all,
-                    topological_edges=topological_edges
-                )
-        else:
-            Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
-                s_cur, 
-                self.adj_thresh, 
-                mask, 
-                tool_mask, 
-                topk=self.topk,
-                connect_tools_all=self.connect_tools_all,
-                topological_edges=topological_edges
-            )
+            epoch_timer.start_timer('edge')
+        
+        Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
+            s_cur, 
+            self.adj_thresh, 
+            mask, 
+            tool_mask, 
+            topk=self.topk,
+            connect_tools_all=self.connect_tools_all,
+            topological_edges=topological_edges
+        )
+        
+        if epoch_timer is not None:
+            epoch_timer.end_timer('edge')
 
         # Forward pass through GNN
         if epoch_timer is not None:
-            with epoch_timer.timer('gnn_forward'):
-                s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
-        else:
-            s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
+            epoch_timer.start_timer('gnn_forward')
+        
+        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
+        
+        if epoch_timer is not None:
+            epoch_timer.end_timer('gnn_forward')
 
         return s_pred

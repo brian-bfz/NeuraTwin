@@ -1708,8 +1708,9 @@ class InvPhyTrainerWarp:
                 topk = gnn_config['train']['edges']['topological']['topk']
                 
                 # Construct topological edges using first frame positions
-                adj_matrix = construct_edges_from_tensor(initial_positions, adj_thresh, topk)
-                topological_edges = adj_matrix.unsqueeze(0)  # [1, particles, particles]
+                adj_matrix = construct_edges_from_tensor(initial_x[object_indices], adj_thresh, topk)
+                topological_edges = torch.zeros(1, total_particles, total_particles, device=cfg.device)
+                topological_edges[0, :n_object_particles, :n_object_particles] = adj_matrix.unsqueeze(0)  # [1, particles, particles]
                 logger.info(f"Constructed topological edges with adj_thresh={adj_thresh}, topk={topk}")
             else:
                 # Initialize as zero matrix for compatibility

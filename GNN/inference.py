@@ -187,15 +187,15 @@ class Visualizer:
         # Create point clouds            
         actual_pcd = o3d.geometry.PointCloud()
         actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0])
-        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Red for actual
+        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
             
         robot_pcd = o3d.geometry.PointCloud()
         robot_pcd.points = o3d.utility.Vector3dVector(pred_robots[0])
-        robot_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for robot
+        robot_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Red for robot
         
         pred_pcd = o3d.geometry.PointCloud()
         pred_pcd.points = o3d.utility.Vector3dVector(pred_objects[0])
-        pred_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Blue for predicted
+        pred_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for predicted
 
         # Add geometries to visualizer
         vis.add_geometry(actual_pcd)
@@ -248,7 +248,7 @@ class Visualizer:
             pred_line_set = visualize_edges(
                 predicted_states[frame_idx], topological_edges, tool_mask, 
                 self.adj_thresh, self.topk, False, 
-                [[0.2, 0.6, 1.0], [0.3, 0.6, 0.3]]  # light orange (BGR), light green
+                [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]]  # light orange, light green
             )
             
             if pred_line_set is not None:
@@ -262,7 +262,8 @@ class Visualizer:
                 vis.capture_screen_float_buffer(do_render=True)
             )
             static_image = (static_image * 255).astype(np.uint8)
-            out.write(static_image)
+            static_image_bgr = cv2.cvtColor(static_image, cv2.COLOR_RGB2BGR)
+            out.write(static_image_bgr)
                         
             if frame_idx % 10 == 0:
                 print(f"  Rendered frame {frame_idx}/{n_frames}")
