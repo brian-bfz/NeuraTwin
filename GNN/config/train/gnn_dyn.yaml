@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/sampled_with_edges.h5"
+  file: "PhysTwin/generated_data/sampled_with_14_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -25,7 +25,7 @@ dataset:
 
 train:
   random_seed: 42
-  n_epoch: 10
+  n_epoch: 300
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
@@ -46,6 +46,7 @@ train:
     patience: 10 # ReduceLROnPlateau
     threshold_mode: 'rel' # ReduceLROnPlateau
     cooldown: 0 # ReduceLROnPlateau
+    min_lr: 8e-6 # ReduceLROnPlateau
   rollback:
     enabled: true
     patience: 10
@@ -55,17 +56,17 @@ train:
     fps_radius: 0.02
   resume:
     active: false
-    epoch: 28
+    epoch: 10
     iter: 0
     folder: "test_no_edges"
   edges:
     topological: 
       enabled: true
-      adj_thresh: 0.10
-      topk: 10
+      adj_thresh: 0.09
+      topk: 12
     collision:  
-      adj_thresh: 0.10
-      topk: 10
+      adj_thresh: 0.09
+      topk: 12
       connect_tools_all: False
   lam_reg: 2e-4
   lam_sp: 1e-2

@@ -184,7 +184,8 @@ def train():
                 factor=config['train']['lr_scheduler']['factor'],
                 patience=config['train']['lr_scheduler']['patience'],
                 threshold_mode=config['train']['lr_scheduler']['threshold_mode'],
-                cooldown=config['train']['lr_scheduler']['cooldown']
+                cooldown=config['train']['lr_scheduler']['cooldown'],
+                min_lr=config['train']['lr_scheduler']['min_lr']
             )
         elif config['train']['lr_scheduler']['type'] == "StepLR":
             step_size = config['train']['lr_scheduler']['step_size']
