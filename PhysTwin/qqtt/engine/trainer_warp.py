@@ -1725,7 +1725,8 @@ class InvPhyTrainerWarp:
                 initial_deltas, 
                 initial_attrs, 
                 particle_nums,
-                topological_edges=topological_edges
+                topological_edges=topological_edges,
+                first_states=initial_states[-1]
             )
             
             # Initialize GNN prediction with first frame
@@ -1760,8 +1761,8 @@ class InvPhyTrainerWarp:
             tool_mask = torch.zeros(gnn_x.shape[0], dtype=torch.bool, device='cpu')
             tool_mask[n_object_particles:] = True
 
-            # Initialize edge set to None - will be created in the loop
-            gnn_line_set = None
+            # Initialize edge sets to empty list - will be created in the loop
+            gnn_line_sets = []
 
             # Move data to CPU
             topological_edges = topological_edges.squeeze(0).cpu()
@@ -1858,8 +1859,9 @@ class InvPhyTrainerWarp:
                 # Update GNN prediction visualization
                 if gnn_obj_pcd is not None and gnn_x is not None and frame_count % downsample_rate == 0:
                     # Remove old GNN edges
-                    if gnn_line_set is not None:
-                        vis.remove_geometry(gnn_line_set, reset_bounding_box=False)
+                    for line_set in gnn_line_sets:
+                        if line_set is not None:
+                            vis.remove_geometry(line_set, reset_bounding_box=False)
                     
                     # Move data to CPU
                     gnn_x = gnn_x.cpu()
@@ -1875,9 +1877,10 @@ class InvPhyTrainerWarp:
                     vis.update_geometry(gnn_robot_pcd)
                     
                     # Update GNN edges
-                    gnn_line_set = visualize_edges(gnn_x, topological_edges, tool_mask, adj_thresh, topk, False, [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]])  # light orange, light green
-                    if gnn_line_set is not None:
-                        vis.add_geometry(gnn_line_set, reset_bounding_box=False)
+                    gnn_line_sets = visualize_edges(gnn_x, topological_edges, tool_mask, adj_thresh, topk, False, [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]])  # light orange, light green
+                    for line_set in gnn_line_sets:
+                        if line_set is not None:
+                            vis.add_geometry(line_set, reset_bounding_box=False)
                     
                 for i, dynamic_mesh in enumerate(self.dynamic_meshes):
                     dynamic_mesh.vertices = o3d.utility.Vector3dVector(

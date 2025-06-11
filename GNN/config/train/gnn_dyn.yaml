@@ -49,7 +49,7 @@ train:
     min_lr: 0.000008 # ReduceLROnPlateau
   rollback:
     enabled: true
-    patience: 10
+    patience: 8
     threshold: 1.7
   particle:
     nf_effect: 64
