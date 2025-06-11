@@ -140,7 +140,11 @@ def train(rank=None, world_size=None):
         # Other ranks: load config but don't create directories
         config = load_yaml(str(CONFIG_TRAIN_GNN_DYN))
         args = None
-        TRAIN_DIR = None
+        if config['train']['resume']['active']:
+            # Resume from existing checkpoint
+            TRAIN_DIR = os.path.join(GNN_DYN_MODEL_ROOT, config['train']['resume']['folder'])
+        else:
+            TRAIN_DIR = None
         epoch_timer = None
         log_fout = None
 
@@ -188,18 +192,9 @@ def train(rank=None, world_size=None):
     if rank is None or rank == 0:
         print("model #params: %d" % count_trainable_parameters(model))
 
-    # resume training of a saved model (if given)
-    # TODO: resume training from distributed training
-    if config['train']['resume']['active'] and (rank is None or rank == 0):
-        model_path = os.path.join(TRAIN_DIR, 'net_epoch_%d_iter_%d.pth' % (
-            config['train']['resume']['epoch'], config['train']['resume']['iter']))
-        print("Loading saved ckp from %s" % model_path)
-
-        pretrained_dict = torch.load(model_path, weights_only=True)
-        model.load_state_dict(pretrained_dict)
-
     if use_gpu:
         model = model.cuda()
+        
     if rank is not None:
         model = DDP(model, device_ids=[rank])
 
@@ -237,6 +232,61 @@ def train(rank=None, world_size=None):
 
     st_epoch = config['train']['resume']['epoch'] if config['train']['resume']['active'] else 0
     best_valid_loss = np.inf
+    
+    # ========================================================================
+    # RESUME TRAINING FROM CHECKPOINT (MULTI-GPU COMPATIBLE)
+    # ========================================================================
+    
+    if config['train']['resume']['active']:
+        if config['train']['resume']['epoch'] == -1:
+            # Special case: Load the best model and its optimizer/scheduler states
+            if rank is None or rank == 0:
+                print("Loading best model checkpoint...")
+            
+            # Load model state
+            model_path = os.path.join(TRAIN_DIR, 'net_best.pth')
+            if rank is None or rank == 0:
+                print(f"Loading best model from {model_path}")
+            
+            model_state = torch.load(model_path, weights_only=True)
+            if rank is None:
+                model.load_state_dict(model_state)
+            else:
+                model.module.load_state_dict(model_state)
+            
+            # Load optimizer and scheduler states
+            checkpoint_path = os.path.join(TRAIN_DIR, 'checkpoint_best.pth')
+            if os.path.exists(checkpoint_path):
+                checkpoint = torch.load(checkpoint_path, weights_only=True)
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if scheduler and checkpoint.get('scheduler_state_dict'):
+                    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                
+                # Get the best epoch from checkpoint
+                if 'best_epoch' in checkpoint:
+                    st_epoch = checkpoint['best_epoch'] + 1  # Start from next epoch
+                    if rank is None or rank == 0:
+                        print(f"Resuming from best epoch {checkpoint['best_epoch']}, starting epoch {st_epoch}")
+                else:
+                    if rank is None or rank == 0:
+                        print("Warning: best_epoch not found in checkpoint, starting from epoch 0")
+                    st_epoch = 0
+            else:
+                if rank is None or rank == 0:
+                    print(f"Warning: checkpoint file {checkpoint_path} not found, only loading model weights")
+        else:
+            # Regular case: Load specific epoch checkpoint
+            model_path = os.path.join(TRAIN_DIR, 'net_epoch_%d_iter_%d.pth' % (
+                config['train']['resume']['epoch'], config['train']['resume']['iter']))
+            
+            if rank is None or rank == 0:
+                print(f"Loading checkpoint from {model_path}")
+            
+            model_state = torch.load(model_path, weights_only=True)
+            if rank is None:
+                model.load_state_dict(model_state)
+            else:
+                model.module.load_state_dict(model_state)
 
     # Early stopping and rollback configuration
     if config['train']['rollback']['enabled']:
@@ -416,61 +466,82 @@ def train(rank=None, world_size=None):
                     log_fout.flush()
 
             # ============================================================
-            # VALIDATION AND MODEL CHECKPOINTING - ONLY ON RANK 0
+            # VALIDATION AND MODEL CHECKPOINTING
             # ============================================================
 
-            if phase == 'valid' and (rank is None or rank == 0):
-                current_val_loss = meter_loss.avg
-                if config['train']['rollback']['enabled']:
-                    validation_history.append(current_val_loss)
-                
-                # Save best model
-                if current_val_loss < best_valid_loss:
-                    best_valid_loss = current_val_loss
-                    best_epoch = epoch
-                    if rank is None:
-                        torch.save(model.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
-                    else:
-                        torch.save(model.module.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
+            if phase == 'valid':
+                # Validation logic and checkpointing (only on rank 0)
+                if rank is None or rank == 0:
+                    current_val_loss = meter_loss.avg
                     if config['train']['rollback']['enabled']:
-                        torch.save({
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
-                        }, '%s/checkpoint_best.pth' % (TRAIN_DIR))
-                
-                # Check for validation loss spike and rollback
-                if config['train']['rollback']['enabled'] and len(validation_history) >= patience_epochs:
-                    recent_min = np.min(validation_history[-patience_epochs:])
-                    if recent_min > best_valid_loss * rollback_threshold:
-                        print(f"Validation loss spike detected! Rolling back to epoch {best_epoch}")
-                        print(f"Current avg loss: {recent_min:.6f}, Best loss: {best_valid_loss:.6f}")
-                        
-                        # Load the best checkpoint
-                        # TODO: resume training from distributed training
+                        validation_history.append(current_val_loss)
+                    
+                    # Save best model
+                    if current_val_loss < best_valid_loss:
+                        best_valid_loss = current_val_loss
+                        best_epoch = epoch
                         if rank is None:
-                            model.load_state_dict(torch.load('%s/net_best.pth' % (TRAIN_DIR)))
+                            torch.save(model.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
                         else:
-                            model.module.load_state_dict(torch.load('%s/net_best.pth' % (TRAIN_DIR)))
-                        checkpoint = torch.load('%s/checkpoint_best.pth' % (TRAIN_DIR))
-                        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                        if scheduler and checkpoint['scheduler_state_dict']:
-                            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                            torch.save(model.module.state_dict(), '%s/net_best.pth' % (TRAIN_DIR))
+                        if config['train']['rollback']['enabled']:
+                            torch.save({
+                                'best_epoch': best_epoch,
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+                            }, '%s/checkpoint_best.pth' % (TRAIN_DIR))
+                    
+                    # Check for validation loss spike and decide rollback
+                    rollback_needed = False
+                    if config['train']['rollback']['enabled'] and len(validation_history) >= patience_epochs:
+                        recent_min = np.min(validation_history[-patience_epochs:])
+                        if recent_min > best_valid_loss * rollback_threshold:
+                            rollback_needed = True
+                            print(f"Validation loss spike detected! Rolling back to epoch {best_epoch}")
+                            print(f"Current avg loss: {recent_min:.6f}, Best loss: {best_valid_loss:.6f}")
+                else:
+                    # For other ranks, initialize rollback flag
+                    rollback_needed = False
+                
+                # Synchronize rollback decision across all processes
+                if rank is not None:
+                    import torch.distributed as dist
+                    rollback_tensor = torch.tensor([1 if rollback_needed else 0], dtype=torch.int, device='cuda')
+                    dist.broadcast(rollback_tensor, src=0)
+                    rollback_needed = bool(rollback_tensor.item())
+                
+                # Execute rollback on all processes if needed
+                if rollback_needed:
+                    # Load the best checkpoint (all processes)
+                    model_state = torch.load('%s/net_best.pth' % (TRAIN_DIR), weights_only=True)
+                    if rank is None:
+                        model.load_state_dict(model_state)
+                    else:
+                        model.module.load_state_dict(model_state)
+                    
+                    checkpoint = torch.load('%s/checkpoint_best.pth' % (TRAIN_DIR), weights_only=True)
+                    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                    if scheduler and checkpoint.get('scheduler_state_dict'):
+                        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                    
+                    # Reset to best epoch (all processes)
+                    epoch = checkpoint['best_epoch']
+                    if rank is None or rank == 0:
+                        validation_history = validation_history[:epoch+1]  # Trim history
                         
-                        # Reset to best epoch
-                        epoch = best_epoch
-                        validation_history = validation_history[:best_epoch+1]  # Trim history
-                        
-                        log_rollback = f"Rolled back to epoch {best_epoch} with validation loss {best_valid_loss:.6f}"
+                        log_rollback = f"Rolled back to epoch {epoch} with validation loss {best_valid_loss:.6f}"
                         print(log_rollback)
                         if log_fout:
                             log_fout.write(log_rollback + '\n')
                             log_fout.flush()
 
-                # Step the scheduler
+                # Step the scheduler (all processes)
                 if (scheduler is not None) and (config['train']['lr_scheduler']['type'] == "StepLR"):
                     scheduler.step()
                 if (scheduler is not None) and (config['train']['lr_scheduler']['type'] == "ReduceLROnPlateau"):
-                    scheduler.step(meter_loss.avg)
+                    # Only step on rank 0 to maintain consistency
+                    if rank is None or rank == 0:
+                        scheduler.step(meter_loss.avg)
     
     # Clean up log file
     if log_fout:

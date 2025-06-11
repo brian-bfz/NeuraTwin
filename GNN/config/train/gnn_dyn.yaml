@@ -55,10 +55,10 @@ train:
     nf_effect: 64
     fps_radius: 0.02
   resume:
-    active: false
-    epoch: 80
+    active: true
+    epoch: -1
     iter: 0
-    folder: "topk_12_12"
+    folder: "test_mp"
   edges:
     topological: 
       enabled: true
