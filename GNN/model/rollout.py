@@ -8,7 +8,7 @@ class Rollout:
     Assume tensors are already on the correct device and with gradients enabled / disabled.
     """
     
-    def __init__(self, model, config, initial_states, initial_deltas, initial_attrs, particle_num, topological_edges, epoch_timer=None):
+    def __init__(self, model, config, initial_states, initial_deltas, initial_attrs, particle_num, topological_edges, first_states, epoch_timer=None):
         """
         Initialize the predictor with trained model and initial history data.
         
@@ -20,6 +20,7 @@ class Rollout:
             initial_attrs: [batch, particles] - initial attribute
             particle_num: [batch] - total number of particles per batch
             topological_edges: [batch, particles, particles] - adjacency matrix of topological edges
+            first_states: [batch, particles, 3] - first frame states for topological edge computations
             epoch_timer: optional EpochTimer for profiling edge construction time
         """
         self.model = model
@@ -39,6 +40,7 @@ class Rollout:
         self.a_cur = initial_attrs     # [batch, particles]
         self.particle_nums = particle_num # [batch]
         self.topological_edges = topological_edges  # [batch, particles, particles]
+        self.first_states = first_states  # [batch, particles, 3]
         
     def forward(self, next_delta):
         """
@@ -61,7 +63,8 @@ class Rollout:
             self.s_delta,       # [batch, n_history, particles, 3]
             topological_edges=self.topological_edges,  # [batch, particles, particles]
             particle_nums=self.particle_nums,  # [batch]
-            epoch_timer=self.epoch_timer  # optional timer for profiling
+            epoch_timer=self.epoch_timer,  # optional timer for profiling
+            first_states=self.first_states  # [batch, particles, 3]
         )  # [batch, particles, 3]
 
         # Always force robot positions to ground truth

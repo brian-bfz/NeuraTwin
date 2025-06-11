@@ -133,6 +133,7 @@ class ParticleDataset(Dataset):
             attrs: [timesteps, particles] - particle attributes (0=object, 1=robot)
             particle_num: int - total number of sampled particles
             topological_edges: [particles, particles] - adjacency matrix for topological edges (or None)
+            first_states: [particles, 3] - first frame states for topological edge computations
         """
         # Get HDF5 file handle
         f = self._get_hdf5_file()
@@ -171,6 +172,9 @@ class ParticleDataset(Dataset):
         # Combine object and robot particles (objects first, then robots)
         states = torch.cat([obj_trajectory, bot_trajectory], dim=1)
 
+        # Store first frame states (after history padding is applied)
+        first_states = states[self.n_his - 1]  # [total_sampled, 3] - actual first frame
+
         states_delta = torch.zeros(states.shape[0] - 1, states.shape[1], 3)
         # Only robots get actual deltas
         states_delta[:, n_obj_particles:] = bot_trajectory[1:] - bot_trajectory[:-1]
@@ -184,7 +188,7 @@ class ParticleDataset(Dataset):
         print(f"Episode {episode_idx}: {len(frame_indices)} timesteps (+ {self.n_his-1} history frames padding), "
               f"Objects: {n_obj_particles} sampled, Robots: {n_bot_particles} sampled")
         
-        return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float()
+        return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float(), first_states.float()
 
     def __getitem__(self, idx):
         """
@@ -200,6 +204,7 @@ class ParticleDataset(Dataset):
             attrs: [time, particles] - particle attributes
             particle_num: int - number of particles in this sample
             topological_edges: [particles, particles] - adjacency matrix for topological edges
+            first_states: [particles, 3] - first frame states for topological edge computations
         """
         # Calculate which episode and timestep this index corresponds to
         idx_episode = idx // self.offset + self.epi_st_idx
@@ -235,6 +240,9 @@ class ParticleDataset(Dataset):
         # Combine sampled particles: [object_particles, robot_particles]
         states = torch.cat([object_data, robot_data], dim=1)  # [time, total_sampled, 3]
         
+        # Store first frame states for topological edge computations
+        first_states = states[0]  # [total_sampled, 3]
+        
         # Apply data augmentation noise to history frames only
         if self.add_randomness:
             noise = torch.randn_like(states[:self.n_his]) * self.state_noise
@@ -256,7 +264,7 @@ class ParticleDataset(Dataset):
         attrs = torch.zeros(n_frames, particle_num)
         attrs[:, n_object:] = 1.0   # Robot particles
                 
-        return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float()
+        return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float(), first_states.float()
 
 # ============================================================================
 # LEGACY TESTING AND CALIBRATION FUNCTIONS

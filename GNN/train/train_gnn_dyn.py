@@ -32,12 +32,13 @@ def collate_fn(data):
     Pads sequences to maximum particle count in batch and handles temporal structure.
     
     Args:
-        data: list of tuples - [(states, states_delta, attrs, particle_num, topological_edges), ...] where:
+        data: list of tuples - [(states, states_delta, attrs, particle_num, topological_edges, first_states), ...] where:
             states: [particle_num, time, 3] - particle positions over time
             states_delta: [particle_num, time-1, 3] - particle displacements
             attrs: [particle_num, time] - particle attributes (0=object, 1=robot)
             particle_num: int - number of particles in this sample
             topological_edges: [particle_num, particle_num] - adjacency matrix for topological edges
+            first_states: [particle_num, 3] - first frame states for topological edge computations
             
     Returns:
         states_tensor: [batch_size, time, max_particles, 3] - padded position sequences
@@ -45,8 +46,9 @@ def collate_fn(data):
         attr: [batch_size, time, max_particles] - padded attribute sequences
         particle_num_tensor: [batch_size] - particle counts per sample
         topological_edges_tensor: [batch_size, max_particles, max_particles] - padded topological edges
+        first_states_tensor: [batch_size, max_particles, 3] - padded first frame states
     """
-    states, states_delta, attrs, particle_num, topological_edges = zip(*data)
+    states, states_delta, attrs, particle_num, topological_edges, first_states = zip(*data)
     max_len = max(particle_num)  # Maximum particles in this batch
     batch_size = len(data)
     n_time, _, n_dim = states[0].shape
@@ -57,6 +59,7 @@ def collate_fn(data):
     attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
     particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
     topological_edges_tensor = torch.zeros((batch_size, max_len, max_len), dtype=torch.float32)
+    first_states_tensor = torch.zeros((batch_size, max_len, n_dim), dtype=torch.float32)
 
     # Fill tensors with actual data (rest remains zero-padded)
     for i in range(len(data)):
@@ -64,8 +67,9 @@ def collate_fn(data):
         states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
         attr[i, :, :particle_num[i]] = attrs[i]
         topological_edges_tensor[i, :particle_num[i], :particle_num[i]] = topological_edges[i]
+        first_states_tensor[i, :particle_num[i], :] = first_states[i]
 
-    return states_tensor, states_delta_tensor, attr, particle_num_tensor, topological_edges_tensor
+    return states_tensor, states_delta_tensor, attr, particle_num_tensor, topological_edges_tensor, first_states_tensor
 
 # ============================================================================
 # MAIN TRAINING FUNCTION
@@ -324,7 +328,7 @@ def train(rank=None, world_size=None):
 
             for i, data in enumerate(dataloaders[phase]):
                 # Data format: B x (n_his + n_roll) x particle_num x 3
-                states, states_delta, attrs, particle_nums, topological_edges = data
+                states, states_delta, attrs, particle_nums, topological_edges, first_states = data
 
                 B, length, max_particles, _ = states.size()
                 assert length == n_rollout + n_history
@@ -334,6 +338,7 @@ def train(rank=None, world_size=None):
                     attrs = attrs.cuda()
                     states_delta = states_delta.cuda()
                     topological_edges = topological_edges.cuda()
+                    first_states = first_states.cuda()
 
                 # End data loading timing (only on rank 0)
                 if epoch_timer and phase == 'train' and (rank is None or rank == 0):
@@ -360,6 +365,7 @@ def train(rank=None, world_size=None):
                         attrs[:, n_history - 1, :],          # [B, particles]
                         particle_nums,           # [B]
                         topological_edges,       # [B, particles, particles]
+                        first_states,            # [B, particles, 3]
                         epoch_timer=epoch_timer if phase == 'train' and (rank is None or rank == 0) else None  # Pass timer for profiling
                     )
 

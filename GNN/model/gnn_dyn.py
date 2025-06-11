@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import time
-from ..utils import construct_edges_with_attrs
+from ..utils import construct_collision_edges, construct_topological_edges
 
 # ============================================================================
 # NEURAL NETWORK MODULES
@@ -38,6 +38,86 @@ class RelationEncoder(nn.Module):
         """
         Args:
             x: [batch_size, n_relations, input_size] - relation features
+            
+        Returns:
+            [batch_size, n_relations, output_size] - encoded relation embeddings
+        """
+        B, N, D = x.size()
+        x = self.model(x.view(B * N, D))
+        return x.view(B, N, self.output_size)
+
+
+class CollisionEncoder(nn.Module):
+    """
+    Encodes collision edge features between connected particles.
+    Input: attributes of both particles (2) + position difference (3) = 5 dimensions
+    """
+    
+    def __init__(self, hidden_size, output_size):
+        """
+        Args:
+            hidden_size: int - dimension of hidden layers
+            output_size: int - dimension of output relation embeddings
+        """
+        super(CollisionEncoder, self).__init__()
+
+        self.input_size = 5  # attributes (2) + position difference (3)
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+
+        self.model = nn.Sequential(
+            nn.Linear(self.input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, output_size),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x: [batch_size, n_relations, 5] - collision relation features
+            
+        Returns:
+            [batch_size, n_relations, output_size] - encoded relation embeddings
+        """
+        B, N, D = x.size()
+        x = self.model(x.view(B * N, D))
+        return x.view(B, N, self.output_size)
+
+
+class TopoEncoder(nn.Module):
+    """
+    Encodes topological edge features between connected particles.
+    Input: attributes of both particles (2) + edge length in first frame (1) + current position diff / first frame edge length (3) = 6 dimensions
+    """
+    
+    def __init__(self, hidden_size, output_size):
+        """
+        Args:
+            hidden_size: int - dimension of hidden layers
+            output_size: int - dimension of output relation embeddings
+        """
+        super(TopoEncoder, self).__init__()
+
+        self.input_size = 6  # attributes (2) + first edge length (1) + normalized position diff (3)
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+
+        self.model = nn.Sequential(
+            nn.Linear(self.input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, output_size),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x: [batch_size, n_relations, 6] - topological relation features
             
         Returns:
             [batch_size, n_relations, output_size] - encoded relation embeddings
@@ -191,10 +271,9 @@ class PropModuleDiffDen(nn.Module):
         self.particle_encoder = ParticleEncoder(
             3 * self.n_history + 1, nf_effect, nf_effect)
 
-        # Relation encoder:
-        # Input: attributes of both particles (2) + position difference (3) + edge attributes (1)
-        self.relation_encoder = RelationEncoder(
-            2 + 3 + 1, nf_effect, nf_effect)
+        # Separate encoders for collision and topological edges
+        self.collision_encoder = CollisionEncoder(nf_effect, nf_effect)
+        self.topo_encoder = TopoEncoder(nf_effect, nf_effect)
 
         # Propagators for message passing
         self.particle_propagator = Propagator(
@@ -207,24 +286,26 @@ class PropModuleDiffDen(nn.Module):
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
-    def forward(self, a_cur, s_cur, s_delta, Rr, Rs, edge_attrs, verbose=False):
+    def forward(self, a_cur, s_cur, s_delta, Rr_collision, Rs_collision, Rr_topo, Rs_topo, first_edge_lengths, first_states, verbose=False):
         """
-        Forward pass of the GNN dynamics model.
+        Forward pass of the GNN dynamics model with separate collision and topological encoders.
         
         Args:
             a_cur: (B, particle_num) - current particle attributes
             s_cur: (B, particle_num, 3) - current positions  
             s_delta: (B, particle_num, 3) - particle displacements over history
-            Rr: (B, rel_num, particle_num) - receiver matrix for graph edges
-            Rs: (B, rel_num, particle_num) - sender matrix for graph edges
-            edge_attrs: (B, rel_num, 1) - edge attributes (1 for topological, 0 for collision)
+            Rr_collision: (B, n_collision, particle_num) - receiver matrix for collision edges
+            Rs_collision: (B, n_collision, particle_num) - sender matrix for collision edges
+            Rr_topo: (B, n_topo, particle_num) - receiver matrix for topological edges
+            Rs_topo: (B, n_topo, particle_num) - sender matrix for topological edges
+            first_edge_lengths: (B, n_topo) - edge lengths in first frame for topological edges
+            first_states: (B, particle_num, 3) - first frame positions
             verbose: bool - whether to print debug information
             
         Returns:
             (B, particle_num, 3) - predicted next particle positions
         """
         B, N = a_cur.size()
-        _, rel_num, _ = Rr.size()
         nf_effect = self.nf_effect
         pstep = 3  # Number of message passing steps
 
@@ -234,39 +315,92 @@ class PropModuleDiffDen(nn.Module):
         # Flatten displacement history for particle encoder
         s_delta_flat = s_delta.reshape(B, N, -1)  # B x particle_num x (3 * n_history)
 
-        Rr_t = Rr.transpose(1, 2) # TODO: add .continuous()? # B x particle_num x rel_num
-        
-        # Compute relation features using edge matrices
-        a_cur_r = Rr.bmm(a_cur[..., None])  # B x rel_num x 1 (receiver attributes)
-        a_cur_s = Rs.bmm(a_cur[..., None])  # B x rel_num x 1 (sender attributes)
-        s_cur_r = Rr.bmm(s_cur)  # B x rel_num x 3 (receiver positions)
-        s_cur_s = Rs.bmm(s_cur)  # B x rel_num x 3 (sender positions)
-
         # Encode particle features (history-aware)
         particle_encode = self.particle_encoder(
             torch.cat([s_delta_flat, a_cur[..., None]], 2))  # B x particle_num x nf_effect
         particle_effect = particle_encode
 
-        # Encode relation features (current frame only)
-        relation_encode = self.relation_encoder(
-            torch.cat([a_cur_r, a_cur_s, s_cur_r - s_cur_s, edge_attrs], 2))  # B x rel_num x nf_effect
+        # =====================================
+        # COLLISION EDGE ENCODING
+        # =====================================
+        collision_encode = None
+        if Rr_collision.shape[1] > 0:  # Check if there are collision edges
+            # Compute collision relation features
+            a_cur_r_collision = Rr_collision.bmm(a_cur[..., None])  # B x n_collision x 1
+            a_cur_s_collision = Rs_collision.bmm(a_cur[..., None])  # B x n_collision x 1
+            s_cur_r_collision = Rr_collision.bmm(s_cur)  # B x n_collision x 3
+            s_cur_s_collision = Rs_collision.bmm(s_cur)  # B x n_collision x 3
 
-        # Message passing iterations
-        for i in range(pstep):
-            # Aggregate particle effects at relation endpoints
-            effect_r = Rr.bmm(particle_effect)  # B x rel_num x nf_effect
-            effect_s = Rs.bmm(particle_effect)  # B x rel_num x nf_effect
+            # Encode collision relation features: attributes (2) + position difference (3)
+            collision_encode = self.collision_encoder(
+                torch.cat([a_cur_r_collision, a_cur_s_collision, s_cur_r_collision - s_cur_s_collision], 2)
+            )  # B x n_collision x nf_effect
+
+        # =====================================
+        # TOPOLOGICAL EDGE ENCODING
+        # =====================================
+        topo_encode = None
+        if Rr_topo.shape[1] > 0:  # Check if there are topological edges
+            # Compute topological relation features
+            a_cur_r_topo = Rr_topo.bmm(a_cur[..., None])  # B x n_topo x 1
+            a_cur_s_topo = Rs_topo.bmm(a_cur[..., None])  # B x n_topo x 1
+            s_cur_r_topo = Rr_topo.bmm(s_cur)  # B x n_topo x 3
+            s_cur_s_topo = Rs_topo.bmm(s_cur)  # B x n_topo x 3
+
+            # Current position difference
+            current_pos_diff = s_cur_r_topo - s_cur_s_topo  # B x n_topo x 3
             
-            # Update relation effects
-            effect_rel = self.relation_propagator(
-                torch.cat([relation_encode, effect_r, effect_s], 2))  # B x rel_num x nf_effect
+            # Normalize by first frame edge length (add small epsilon to avoid division by zero)
+            first_edge_lengths_expanded = first_edge_lengths.unsqueeze(-1)  # B x n_topo x 1
+            normalized_pos_diff = current_pos_diff / (first_edge_lengths_expanded + 1e-8)  # B x n_topo x 3
 
-            # Aggregate relation effects back to particles
-            effect_rel_agg = Rr_t.bmm(effect_rel)  # B x particle_num x nf_effect
+            # Encode topological relation features: attributes (2) + first edge length (1) + normalized position diff (3)
+            topo_encode = self.topo_encoder(
+                torch.cat([a_cur_r_topo, a_cur_s_topo, first_edge_lengths_expanded, normalized_pos_diff], 2)
+            )  # B x n_topo x nf_effect
+
+        # =====================================
+        # MESSAGE PASSING
+        # =====================================
+        for i in range(pstep):
+            # Prepare for aggregating relation effects
+            total_effect_agg = torch.zeros_like(particle_effect)  # B x particle_num x nf_effect
+            
+            # Process collision edges
+            if collision_encode is not None:
+                # Aggregate particle effects at collision edge endpoints
+                effect_r_collision = Rr_collision.bmm(particle_effect)  # B x n_collision x nf_effect
+                effect_s_collision = Rs_collision.bmm(particle_effect)  # B x n_collision x nf_effect
+                
+                # Update collision edge effects
+                effect_collision = self.relation_propagator(
+                    torch.cat([collision_encode, effect_r_collision, effect_s_collision], 2)
+                )  # B x n_collision x nf_effect
+
+                # Aggregate collision effects back to particles
+                Rr_collision_t = Rr_collision.transpose(1, 2)  # B x particle_num x n_collision
+                effect_collision_agg = Rr_collision_t.bmm(effect_collision)  # B x particle_num x nf_effect
+                total_effect_agg += effect_collision_agg
+
+            # Process topological edges
+            if topo_encode is not None:
+                # Aggregate particle effects at topological edge endpoints
+                effect_r_topo = Rr_topo.bmm(particle_effect)  # B x n_topo x nf_effect
+                effect_s_topo = Rs_topo.bmm(particle_effect)  # B x n_topo x nf_effect
+                
+                # Update topological edge effects
+                effect_topo = self.relation_propagator(
+                    torch.cat([topo_encode, effect_r_topo, effect_s_topo], 2)
+                )  # B x n_topo x nf_effect
+
+                # Aggregate topological effects back to particles
+                Rr_topo_t = Rr_topo.transpose(1, 2)  # B x particle_num x n_topo
+                effect_topo_agg = Rr_topo_t.bmm(effect_topo)  # B x particle_num x nf_effect
+                total_effect_agg += effect_topo_agg
             
             # Update particle effects with residual connection
             particle_effect = self.particle_propagator(
-                torch.cat([particle_encode, effect_rel_agg], 2),
+                torch.cat([particle_encode, total_effect_agg], 2),
                 residual=particle_effect)
 
         # Predict position changes
@@ -295,7 +429,7 @@ class PropNetDiffDenModel(nn.Module):
         self.connect_tools_all = config['train']['edges']['collision']['connect_tools_all']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None, epoch_timer=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None, epoch_timer=None, first_states=None):
         """
         Predict particle positions one step into the future.
         
@@ -308,6 +442,7 @@ class PropNetDiffDenModel(nn.Module):
             topological_edges: (B, particle_num, particle_num) - adjacency matrix of topological edges
             particle_nums: (B,) - number of valid particles per batch sample
             epoch_timer: optional EpochTimer for profiling edge construction time
+            first_states: (B, particle_num, 3) - first frame states for topological edge computations
             
         Returns:
             (B, particle_num, 3) - predicted next particle positions
@@ -338,7 +473,8 @@ class PropNetDiffDenModel(nn.Module):
         if epoch_timer is not None:
             epoch_timer.start_timer('edge')
         
-        Rr_batch, Rs_batch, edge_attrs = construct_edges_with_attrs(
+        # Construct collision edges (excluding topological edges)
+        Rr_collision, Rs_collision = construct_collision_edges(
             s_cur, 
             self.adj_thresh, 
             mask, 
@@ -348,14 +484,26 @@ class PropNetDiffDenModel(nn.Module):
             topological_edges=topological_edges
         )
         
+        # Construct topological edges with first frame information
+        Rr_topo, Rs_topo, first_edge_lengths = construct_topological_edges(
+            topological_edges, 
+            first_states
+        )
+        
         if epoch_timer is not None:
             epoch_timer.end_timer('edge')
 
-        # Forward pass through GNN
+        # Forward pass through GNN with separate edge types
         if epoch_timer is not None:
             epoch_timer.start_timer('gnn_forward')
         
-        s_pred = self.model.forward(a_cur, s_cur, s_delta, Rr_batch, Rs_batch, edge_attrs)
+        s_pred = self.model.forward(
+            a_cur, s_cur, s_delta, 
+            Rr_collision, Rs_collision, 
+            Rr_topo, Rs_topo, 
+            first_edge_lengths, 
+            first_states
+        )
         
         if epoch_timer is not None:
             epoch_timer.end_timer('gnn_forward')
