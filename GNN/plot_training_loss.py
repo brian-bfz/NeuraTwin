@@ -9,41 +9,36 @@ from .paths import *
 
 def find_log_files(model_dir):
     """
-    Find all log files for a model, including resume logs
+    Find all log files for a model, including resume logs.
+    Sort by modification time to handle pauses and rollbacks properly.
     
     Returns:
-    - List of log file paths sorted by creation/resume order
+    - List of log file paths sorted by modification time
     """
     log_files = []
     
-    # Main log file
-    main_log = os.path.join(model_dir, "log.txt")
-    if os.path.exists(main_log):
-        log_files.append(main_log)
+    # Find all log files (any txt file starting with 'log')
+    log_pattern = os.path.join(model_dir, "log*.txt")
+    all_logs = glob.glob(log_pattern)
     
-    # Resume log files - pattern: log_resume_epoch_{n_epoch}_iter_0
-    resume_pattern = os.path.join(model_dir, "log_resume_epoch_*_iter_0.txt")
-    resume_logs = glob.glob(resume_pattern)
+    # Get modification times and sort by them
+    log_files_with_time = []
+    for log_path in all_logs:
+        if os.path.exists(log_path):
+            mod_time = os.path.getmtime(log_path)
+            log_files_with_time.append((mod_time, log_path))
     
-    # Sort resume logs by epoch number
-    resume_logs_with_epoch = []
-    for log_path in resume_logs:
-        filename = os.path.basename(log_path)
-        epoch_match = re.search(r'log_resume_epoch_(\d+)_iter_0', filename)
-        if epoch_match:
-            epoch_num = int(epoch_match.group(1))
-            resume_logs_with_epoch.append((epoch_num, log_path))
-    
-    # Sort by epoch number and add to log_files
-    resume_logs_with_epoch.sort(key=lambda x: x[0])
-    for epoch_num, log_path in resume_logs_with_epoch:
-        log_files.append(log_path)
+    # Sort by modification time (earliest first)
+    log_files_with_time.sort(key=lambda x: x[0])
+    log_files = [log_path for mod_time, log_path in log_files_with_time]
     
     return log_files
 
 def parse_training_log(model_dir):
     """
-    Parse all training log files (including resume logs) and extract loss information
+    Parse all training log files (including resume logs) and extract loss information.
+    If there are multiple entries for the same epoch, use the latest one from the 
+    most recently modified log file.
     
     Returns:
     - epochs: list of epoch numbers
@@ -52,17 +47,12 @@ def parse_training_log(model_dir):
     - best_valid_losses: list of best validation losses per epoch
     """
     
-    epochs = []
-    train_losses = []
-    valid_losses = []
-    best_valid_losses = []
-    
-    # Find all log files
+    # Find all log files sorted by modification time
     log_files = find_log_files(model_dir)
     
     if not log_files:
         print(f"Warning: No log files found in {model_dir}")
-        return epochs, train_losses, valid_losses, best_valid_losses
+        return [], [], [], []
     
     print(f"Found {len(log_files)} log file(s):")
     for log_file in log_files:
@@ -72,7 +62,10 @@ def parse_training_log(model_dir):
     train_pattern = r'train \[(\d+)/\d+\] Loss: ([\d.]+), Best valid: ([\d.]+|inf)'
     valid_pattern = r'valid \[(\d+)/\d+\] Loss: ([\d.]+), Best valid: ([\d.]+|inf)'
     
-    # Parse each log file
+    # Dictionaries to store latest entry for each epoch
+    epoch_data = {}  # epoch -> {train_loss, valid_loss, best_valid, log_file}
+    
+    # Parse each log file in order (earliest to latest modification time)
     for log_path in log_files:
         print(f"Parsing: {os.path.basename(log_path)}")
         
@@ -87,9 +80,14 @@ def parse_training_log(model_dir):
                     loss = float(train_match.group(2))
                     best_valid = float(train_match.group(3)) if train_match.group(3) != 'inf' else np.inf
                     
-                    epochs.append(epoch)
-                    train_losses.append(loss)
-                    best_valid_losses.append(best_valid)
+                    # Initialize or update epoch data
+                    if epoch not in epoch_data:
+                        epoch_data[epoch] = {}
+                    epoch_data[epoch].update({
+                        'train_loss': loss,
+                        'best_valid': best_valid,
+                        'log_file': os.path.basename(log_path)
+                    })
                 
                 # Match validation epoch summary
                 valid_match = re.search(valid_pattern, line)
@@ -97,17 +95,34 @@ def parse_training_log(model_dir):
                     epoch = int(valid_match.group(1))
                     loss = float(valid_match.group(2))
                     
-                    valid_losses.append(loss)
+                    # Initialize or update epoch data
+                    if epoch not in epoch_data:
+                        epoch_data[epoch] = {}
+                    epoch_data[epoch].update({
+                        'valid_loss': loss,
+                        'log_file': os.path.basename(log_path)
+                    })
     
-    # Sort by epoch number (in case files were parsed out of order)
-    if epochs:
-        combined = list(zip(epochs, train_losses, valid_losses, best_valid_losses))
-        combined.sort(key=lambda x: x[0])
-        epochs, train_losses, valid_losses, best_valid_losses = zip(*combined)
-        epochs = list(epochs)
-        train_losses = list(train_losses)
-        valid_losses = list(valid_losses)
-        best_valid_losses = list(best_valid_losses)
+    # Convert to sorted lists
+    epochs = []
+    train_losses = []
+    valid_losses = []
+    best_valid_losses = []
+    
+    if epoch_data:
+        sorted_epochs = sorted(epoch_data.keys())
+        for epoch in sorted_epochs:
+            data = epoch_data[epoch]
+            if 'train_loss' in data and 'valid_loss' in data:
+                epochs.append(epoch)
+                train_losses.append(data['train_loss'])
+                valid_losses.append(data['valid_loss'])
+                best_valid_losses.append(data['best_valid'])
+    
+    # Report any duplicate epochs that were resolved
+    duplicate_epochs = [epoch for epoch in epoch_data.keys() if epoch_data[epoch].get('log_file')]
+    if len(duplicate_epochs) != len(set(duplicate_epochs)):
+        print(f"Note: Resolved duplicate entries for some epochs using latest log file data")
     
     return epochs, train_losses, valid_losses, best_valid_losses
 

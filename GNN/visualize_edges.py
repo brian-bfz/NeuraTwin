@@ -48,5 +48,5 @@ if __name__ == "__main__":
     colors = [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]]
 
     # Visualize edges
-    line_set = visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, False, colors)
-    o3d.visualization.draw_geometries([line_set])
+    line_sets = visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, False, colors)
+    o3d.visualization.draw_geometries(line_sets)

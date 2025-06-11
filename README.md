@@ -21,6 +21,8 @@ If error pops up for urdfpy, click on the problematic file, and change ```np.flo
 
 ```python -m GNN.train.train_gnn_dyn --name```
 
+```CUDA_VISIBLE_DEVICES=0 python -m GNN.train.train_gnn_dyn```
+
 ```python -m GNN.inference --model --episodes --video```
 
 ```python -m GNN.html_video --model```

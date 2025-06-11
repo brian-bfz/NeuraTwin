@@ -75,11 +75,17 @@ def collate_fn(data):
 # MAIN TRAINING FUNCTION
 # ============================================================================
 
-def train(rank=None, world_size=None):
+def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
     """
     Main training loop for GNN dynamics model with autoregressive rollout.
     Handles model initialization, data loading, training with validation,
     learning rate scheduling, early stopping, and checkpoint management.
+    
+    Args:
+        rank: int - process rank for distributed training (None for single GPU)
+        world_size: int - total number of processes for distributed training
+        TRAIN_DIR: str - training directory path
+        profiling: bool - enable timing profiling
     """
 
     # ========================================================================
@@ -89,50 +95,14 @@ def train(rank=None, world_size=None):
         ddp_setup(rank, world_size)
 
     # ========================================================================
-    # ARGUMENT PARSING AND DIRECTORY SETUP - ONLY ON RANK 0
+    # LOAD CONFIG AND SETUP LOGGING
     # ========================================================================
+    config = load_yaml(str(CONFIG_TRAIN_GNN_DYN))
+    
     if rank is None or rank == 0:
-        # Parse command line arguments
-        parser = argparse.ArgumentParser(description='Train GNN dynamics model')
-        parser.add_argument('--name', type=str, default=None,
-                           help='Training run name. If not provided, uses timestamp (YYYY-MM-DD-hh-mm-ss-ms)')
-        parser.add_argument('--profiling', action='store_true',
-                           help='Enable timing profiling (logs timing breakdown each epoch)')
-        args = parser.parse_args()
-
-        # Load training configuration
-        config = load_yaml(str(CONFIG_TRAIN_GNN_DYN))
-        
-        # Setup training directory
-        TRAIN_ROOT = GNN_DYN_MODEL_ROOT
-        
-        if config['train']['resume']['active']:
-            # Resume from existing checkpoint
-            TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['resume']['folder'])
-        else:
-            # Create new training directory
-            if args.name:
-                train_name = args.name
-                TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
-                
-                # Check if directory exists and is not empty
-                if os.path.exists(TRAIN_DIR) and os.listdir(TRAIN_DIR):
-                    print(f"Error: Training directory '{TRAIN_DIR}' already exists and is not empty!")
-                    print(f"Please choose a different name or remove the existing directory.")
-                    if rank is not None:
-                        destroy_process_group()
-                    return
-            else:
-                train_name = YYYY_MM_DD_hh_mm_ss_ms()
-                TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
-        
-        os.system('mkdir -p ' + TRAIN_DIR)
-        save_yaml(config, os.path.join(TRAIN_DIR, "config.yaml"))
-        print(f"Training directory: {TRAIN_DIR}")
-        
         # Initialize profiling and logging
-        epoch_timer = EpochTimer() if args.profiling else None
-        if args.profiling:
+        epoch_timer = EpochTimer() if profiling else None
+        if profiling:
             print("Profiling enabled - will log timing breakdown each epoch")
 
         if not config['train']['resume']['active']:
@@ -141,14 +111,6 @@ def train(rank=None, world_size=None):
             log_fout = open(os.path.join(TRAIN_DIR, 'log_resume_epoch_%d_iter_%d.txt' % (
                 config['train']['resume']['epoch'], config['train']['resume']['iter'])), 'w')
     else:
-        # Other ranks: load config but don't create directories
-        config = load_yaml(str(CONFIG_TRAIN_GNN_DYN))
-        args = None
-        if config['train']['resume']['active']:
-            # Resume from existing checkpoint
-            TRAIN_DIR = os.path.join(GNN_DYN_MODEL_ROOT, config['train']['resume']['folder'])
-        else:
-            TRAIN_DIR = None
         epoch_timer = None
         log_fout = None
 
@@ -275,6 +237,10 @@ def train(rank=None, world_size=None):
                     if rank is None or rank == 0:
                         print("Warning: best_epoch not found in checkpoint, starting from epoch 0")
                     st_epoch = 0
+                
+                # Load best validation loss if available
+                if 'best_valid_loss' in checkpoint:
+                    best_valid_loss = checkpoint['best_valid_loss']
             else:
                 if rank is None or rank == 0:
                     print(f"Warning: checkpoint file {checkpoint_path} not found, only loading model weights")
@@ -291,6 +257,13 @@ def train(rank=None, world_size=None):
                 model.load_state_dict(model_state)
             else:
                 model.module.load_state_dict(model_state)
+            
+            # Try to load best validation loss from checkpoint_best.pth if available
+            checkpoint_best_path = os.path.join(TRAIN_DIR, 'checkpoint_best.pth')
+            if os.path.exists(checkpoint_best_path):
+                checkpoint_best = torch.load(checkpoint_best_path, weights_only=True)
+                if 'best_valid_loss' in checkpoint_best:
+                    best_valid_loss = checkpoint_best['best_valid_loss']
 
     # Early stopping and rollback configuration
     if config['train']['rollback']['enabled']:
@@ -318,12 +291,12 @@ def train(rank=None, world_size=None):
                 model.train(phase == 'train')
             meter_loss = AverageMeter()
             
-            # Start epoch timing (only on rank 0)
-            if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+            # Start epoch timing
+            if epoch_timer and phase == 'train':
                 epoch_timer.start_epoch()
 
-            # Start data loading timing (only on rank 0)
-            if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+            # Start data loading timing
+            if epoch_timer and phase == 'train':
                 epoch_timer.start_timer('data_loading')
 
             for i, data in enumerate(dataloaders[phase]):
@@ -340,16 +313,16 @@ def train(rank=None, world_size=None):
                     topological_edges = topological_edges.cuda()
                     first_states = first_states.cuda()
 
-                # End data loading timing (only on rank 0)
-                if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+                # End data loading timing
+                if epoch_timer and phase == 'train':
                     epoch_timer.end_timer('data_loading')
 
                 loss = 0.
 
                 with torch.set_grad_enabled(phase == 'train'):
                     
-                    # Start forward pass timing (only on rank 0)
-                    if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+                    # Start forward pass timing
+                    if epoch_timer and phase == 'train':
                         epoch_timer.start_timer('forward')
 
                     # ============================================================
@@ -366,7 +339,7 @@ def train(rank=None, world_size=None):
                         particle_nums,           # [B]
                         topological_edges,       # [B, particles, particles]
                         first_states,            # [B, particles, 3]
-                        epoch_timer=epoch_timer if phase == 'train' and (rank is None or rank == 0) else None  # Pass timer for profiling
+                        epoch_timer=epoch_timer if phase == 'train' else None  # Pass timer for profiling
                     )
 
                     for idx_step in range(n_rollout):
@@ -376,13 +349,13 @@ def train(rank=None, world_size=None):
                         # Ground truth next state 
                         s_nxt = states[:, n_history + idx_step, :, :]  # B x particle_num x 3
 
-                        if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+                        if epoch_timer and phase == 'train':
                             epoch_timer.start_timer('rollout')
 
                         # Predict next state using rollout
                         s_pred = rollout.forward(next_delta)  # [B, particles, 3]
 
-                        if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+                        if epoch_timer and phase == 'train':
                             epoch_timer.end_timer('rollout')
 
                         # Calculate loss only for valid particles
@@ -395,8 +368,8 @@ def train(rank=None, world_size=None):
                     # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)
                     
-                    # End forward pass timing (only on rank 0)
-                    if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+                    # End forward pass timing
+                    if epoch_timer and phase == 'train':
                         epoch_timer.end_timer('forward')
 
                 meter_loss.update(loss.item(), B)
@@ -406,16 +379,16 @@ def train(rank=None, world_size=None):
                 # ============================================================
                 
                 if phase == 'train':
-                    # Start backward pass timing (only on rank 0)
-                    if epoch_timer and (rank is None or rank == 0):
+                    # Start backward pass timing
+                    if epoch_timer:
                         epoch_timer.start_timer('backward')
                     
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
                     
-                    # End backward pass timing (only on rank 0)
-                    if epoch_timer and (rank is None or rank == 0):
+                    # End backward pass timing
+                    if epoch_timer:
                         epoch_timer.end_timer('backward')
 
                 # ============================================================
@@ -440,19 +413,19 @@ def train(rank=None, world_size=None):
                     else:
                         torch.save(model.module.state_dict(), '%s/net_epoch_%d_iter_%d.pth' % (TRAIN_DIR, epoch, i))
                 
-                # Start data loading timing for next iteration (only on rank 0)
-                if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+                # Start data loading timing for next iteration
+                if epoch_timer and phase == 'train':
                     epoch_timer.start_timer('data_loading')
 
-            # End data loading timing (only on rank 0)
-            if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+            # End data loading timing
+            if epoch_timer and phase == 'train':
                 epoch_timer.end_timer('data_loading')
 
             # ============================================================
             # EPOCH-END PROFILING AND LOGGING - ONLY ON RANK 0
             # ============================================================
             
-            if epoch_timer and phase == 'train' and (rank is None or rank == 0):
+            if epoch_timer and phase == 'train':
                 epoch_timer.end_epoch()
                 
                 # Generate formatted timing log automatically
@@ -493,6 +466,7 @@ def train(rank=None, world_size=None):
                         if config['train']['rollback']['enabled']:
                             torch.save({
                                 'best_epoch': best_epoch,
+                                'best_valid_loss': best_valid_loss,
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
                             }, '%s/checkpoint_best.pth' % (TRAIN_DIR))
@@ -557,10 +531,46 @@ def train(rank=None, world_size=None):
         destroy_process_group()
 
 if __name__=='__main__':
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Train GNN dynamics model')
+    parser.add_argument('--name', type=str, default=None,
+                       help='Training run name. If not provided, uses timestamp (YYYY-MM-DD-hh-mm-ss-ms)')
+    parser.add_argument('--profiling', action='store_true',
+                       help='Enable timing profiling (logs timing breakdown each epoch)')
+    args = parser.parse_args()
+    
+    # Load training configuration for directory setup
+    config = load_yaml(str(CONFIG_TRAIN_GNN_DYN))
+    
+    # Setup training directory
+    TRAIN_ROOT = GNN_DYN_MODEL_ROOT
+    
+    if config['train']['resume']['active']:
+        # Resume from existing checkpoint
+        TRAIN_DIR = os.path.join(TRAIN_ROOT, config['train']['resume']['folder'])
+    else:
+        # Create new training directory
+        if args.name:
+            train_name = args.name
+            TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
+            
+            # Check if directory exists and is not empty
+            if os.path.exists(TRAIN_DIR) and os.listdir(TRAIN_DIR):
+                print(f"Error: Training directory '{TRAIN_DIR}' already exists and is not empty!")
+                print(f"Please choose a different name or remove the existing directory.")
+                exit(1)
+        else:
+            train_name = YYYY_MM_DD_hh_mm_ss_ms()
+            TRAIN_DIR = os.path.join(TRAIN_ROOT, train_name)
+    
+    os.system('mkdir -p ' + TRAIN_DIR)
+    save_yaml(config, os.path.join(TRAIN_DIR, "config.yaml"))
+    print(f"Training directory: {TRAIN_DIR}")
+    
     world_size = torch.cuda.device_count()
     if world_size > 1:
         print(f"Using {world_size} GPUs for distributed training")
-        mp.spawn(train, nprocs=world_size, args=(world_size, ))
+        mp.spawn(train, nprocs=world_size, args=(world_size, TRAIN_DIR, args.profiling))
     else:
         print("Using single GPU training")
-        train()
+        train(TRAIN_DIR=TRAIN_DIR, profiling=args.profiling)

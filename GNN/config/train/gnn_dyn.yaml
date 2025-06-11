@@ -19,7 +19,7 @@ dataset:
   randomness: 
     use: False
     state_noise:
-      train: 0.005
+      train: 0.0025
       valid: 0.0
   downsample_rate: 3
 
@@ -50,22 +50,22 @@ train:
   rollback:
     enabled: true
     patience: 10
-    threshold: 2
+    threshold: 1.7
   particle:
     nf_effect: 64
     fps_radius: 0.02
   resume:
-    active: false
+    active: true
     epoch: -1
     iter: 0
-    folder: "test_mp"
+    folder: "debug_encoders"
   edges:
     topological: 
       enabled: true
       adj_thresh: 0.09
       topk: 12
     collision:  
-      adj_thresh: 0.09
+      adj_thresh: 0.06
       topk: 12
       connect_tools_all: False
   lam_reg: 2e-4

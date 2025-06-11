@@ -243,7 +243,8 @@ def construct_collision_edges(states, adj_thresh, mask, tool_mask, topk, connect
         adj_matrix[obj_tool_mask_1] = 0  # Clear object-to-tool edges
 
     # Remove topological edges
-    adj_matrix = adj_matrix * (~topological_edges)
+    topological_mask = topological_edges > 0
+    adj_matrix[topological_mask] = 0
 
     # Convert adjacency matrix to sparse edge representation
     n_rels = adj_matrix.sum(dim=(1,2))  # [B] - Number of edges per batch

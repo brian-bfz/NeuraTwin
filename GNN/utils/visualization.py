@@ -3,7 +3,7 @@ import cv2
 from PIL import Image, ImageEnhance
 import os
 import torch
-from .edges import construct_edges_with_attrs
+from .edges import construct_collision_edges, construct_topological_edges
 import open3d as o3d
 
 
@@ -19,7 +19,7 @@ def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, c
         adj_thresh: float - distance threshold for collision edges
         topk: int - maximum neighbors per particle
         connect_tools_all: bool - whether to connect tools to all objects
-        colors: list of [b,g,r] colors for [collision, topological] edges
+        colors: list of [r,g,b] colors for [collision, topological] edges
         
     Returns:
         o3d.geometry.LineSet - line set for visualization or None
@@ -35,24 +35,31 @@ def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, c
     # Create mask for valid particles
     mask = torch.ones(B, N, dtype=torch.bool, device=positions.device)
     
-    # Use construct_edges_with_attrs to get edges
-    Rr, Rs, edge_attrs = construct_edges_with_attrs(
+    # Use construct_collision_edges to get edges
+    Rr_collision, Rs_collision = construct_collision_edges(
         positions, adj_thresh, mask, tool_mask, 
         topk=topk, connect_tools_all=connect_tools_all, topological_edges=topological_edges
     )
+
+    Rr_topo, Rs_topo, first_edge_lengths = construct_topological_edges(
+        topological_edges, positions
+    )
     
-    return create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions[0])  # Pass first batch
+    # Create line sets for each edge type
+    collision_lineset = create_lineset_from_Rr_Rs(Rr_collision, Rs_collision, colors[0], positions[0])
+    topological_lineset = create_lineset_from_Rr_Rs(Rr_topo, Rs_topo, colors[1], positions[0])
+    
+    return [collision_lineset, topological_lineset]
 
 
-def create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions):
+def create_lineset_from_Rr_Rs(Rr, Rs, color, positions):
     """
     Create Open3D LineSet from sparse receiver/sender matrices
     
     Args:
         Rr: [B, n_rel, N] tensor - receiver matrix
         Rs: [B, n_rel, N] tensor - sender matrix  
-        edge_attrs: [B, n_rel, 1] tensor - edge attributes
-        colors: list of [r,g,b] colors for [collision, topological] edges
+        color: [r, g, b] color for edges
         positions: [N, 3] tensor - particle positions
         
     Returns:
@@ -77,22 +84,12 @@ def create_lineset_from_Rr_Rs(Rr, Rs, edge_attrs, colors, positions):
                 
         if len(valid_edges) > 0:
             edges = np.array(valid_edges)
-            edge_attrs_flat = edge_attrs[0, edge_indices, 0].numpy()
             positions = positions.numpy()
                     
             lineset = o3d.geometry.LineSet()
             lineset.points = o3d.utility.Vector3dVector(positions)
             lineset.lines = o3d.utility.Vector2iVector(edges)
-                    
-            # Color edges based on type: collision (0) vs topological (1)
-            line_colors = []
-            for attr in edge_attrs_flat:
-                if attr > 0.5:  # Topological edge
-                    line_colors.append(colors[1])  # topological color
-                else:  # Collision edge
-                    line_colors.append(colors[0])  # collision color
-                    
-            lineset.colors = o3d.utility.Vector3dVector(np.array(line_colors))
+            lineset.colors = o3d.utility.Vector3dVector(np.array([color] * len(edges)))
             return lineset
     
     return None

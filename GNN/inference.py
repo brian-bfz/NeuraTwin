@@ -68,7 +68,7 @@ class Visualizer:
         print(f"Dataset initialized with {self.dataset.n_episode} episodes")
         print(f"History length: {self.n_history}")
 
-    def predict_episode_rollout(self, states, states_delta, attrs, particle_num, topological_edges):
+    def predict_episode_rollout(self, states, states_delta, attrs, particle_num, topological_edges, first_states):
         """
         Predict object motion for entire episode using autoregressive rollout.
         
@@ -79,6 +79,8 @@ class Visualizer:
                 For t = n_history-1: 0 for objects, actual motion for robots
             attrs: [timesteps, particles] - particle attributes (0=object, 1=robot)
             particle_num: int - total number of particles
+            topological_edges: [particles, particles] - adjacency matrix for topological edges
+            first_states: [particles, 3] - first frame states for topological edge computations
             
         Returns:
             predicted_states: [timesteps, particles, 3] - complete predicted trajectory
@@ -100,7 +102,8 @@ class Visualizer:
             states_delta[:self.n_history - 1].unsqueeze(0), # [1, n_history - 1, particles, 3] 
             attrs[self.n_history - 1].unsqueeze(0),       # [1, particles]
             torch.tensor([particle_num], device=self.device),  # [1]
-            topological_edges.unsqueeze(0)  # [1, particles, particles] or None
+            topological_edges.unsqueeze(0),  # [1, particles, particles]
+            first_states.unsqueeze(0)  # [1, particles, 3]
         )
         
         # Initialize prediction storage with history
@@ -219,7 +222,7 @@ class Visualizer:
             )
 
         # Initialize edge sets
-        pred_line_set = None
+        pred_line_sets = []
 
         # Render each frame
         for frame_idx in range(n_frames):
@@ -242,17 +245,18 @@ class Visualizer:
             vis.update_geometry(robot_pcd)
 
             # Remove old edges
-            if pred_line_set is not None:
-                vis.remove_geometry(pred_line_set, reset_bounding_box=False)
+            for line_set in pred_line_sets:
+                if line_set is not None:
+                    vis.remove_geometry(line_set, reset_bounding_box=False)
             
-            pred_line_set = visualize_edges(
+            pred_line_sets = visualize_edges(
                 predicted_states[frame_idx], topological_edges, tool_mask, 
                 self.adj_thresh, self.topk, False, 
                 [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]]  # light orange, light green
             )
-            
-            if pred_line_set is not None:
-                vis.add_geometry(pred_line_set, reset_bounding_box=False)
+            for line_set in pred_line_sets:
+                if line_set is not None:
+                    vis.add_geometry(line_set, reset_bounding_box=False)
                         
             # Render frame
             vis.poll_events()
@@ -337,11 +341,12 @@ def main():
         
         with torch.no_grad():
             # Load episode data
-            states, states_delta, attrs, particle_num, topological_edges = visualizer.dataset.load_full_episode(episode_num)
+            states, states_delta, attrs, particle_num, topological_edges, first_states = visualizer.dataset.load_full_episode(episode_num)
             states = states.to(visualizer.device)
             states_delta = states_delta.to(visualizer.device)
             attrs = attrs.to(visualizer.device)
             topological_edges = topological_edges.to(visualizer.device)
+            first_states = first_states.to(visualizer.device)
 
             # Determine particle counts from attributes (0=object, 1=robot)
             n_obj = (attrs[0] == 0).sum().item()
@@ -351,7 +356,7 @@ def main():
             print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
                         
             # Run autoregressive rollout prediction
-            predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges)
+            predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges, first_states)
             
             # Split into object and robot components for evaluation
             predicted_objects = predicted_states[:, :n_obj, :]
