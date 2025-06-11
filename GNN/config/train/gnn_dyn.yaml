@@ -46,7 +46,7 @@ train:
     patience: 10 # ReduceLROnPlateau
     threshold_mode: 'rel' # ReduceLROnPlateau
     cooldown: 0 # ReduceLROnPlateau
-    min_lr: 8e-6 # ReduceLROnPlateau
+    min_lr: 0.000008 # ReduceLROnPlateau
   rollback:
     enabled: true
     patience: 10
@@ -56,9 +56,9 @@ train:
     fps_radius: 0.02
   resume:
     active: false
-    epoch: 10
+    epoch: 80
     iter: 0
-    folder: "test_no_edges"
+    folder: "topk_12_12"
   edges:
     topological: 
       enabled: true

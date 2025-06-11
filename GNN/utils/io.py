@@ -4,6 +4,23 @@ Input/output utilities for file handling and time formatting.
 
 import datetime
 import yaml
+import os
+from torch.distributed import init_process_group, destroy_process_group
+from torch.cuda import set_device
+
+def ddp_setup(rank, world_size):
+    """
+    Setup distributed training environment.
+
+    Args:
+        rank: int - unique identifier for current process
+        world_size: int - total number of processes
+    """
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    set_device(rank)
+    init_process_group(backend='nccl', rank=rank, world_size=world_size)
 
 
 def YYYY_MM_DD_hh_mm_ss_ms():
