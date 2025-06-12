@@ -53,8 +53,8 @@ class Rollout:
             predicted_states: [batch, particles, 3] - predicted next frame positions
         """
         # Update delta buffer with the robot's motions
-        self.s_delta = torch.roll(self.s_delta, shifts=1, dims=1)
-        self.s_delta[:, 0, :, :] = next_delta
+        self.s_delta = torch.roll(self.s_delta, shifts=-1, dims=1)
+        self.s_delta[:, -1, :, :] = next_delta
             
         # Predict next state using current history
         predicted_states = self.model.predict_one_step(
@@ -62,12 +62,12 @@ class Rollout:
             self.s_cur,        # [batch, particles, 3]
             self.s_delta,       # [batch, n_history, particles, 3]
             topological_edges=self.topological_edges,  # [batch, particles, particles]
+            first_states=self.first_states,  # [batch, particles, 3]
             particle_nums=self.particle_nums,  # [batch]
             epoch_timer=self.epoch_timer,  # optional timer for profiling
-            first_states=self.first_states  # [batch, particles, 3]
         )  # [batch, particles, 3]
 
-        # Always force robot positions to ground truth
+        # Force robot positions to ground truth
         robot_mask = (self.a_cur == 1)  # [batch, particles]
         predicted_states[robot_mask] = next_delta[robot_mask] + self.s_cur[robot_mask]
 

@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/sampled_with_14_edges.h5"
+  file: "PhysTwin/generated_data/sampled_with_12_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -19,14 +19,14 @@ dataset:
   randomness: 
     use: False
     state_noise:
-      train: 0.001
+      train: 0.002
       valid: 0.0
   downsample_rate: 3
 
 train:
   random_seed: 42
   n_epoch: 300
-  lr: 0.0005
+  lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
   nf_hidden: 64
@@ -55,7 +55,7 @@ train:
     nf_effect: 64
     fps_radius: 0.02
   resume:
-    active: true
+    active: false
     epoch: -1
     iter: 0
     folder: "debug_encoders"

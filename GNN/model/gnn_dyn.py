@@ -197,16 +197,16 @@ class PropModuleDiffDen(nn.Module):
 
         # Propagators for message passing
         self.particle_propagator = Propagator(
-            2 * nf_effect, nf_effect)  # particle encoding + aggregated relation effects
+            3 * nf_effect, nf_effect)  # particle encoding + collision effects + topological effects
 
         self.relation_propagator = Propagator(
-            nf_effect + 2 * nf_effect, nf_effect)  # relation encoding + sender/receiver effects
+            3 * nf_effect, nf_effect)  # relation encoding + sender effects + receiver effects
 
         # Final position predictor
         self.particle_predictor = ParticlePredictor(
             nf_effect, nf_effect, 3)
 
-    def forward(self, a_cur, s_cur, s_delta, Rr_collision, Rs_collision, Rr_topo, Rs_topo, first_edge_lengths, first_states, verbose=False):
+    def forward(self, a_cur, s_cur, s_delta, Rr_collision, Rs_collision, Rr_topo, Rs_topo, first_edge_lengths):
         """
         Forward pass of the GNN dynamics model with separate collision and topological encoders.
         
@@ -219,14 +219,11 @@ class PropModuleDiffDen(nn.Module):
             Rr_topo: (B, n_topo, particle_num) - receiver matrix for topological edges
             Rs_topo: (B, n_topo, particle_num) - sender matrix for topological edges
             first_edge_lengths: (B, n_topo) - edge lengths in first frame for topological edges
-            first_states: (B, particle_num, 3) - first frame positions
-            verbose: bool - whether to print debug information
             
         Returns:
             (B, particle_num, 3) - predicted next particle positions
         """
         B, N = a_cur.size()
-        nf_effect = self.nf_effect
         pstep = 3  # Number of message passing steps
 
         # Convert from data format (B x time x particles) to model format (B x particles x time)
@@ -269,6 +266,7 @@ class PropModuleDiffDen(nn.Module):
         # Normalize by first frame edge length (add small epsilon to avoid division by zero)
         first_edge_lengths_expanded = first_edge_lengths.unsqueeze(-1)  # B x n_topo x 1
         normalized_pos_diff = current_pos_diff / (first_edge_lengths_expanded + 1e-8)  # B x n_topo x 3
+        assert abs(normalized_pos_diff).max() < 10.
 
         # Encode topological relation features: attributes (2) + first edge length (1) + normalized position diff (3)
         topo_encode = self.topo_encoder(
@@ -304,13 +302,10 @@ class PropModuleDiffDen(nn.Module):
             # Aggregate topological effects back to particles
             Rr_topo_t = Rr_topo.transpose(1, 2)  # B x particle_num x n_topo
             effect_topo_agg = Rr_topo_t.bmm(effect_topo)  # B x particle_num x nf_effect
-            
-            # Combine all relation effects
-            total_effect_agg = effect_collision_agg + effect_topo_agg  # B x particle_num x nf_effect
-            
+                        
             # Update particle effects with residual connection
             particle_effect = self.particle_propagator(
-                torch.cat([particle_encode, total_effect_agg], 2),
+                torch.cat([particle_encode, effect_collision_agg, effect_topo_agg], 2),
                 residual=particle_effect)
 
         # Predict position changes
@@ -339,7 +334,7 @@ class PropNetDiffDenModel(nn.Module):
         self.connect_tools_all = config['train']['edges']['collision']['connect_tools_all']
         self.model = PropModuleDiffDen(config, use_gpu)
 
-    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, particle_nums=None, epoch_timer=None, first_states=None):
+    def predict_one_step(self, a_cur, s_cur, s_delta, topological_edges, first_states, particle_nums=None, epoch_timer=None):
         """
         Predict particle positions one step into the future.
         
@@ -350,9 +345,9 @@ class PropNetDiffDenModel(nn.Module):
                     For t < n_history-1: consecutive frame differences
                     For t = n_history-1: 0 for objects, actual motion for robots
             topological_edges: (B, particle_num, particle_num) - adjacency matrix of topological edges
+            first_states: (B, particle_num, 3) - first frame states for topological edge computations
             particle_nums: (B,) - number of valid particles per batch sample
             epoch_timer: optional EpochTimer for profiling edge construction time
-            first_states: (B, particle_num, 3) - first frame states for topological edge computations
             
         Returns:
             (B, particle_num, 3) - predicted next particle positions
@@ -365,9 +360,8 @@ class PropNetDiffDenModel(nn.Module):
 
         B, N = a_cur.size()
 
-        # Create batch masks for valid particles and tools
+        # Create batch masks to exclude batch padding
         if particle_nums is not None:
-            # Create mask for valid particles
             mask = torch.zeros((B, N), dtype=torch.bool, device=s_cur.device)
             for b in range(B):
                 n_particles = particle_nums[b].item()
@@ -379,7 +373,6 @@ class PropNetDiffDenModel(nn.Module):
         # Create tool mask (tool particles have attr=1, objects have attr=0)
         tool_mask = (a_cur > 0.5) & mask
                 
-        # Construct graph edges based on current particle positions
         if epoch_timer is not None:
             epoch_timer.start_timer('edge')
         
@@ -411,8 +404,7 @@ class PropNetDiffDenModel(nn.Module):
             a_cur, s_cur, s_delta, 
             Rr_collision, Rs_collision, 
             Rr_topo, Rs_topo, 
-            first_edge_lengths, 
-            first_states
+            first_edge_lengths
         )
         
         if epoch_timer is not None:

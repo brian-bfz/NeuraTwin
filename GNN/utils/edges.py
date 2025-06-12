@@ -43,7 +43,7 @@ def construct_edges_from_tensor(points, adj_thresh, topk):
     Returns:
         adj_matrix: [N, N] torch tensor - adjacency matrix of edges
     """
-    N, state_dim = points.shape
+    N, _ = points.shape
 
     # Create pairwise particle combinations
     s_receiv = points[:, None, :].repeat(1, N, 1)
@@ -186,7 +186,7 @@ def construct_collision_edges(states, adj_thresh, mask, tool_mask, topk, connect
         Rr: (B, n_rel, N) torch tensor - receiver matrix for collision edges
         Rs: (B, n_rel, N) torch tensor - sender matrix for collision edges
     """
-    B, N, state_dim = states.shape
+    B, N, _ = states.shape
     
     # Create pairwise particle combinations for distance calculation
     s_receiv = states[:, :, None, :].repeat(1, 1, N, 1)  # Receiver particles
@@ -239,11 +239,12 @@ def construct_collision_edges(states, adj_thresh, mask, tool_mask, topk, connect
         adj_matrix[batch_obj_tool_mask_2] = 1  # Add all tool-to-object edges
         adj_matrix[neg_batch_obj_tool_mask_1] = 0
         adj_matrix[neg_batch_obj_tool_mask_2] = 0
+        adj_matrix[tool_mask_12] = 0
     else:
         adj_matrix[obj_tool_mask_1] = 0  # Clear object-to-tool edges
 
     # Remove topological edges
-    topological_mask = topological_edges > 0
+    topological_mask = topological_edges > 0.5
     adj_matrix[topological_mask] = 0
 
     # Convert adjacency matrix to sparse edge representation

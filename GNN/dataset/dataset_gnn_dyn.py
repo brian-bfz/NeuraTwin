@@ -143,24 +143,13 @@ class ParticleDataset(Dataset):
         n_frames = episode_group.attrs['n_frames']
         frame_indices = [i for i in range(0, n_frames, self.downsample_rate)]
             
-        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_obj_particles, 3]
-        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [time, n_bot_particles, 3]
+        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_object, 3]
+        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [time, n_robot, 3]
             
-        n_obj_particles = episode_group.attrs['n_obj_particles']
-        n_bot_particles = episode_group.attrs['n_bot_particles']
-        particle_num = n_obj_particles + n_bot_particles
+        n_object = object_data.shape[1]
+        n_robot = robot_data.shape[1]
+        particle_num = n_object + n_robot
             
-        # Load topological edges if they exist and are enabled
-        if self.config['train']['edges']['topological']['enabled'] and 'object_edges' in episode_group:
-            object_edges = torch.from_numpy(episode_group['object_edges'][:])  # [n_obj_particles, n_obj_particles]
-                
-            # Create full topological edges matrix for all particles
-            topological_edges = torch.zeros(particle_num, particle_num)
-            topological_edges[:n_obj_particles, :n_obj_particles] = object_edges
-        else:
-            # Initialize as zero matrix for compatibility
-            topological_edges = torch.zeros(particle_num, particle_num, dtype=torch.float32)
-
         # Prepend history padding: repeat first frame (n_history-1) times
         # This enables inference to start with proper temporal context
         first_obj_frame = object_data[:1].repeat(self.n_his - 1, 1, 1)
@@ -172,21 +161,27 @@ class ParticleDataset(Dataset):
         # Combine object and robot particles (objects first, then robots)
         states = torch.cat([obj_trajectory, bot_trajectory], dim=1)
 
-        # Store first frame states (after history padding is applied)
-        first_states = states[self.n_his - 1]  # [total_sampled, 3] - actual first frame
+        # Store first frame states for topological edge computations
+        first_states = states[0]  # [total_sampled, 3]
 
         states_delta = torch.zeros(states.shape[0] - 1, states.shape[1], 3)
         # Only robots get actual deltas
-        states_delta[:, n_obj_particles:] = bot_trajectory[1:] - bot_trajectory[:-1]
+        states_delta[:, n_object:] = bot_trajectory[1:] - bot_trajectory[:-1]
         
         # Create attribute tensor (0=object, 1=robot)
         attrs = torch.zeros(states.shape[0], states.shape[1])
-        attrs[:, n_obj_particles:] = 1.0
+        attrs[:, n_object:] = 1.0
 
-        particle_num = n_obj_particles + n_bot_particles
+        topological_edges = torch.zeros(particle_num, particle_num)
+        # Load topological edges if they exist and are enabled
+        if self.config['train']['edges']['topological']['enabled'] and 'object_edges' in episode_group:
+            object_edges = torch.from_numpy(episode_group['object_edges'][:])  # [n_object, n_object]
+                
+            # Create full topological edges matrix for all particles
+            topological_edges[:n_object, :n_object] = object_edges
 
         print(f"Episode {episode_idx}: {len(frame_indices)} timesteps (+ {self.n_his-1} history frames padding), "
-              f"Objects: {n_obj_particles} sampled, Robots: {n_bot_particles} sampled")
+              f"Objects: {n_object} sampled, Robots: {n_robot} sampled")
         
         return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float(), first_states.float()
 
@@ -215,34 +210,23 @@ class ParticleDataset(Dataset):
         episode_group = f[f'episode_{idx_episode:06d}']
         
         # Generate downsampled frame indices for history + rollout
-        frame_indices = [idx_timestep + i * self.downsample_rate for i in range(self.n_his + self.n_roll)]
-        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [time, n_obj, 3]
-        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [time, n_bot, 3]
-        
         n_frames = self.n_his + self.n_roll
+        frame_indices = [idx_timestep + i * self.downsample_rate for i in range(n_frames)]
+        frame_indices.insert(0, 0) # get the episode's first frame
+        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [n_frames + 1, n_obj, 3]
+        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [n_frames + 1, n_bot, 3]
         
         n_object = object_data.shape[1]
         n_robot = robot_data.shape[1]
         particle_num = n_object + n_robot
         
-        if self.config['train']['edges']['topological']['enabled']:
-            # Load topological edges for object particles (computed from first frame)
-            object_edges = torch.from_numpy(episode_group['object_edges'][:])  # [n_sampled_obj, n_sampled_obj]
-
-            # Create full topological edges matrix for all particles
-            # Objects have topological edges, robots don't connect to each other topologically
-            topological_edges = torch.zeros(particle_num, particle_num)
-            topological_edges[:n_object, :n_object] = object_edges
-        else:
-            # Initialize as zero matrix for compatibility
-            topological_edges = torch.zeros(particle_num, particle_num, dtype=torch.float32)
-        
         # Combine sampled particles: [object_particles, robot_particles]
-        states = torch.cat([object_data, robot_data], dim=1)  # [time, total_sampled, 3]
+        states = torch.cat([object_data, robot_data], dim=1)  # [n_frames + 1, total_sampled, 3]
         
         # Store first frame states for topological edge computations
         first_states = states[0]  # [total_sampled, 3]
-        
+        states = states[1:]  # [n_frames, total_sampled, 3]
+
         # Apply data augmentation noise to history frames only
         if self.add_randomness:
             noise = torch.randn_like(states[:self.n_his]) * self.state_noise
@@ -264,6 +248,15 @@ class ParticleDataset(Dataset):
         attrs = torch.zeros(n_frames, particle_num)
         attrs[:, n_object:] = 1.0   # Robot particles
                 
+        # Create full topological edges matrix for all particles
+        topological_edges = torch.zeros(particle_num, particle_num)
+        if self.config['train']['edges']['topological']['enabled']:
+            # Load topological edges for object particles (computed from first frame)
+            object_edges = torch.from_numpy(episode_group['object_edges'][:])  # [n_object, n_object]
+
+            # Object has topological edges, robot doesn't
+            topological_edges[:n_object, :n_object] = object_edges
+        
         return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float(), first_states.float()
 
 # ============================================================================
