@@ -162,7 +162,7 @@ class ParticleDataset(Dataset):
         states = torch.cat([obj_trajectory, bot_trajectory], dim=1)
 
         # Store first frame states for topological edge computations
-        first_states = states[0]  # [total_sampled, 3]
+        first_states = states[0]  # [particle_num, 3]
 
         states_delta = torch.zeros(states.shape[0] - 1, states.shape[1], 3)
         # Only robots get actual deltas
@@ -208,25 +208,25 @@ class ParticleDataset(Dataset):
         # Get HDF5 file handle
         f = self._get_hdf5_file()
         episode_group = f[f'episode_{idx_episode:06d}']
+
+        # Store first frame states for topological edge computations
+        first_object = torch.from_numpy(episode_group['object'][0, :, :])  # [n_obj, 3]
+        first_robot = torch.from_numpy(episode_group['robot'][0, :, :])    # [n_bot, 3]
+        first_states = torch.cat([first_object, first_robot], dim=0)  # [particle_num, 3]
         
         # Generate downsampled frame indices for history + rollout
         n_frames = self.n_his + self.n_roll
         frame_indices = [idx_timestep + i * self.downsample_rate for i in range(n_frames)]
-        frame_indices.insert(0, 0) # get the episode's first frame
-        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [n_frames + 1, n_obj, 3]
-        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [n_frames + 1, n_bot, 3]
+        object_data = torch.from_numpy(episode_group['object'][frame_indices, :, :])  # [n_frames, n_obj, 3]
+        robot_data = torch.from_numpy(episode_group['robot'][frame_indices, :, :])    # [n_frames, n_bot, 3]
         
         n_object = object_data.shape[1]
         n_robot = robot_data.shape[1]
         particle_num = n_object + n_robot
         
         # Combine sampled particles: [object_particles, robot_particles]
-        states = torch.cat([object_data, robot_data], dim=1)  # [n_frames + 1, total_sampled, 3]
+        states = torch.cat([object_data, robot_data], dim=1)  # [n_frames, particle_num, 3]
         
-        # Store first frame states for topological edge computations
-        first_states = states[0]  # [total_sampled, 3]
-        states = states[1:]  # [n_frames, total_sampled, 3]
-
         # Apply data augmentation noise to history frames only
         if self.add_randomness:
             noise = torch.randn_like(states[:self.n_his]) * self.state_noise
