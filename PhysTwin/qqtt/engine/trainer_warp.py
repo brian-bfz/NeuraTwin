@@ -1726,7 +1726,7 @@ class InvPhyTrainerWarp:
                 initial_attrs, 
                 particle_nums,
                 topological_edges=topological_edges,
-                first_states=initial_states[-1]
+                first_states=initial_states[-1:]
             )
             
             # Initialize GNN prediction with first frame
