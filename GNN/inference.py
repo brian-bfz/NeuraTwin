@@ -355,15 +355,9 @@ def main():
             print(f"Loaded episode with {n_obj} object particles, {n_robot} robot particles")
             print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
                         
-            translation = torch.ones_like(states) * 1000
-            states = states + translation
-
             # Run autoregressive rollout prediction
             predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges, first_states)
             
-            states = states - translation
-            predicted_states = predicted_states - translation
-
             # Split into object and robot components for evaluation
             predicted_objects = predicted_states[:, :n_obj, :]
             actual_objects = states[:, :n_obj, :]
