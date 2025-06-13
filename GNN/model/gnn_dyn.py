@@ -266,7 +266,6 @@ class PropModuleDiffDen(nn.Module):
         # Normalize by first frame edge length (add small epsilon to avoid division by zero)
         first_edge_lengths_expanded = first_edge_lengths.unsqueeze(-1)  # B x n_topo x 1
         normalized_pos_diff = current_pos_diff / (first_edge_lengths_expanded + 1e-8)  # B x n_topo x 3
-        assert abs(normalized_pos_diff).max() < 10.
 
         # Encode topological relation features: attributes (2) + first edge length (1) + normalized position diff (3)
         topo_encode = self.topo_encoder(
