@@ -266,14 +266,7 @@ class PropModuleDiffDen(nn.Module):
         # Normalize by first frame edge length (add small epsilon to avoid division by zero)
         first_edge_lengths_expanded = first_edge_lengths.unsqueeze(-1)  # B x n_topo x 1
         normalized_pos_diff = current_pos_diff / (first_edge_lengths_expanded + 1e-8)  # B x n_topo x 3
-
-        # Debug. 
-        sqr_dis = torch.sum(normalized_pos_diff**2, -1)
-        sqr_dis_mask = sqr_dis > 100
-        if sqr_dis_mask.sum() > 0:
-            print(f'max squared distance: {sqr_dis[sqr_dis_mask].max()}')
-            print(f'rest length: {first_edge_lengths[sqr_dis_mask].mean()}')
-        assert sqr_dis_mask.sum() == 0
+        assert abs(normalized_pos_diff).max() < 10.
 
         # Encode topological relation features: attributes (2) + first edge length (1) + normalized position diff (3)
         topo_encode = self.topo_encoder(
