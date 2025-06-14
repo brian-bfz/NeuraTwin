@@ -12,7 +12,7 @@ from scripts.planner import Planner
 from scripts.reward import RewardFn
 
 class ModelRolloutFn:
-    def __init__(self, model, config, robot_mask, n_sample, topological_edges, first_states):
+    def __init__(self, model, config, robot_mask, topological_edges, first_states):
         """
         Initialize the model rollout function.
         
@@ -20,7 +20,6 @@ class ModelRolloutFn:
             model: trained GNN model
             config: dict - training configuration
             robot_mask: [n_particles] - boolean tensor for robot particles
-            n_sample: int - number of samples the planner generates
             topological_edges: [n_particles, n_particles] tensor - topological edges adjacency matrix
             first_states: [n_particles, 3] - first frame particle positions
         """
@@ -31,8 +30,8 @@ class ModelRolloutFn:
         self.n_robots = robot_mask.sum().item()
         self.n_particles = len(robot_mask)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.topological_edges = topological_edges.to(self.device).unsqueeze(0).repeat(n_sample)
-        self.first_states = first_states.to(self.device).unsqueeze(0).repeat(n_sample)
+        self.topological_edges = topological_edges.to(self.device)
+        self.first_states = first_states.to(self.device)
 
     def __call__(self, state_cur, action_seqs):
         """
@@ -40,7 +39,7 @@ class ModelRolloutFn:
         
         Args:
             state_cur: [n_history, state_dim] - current state history 
-            action_seqs: [n_sample, n_look_ahead, action_dim] - robot action sequences
+            action_seqs: [n_sample, n_look_ahead, 3] - robot velocity sequences (broadcast to all robot particles)
             
         Returns:
             dict containing:
@@ -58,10 +57,14 @@ class ModelRolloutFn:
         # Create attributes (0=object, 1=robot) [n_sample, n_particles]
         attrs = self.robot_mask.clone().float().unsqueeze(0).repeat(n_sample, 1)
         
-        # Reshape actions: [n_sample, n_look_ahead, n_robots*3] -> [n_sample, n_look_ahead, n_robots, 3]
-        robot_actions = action_seqs.view(n_sample, n_look_ahead, self.n_robots, 3)
+        # Broadcast robot actions to all robot particles: [n_sample, n_look_ahead, 3] -> [n_sample, n_look_ahead, n_robots, 3]
+        robot_actions = action_seqs.unsqueeze(2).repeat(1, 1, self.n_robots, 1)
         
         particle_nums = torch.tensor([self.n_particles] * n_sample, device=self.device)
+
+        # Adjust topological_edges and first_states to match current batch size
+        topological_edges = self.topological_edges.unsqueeze(0).repeat(n_sample, 1, 1)
+        first_states = self.first_states.unsqueeze(0).repeat(n_sample, 1, 1)
 
         rollout = Rollout(
             self.model, 
@@ -70,8 +73,8 @@ class ModelRolloutFn:
             states_delta,           # [n_sample, n_history-1, n_particles, 3] - delta history
             attrs,                  # [n_sample, n_particles] - attributes
             particle_nums,          # [n_sample] - particle counts
-            self.topological_edges, # [n_sample, n_particles, n_particles] - topological edges
-            self.first_states,      # [n_sample, n_particles, 3] - first frame states
+            topological_edges,      # [n_sample, n_particles, n_particles] - topological edges
+            first_states,           # [n_sample, n_particles, 3] - first frame states
         )
         
         state_seqs = torch.zeros(n_sample, n_look_ahead, self.n_particles * 3, device=action_seqs.device)
@@ -113,6 +116,7 @@ class PlannerWrapper:
         self.model.eval()
         
         # Extract episode-independent parameters
+        self.action_dim = self.mpc_config['action_dim']
         self.n_history = self.train_config['train']['n_history'] # mpc and model n_history must agree
         self.data_file = self.mpc_config['data_file'] # mpc may use different data file from training
         self.n_sample = self.mpc_config['n_sample']
@@ -121,8 +125,8 @@ class PlannerWrapper:
         self.reward_weight = self.mpc_config['reward_weight']
         self.planner_type = self.mpc_config['planner_type']
         self.noise_level = self.mpc_config['noise_level']
-        self.action_lower_bound = self.mpc_config['action_lower_bound']
-        self.action_upper_bound = self.mpc_config['action_upper_bound']
+        self.action_lower_bound = torch.full((self.action_dim,), self.mpc_config['action_lower_bound'], device=self.device)
+        self.action_upper_bound = torch.full((self.action_dim,), self.mpc_config['action_upper_bound'], device=self.device)
         self.verbose = self.mpc_config.get('verbose', False)
 
         self.action_weight = self.mpc_config['action_weight']
@@ -148,7 +152,7 @@ class PlannerWrapper:
             episode_group = f[f'episode_{episode_idx:06d}']
             object_data = episode_group['object'][0]
             robot_data = episode_group['robot'][0]
-            object_edges = episode_group['object_edges']
+            object_edges = episode_group['object_edges'][:]
             n_object = object_data.shape[0]
             n_robot = robot_data.shape[0]
 
@@ -162,7 +166,7 @@ class PlannerWrapper:
             # Create topological edges matrix (objects only, robots don't have topological edges)
             n_particles = n_object + n_robot
             topological_edges = torch.zeros(n_particles, n_particles, dtype=torch.float32, device=self.device)
-            topological_edges[:n_object, :n_object] = object_edges
+            topological_edges[:n_object, :n_object] = torch.tensor(object_edges, dtype=torch.float32, device=self.device)
 
             return first_states, topological_edges, robot_mask
 
@@ -174,7 +178,7 @@ class PlannerWrapper:
             episode_idx: int - episode containing the initial state
 
         Returns:
-            action_seqs: [n_look_ahead, n_robots*3] - action sequence
+            action_seqs: [n_look_ahead, 3] - action sequence
         """
         # Prepare data
         first_states, topological_edges, robot_mask = self.load_data(episode_idx)
@@ -182,25 +186,23 @@ class PlannerWrapper:
         state_cur = state_cur.flatten(start_dim=1) # [n_history, n_particles*3]
 
         # Set up the model rollout function
-        model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, self.n_sample, topological_edges, first_states)
-        n_robots = model_rollout_fn.n_robots
-        action_dim = n_robots * 3
-        initial_action_seq = torch.zeros(self.n_look_ahead, action_dim, device=self.device)
+        model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
+        initial_action_seq = torch.zeros(self.n_look_ahead, self.action_dim, device=self.device)
 
         # Set up the reward function
-        reward_fn = RewardFn(self.n_sample, self.action_weight)
+        reward_fn = RewardFn(self.action_weight, robot_mask)
 
         # Set up the planner
         planner = Planner({
-            'action_dim': action_dim,
+            'action_dim': self.action_dim,
             'model_rollout_fn': model_rollout_fn,
             'evaluate_traj_fn': reward_fn,
             'n_sample': self.n_sample,
             'n_look_ahead': self.n_look_ahead,
             'n_update_iter': self.n_update_iter,
             'reward_weight': self.reward_weight,
-            'action_lower_lim': torch.full((action_dim,), self.action_lower_bound, device=self.device),
-            'action_upper_lim': torch.full((action_dim,), self.action_upper_bound, device=self.device),
+            'action_lower_lim': self.action_lower_bound,
+            'action_upper_lim': self.action_upper_bound,
             'planner_type': self.planner_type,
             'noise_level': self.noise_level,
             'verbose': self.verbose,
@@ -219,7 +221,7 @@ class PlannerWrapper:
 
         Args:
             episode_idx: int - episode containing the initial state
-            action_seq: [n_look_ahead, n_robots*3] torch tensor 
+            action_seq: [n_look_ahead, 3] torch tensor 
         """
         # Prepare data
         first_states, topological_edges, robot_mask = self.load_data(episode_idx)
@@ -227,7 +229,7 @@ class PlannerWrapper:
         state_cur = state_cur.flatten(start_dim=1) # [n_history, n_particles*3]
 
         # Set up the model rollout function
-        model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, self.n_sample, topological_edges, first_states)
+        model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
                      
         # Get state sequence prediction
         result = model_rollout_fn(state_cur, action_seq.unsqueeze(0))
@@ -242,15 +244,15 @@ class PlannerWrapper:
         full_trajectory = torch.cat([initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
         
         # Set up reward function to get target
-        reward_fn = RewardFn(1, self.action_weight)  # n_sample=1 for visualization
-        target_pcd = reward_fn.target[0].cpu()  # [n_particles_target, 3]
+        reward_fn = RewardFn(self.action_weight, robot_mask)
+        target_pcd = reward_fn.target.cpu()  # [n_particles_target, 3]
         
         # Create target trajectory (static target repeated for all timesteps)
         n_frames = len(full_trajectory)
         target_trajectory = target_pcd.unsqueeze(0).repeat(n_frames, 1, 1)  # [n_frames, n_particles_target, 3]
         
         # Create output directory and file path
-        output_dir = "./tasks"
+        output_dir = "GNN/tasks"
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, f"mpc_episode_{episode_idx}.mp4")
         
@@ -265,7 +267,6 @@ class PlannerWrapper:
             predicted_states=full_trajectory,
             tool_mask=robot_mask,
             actual_objects=target_trajectory,  # Target shown as "actual" (blue)
-            episode_num=episode_idx,
             save_path=save_path,
             topological_edges=topological_edges
         )
@@ -298,15 +299,19 @@ if __name__ == "__main__":
     else:
         train_config_path = args.train_config
         
-    # Initialize planner wrapper
-    planner_wrapper = PlannerWrapper(model_path, train_config_path, args.mpc_config)
+    with torch.no_grad():
+        # Initialize planner wrapper
+        planner_wrapper = PlannerWrapper(model_path, train_config_path, args.mpc_config)
     
-    # Demonstrate planning
-    print("="*60)
-    print("GNN-BASED MODEL PREDICTIVE CONTROL DEMO")
-    print("="*60)
+        # Demonstrate planning
+        print("="*60)
+        print("GNN-BASED MODEL PREDICTIVE CONTROL DEMO")
+        print("="*60)
     
-    # Plan action sequence for the specified episode
-    optimal_actions = planner_wrapper.plan_action(args.episode)
-    print(f"Planned action sequence shape: {optimal_actions.shape}")
-    print("Planning demonstration complete!")
+        # Plan action sequence for the specified episode
+        optimal_actions = planner_wrapper.plan_action(args.episode)
+        print(f"Planned action sequence shape: {optimal_actions.shape}")
+        print("Planning demonstration complete!")
+
+        # Visualize action sequence
+        planner_wrapper.visualize_action(args.episode, optimal_actions)
