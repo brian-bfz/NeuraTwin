@@ -5,7 +5,8 @@ import os
 import torch
 from .edges import construct_collision_edges, construct_topological_edges
 import open3d as o3d
-
+import pickle
+import json
 
 
 def visualize_edges(positions, topological_edges, tool_mask, adj_thresh, topk, connect_tools_all, colors):
@@ -287,3 +288,166 @@ def lighten_img(img, factor=1.2):
     color_lighten_img = cv2.imread('tmp_2.png')
     os.system('rm tmp_1.png tmp_2.png')
     return color_lighten_img
+
+
+class Visualizer:
+    """
+    Visualizer for particle trajectories with camera calibration.
+    Handles 3D visualization of particle motion with proper camera setup.
+    """
+    
+    def __init__(self, camera_calib_path):
+        """
+        Initialize visualizer with camera calibration data.
+        
+        Args:
+            camera_calib_path: str - path to camera calibration data directory
+        """
+        # Load camera to world transforms
+        with open(os.path.join(camera_calib_path, "calibrate.pkl"), "rb") as f:
+            self.c2ws = pickle.load(f)
+        self.w2cs = [np.linalg.inv(c2w) for c2w in self.c2ws]
+            
+        with open(os.path.join(camera_calib_path, "metadata.json"), "r") as f:
+            data = json.load(f)
+        self.intrinsics = np.array(data["intrinsics"])
+        self.WH = data["WH"]
+        self.FPS = data["fps"] / data.get("downsample_rate", 1)  # Handle missing downsample_rate
+        
+        print(f"Loaded camera calibration from: {camera_calib_path}")
+        print(f"Resolution: {self.WH}, FPS: {self.FPS}")
+
+    def visualize_object_motion(self, predicted_states, tool_mask, actual_objects, save_path, topological_edges=None):
+        """
+        Create 3D visualization comparing predicted vs actual object motion.
+        Renders particles as colored point clouds with connectivity edges.
+        
+        Args:
+            predicted_states: [timesteps, n_particles, 3] tensor - predicted trajectory (objects + robots)
+            tool_mask: [n_particles] tensor - boolean mask (False=object, True=robot)
+            actual_objects: [timesteps, n_obj, 3] tensor - ground truth object trajectory  
+            save_path: str - output video file path
+            topological_edges: [N, N] tensor - topological edges for object and robot particles
+            
+        Returns:
+            save_path: str - path where video was saved
+        """        
+        # Video parameters
+        width, height = self.WH
+        fps = self.FPS
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
+        
+        # Create Open3D visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(width=width, height=height, visible=False)
+        
+        render_option = vis.get_render_option()
+        render_option.point_size = 10.0
+
+        # Move tensors to CPU
+        predicted_states = predicted_states.cpu()
+        tool_mask = tool_mask.cpu()
+        if topological_edges is not None:
+            topological_edges = topological_edges.cpu()
+        
+        # Split predicted states into objects and robots using tool_mask. Convert to numpy for o3d. Keep predicted_states as tensor. 
+        actual_objects = actual_objects.cpu().numpy()
+        pred_objects = predicted_states[:, ~tool_mask, :].numpy()
+        pred_robots = predicted_states[:, tool_mask, :].numpy()
+        
+        # Create point clouds            
+        actual_pcd = o3d.geometry.PointCloud()
+        actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0])
+        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
+            
+        robot_pcd = o3d.geometry.PointCloud()
+        robot_pcd.points = o3d.utility.Vector3dVector(pred_robots[0])
+        robot_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Red for robot
+        
+        pred_pcd = o3d.geometry.PointCloud()
+        pred_pcd.points = o3d.utility.Vector3dVector(pred_objects[0])
+        pred_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for predicted
+
+        # Add geometries to visualizer
+        vis.add_geometry(actual_pcd)
+        vis.add_geometry(robot_pcd)
+        vis.add_geometry(pred_pcd)
+
+        n_frames = min(len(predicted_states), len(actual_objects))
+        print(f"Rendering {n_frames} frames...")
+        
+        # Set up camera parameters if available
+        if self.w2cs is not None:
+            view_control = vis.get_view_control()
+            camera_params = o3d.camera.PinholeCameraParameters()
+            intrinsic_parameter = o3d.camera.PinholeCameraIntrinsic(
+                width, height, self.intrinsics[0]  # Using first camera
+            )
+            camera_params.intrinsic = intrinsic_parameter
+            camera_params.extrinsic = self.w2cs[0]
+            view_control.convert_from_pinhole_camera_parameters(
+                camera_params, allow_arbitrary=True
+            )
+
+        # Initialize edge sets
+        pred_line_sets = []
+
+        # Render each frame
+        for frame_idx in range(n_frames):
+            # Update particle positions
+            pred_obj_pos = pred_objects[frame_idx]
+            actual_obj_pos = actual_objects[frame_idx]
+            robot_pos = pred_robots[frame_idx]
+            
+            if frame_idx == 0:
+                print(f"Sampled object particles: {pred_obj_pos.shape[0]}")
+                print(f"Robot particles: {robot_pos.shape[0]}")
+            
+            # Update point cloud positions
+            pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
+            robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
+            actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
+
+            vis.update_geometry(pred_pcd)
+            vis.update_geometry(actual_pcd)
+            vis.update_geometry(robot_pcd)
+
+            # Remove old edges
+            for line_set in pred_line_sets:
+                if line_set is not None:
+                    vis.remove_geometry(line_set, reset_bounding_box=False)
+            
+            # Add topological edges if available
+            if topological_edges is not None:
+                pred_line_sets = visualize_edges(
+                    predicted_states[frame_idx], topological_edges, tool_mask, 
+                    adj_thresh=0.05, topk=5, connect_tools_all=False, 
+                    colors=[[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]]  # light orange, light green
+                )
+                for line_set in pred_line_sets:
+                    if line_set is not None:
+                        vis.add_geometry(line_set, reset_bounding_box=False)
+                        
+            # Render frame
+            vis.poll_events()
+            vis.update_renderer()
+            
+            static_image = np.asarray(
+                vis.capture_screen_float_buffer(do_render=True)
+            )
+            static_image = (static_image * 255).astype(np.uint8)
+            static_image_bgr = cv2.cvtColor(static_image, cv2.COLOR_RGB2BGR)
+            out.write(static_image_bgr)
+                        
+            if frame_idx % 10 == 0:
+                print(f"  Rendered frame {frame_idx}/{n_frames}")
+        
+        # Cleanup
+        out.release()
+        vis.destroy_window()
+        
+        print(f"Video saved to: {save_path}")
+        return save_path

@@ -1,13 +1,15 @@
 import torch
 import argparse
 import h5py
+import numpy as np
+import os
 
 from .model.rollout import Rollout
 from .model.gnn_dyn import PropNetDiffDenModel
-from .utils import load_yaml
+from .utils import load_yaml, Visualizer
 from .paths import get_model_paths
 from scripts.planner import Planner
-from scripts.reward import RewardFunction
+from scripts.reward import RewardFn
 
 class ModelRolloutFn:
     def __init__(self, model, config, robot_mask, n_sample, topological_edges, first_states):
@@ -122,6 +124,8 @@ class PlannerWrapper:
         self.action_lower_bound = self.mpc_config['action_lower_bound']
         self.action_upper_bound = self.mpc_config['action_upper_bound']
         self.verbose = self.mpc_config.get('verbose', False)
+
+        self.action_weight = self.mpc_config['action_weight']
         
         print(f"Loaded model from: {model_path}")
         print(f"Using device: {self.device}")
@@ -170,7 +174,7 @@ class PlannerWrapper:
             episode_idx: int - episode containing the initial state
 
         Returns:
-            action_seqs: [n_sample, n_look_ahead, n_robots*3] - action sequence
+            action_seqs: [n_look_ahead, n_robots*3] - action sequence
         """
         # Prepare data
         first_states, topological_edges, robot_mask = self.load_data(episode_idx)
@@ -183,8 +187,8 @@ class PlannerWrapper:
         action_dim = n_robots * 3
         initial_action_seq = torch.zeros(self.n_look_ahead, action_dim, device=self.device)
 
-        # Set up the reward function (blackbox for now)
-        reward_fn = RewardFunction({})
+        # Set up the reward function
+        reward_fn = RewardFn(self.n_sample, self.action_weight)
 
         # Set up the planner
         planner = Planner({
@@ -207,18 +211,67 @@ class PlannerWrapper:
         result = planner.trajectory_optimization(state_cur, initial_action_seq)
         return result['act_seq']
 
-    def visualize_action(self, episode_idx, action_seqs):
+    def visualize_action(self, episode_idx, action_seq):
         """
-        Use ModelRolloutFn to infer the state sequence from initial state and action seqeuence
+        Use ModelRolloutFn to infer the state sequence from initial state and action sequence
         Use Open3D to visualize the state and action sequences, and target of reward function
         Save the video to ./tasks as an mp4 file with avc1 codec
 
         Args:
             episode_idx: int - episode containing the initial state
-            action_seqs: [n_sample, n_look_ahead, n_robots*3] torch tensor 
+            action_seq: [n_look_ahead, n_robots*3] torch tensor 
         """
+        # Prepare data
+        first_states, topological_edges, robot_mask = self.load_data(episode_idx)
+        state_cur = first_states.clone().unsqueeze(0).repeat(self.n_history, 1, 1) # [n_history, n_particles, 3]
+        state_cur = state_cur.flatten(start_dim=1) # [n_history, n_particles*3]
+
+        # Set up the model rollout function
+        model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, self.n_sample, topological_edges, first_states)
+                     
+        # Get state sequence prediction
+        result = model_rollout_fn(state_cur, action_seq.unsqueeze(0))
+        predicted_states = result['state_seqs'][0]  # [n_look_ahead, n_particles*3]
         
+        # Reshape to [n_look_ahead, n_particles, 3]
+        n_particles = model_rollout_fn.n_particles
+        predicted_states = predicted_states.reshape(-1, n_particles, 3)
         
+        # Add initial state to create full trajectory
+        initial_state = first_states.unsqueeze(0)  # [1, n_particles, 3]
+        full_trajectory = torch.cat([initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
+        
+        # Set up reward function to get target
+        reward_fn = RewardFn(1, self.action_weight)  # n_sample=1 for visualization
+        target_pcd = reward_fn.target[0].cpu()  # [n_particles_target, 3]
+        
+        # Create target trajectory (static target repeated for all timesteps)
+        n_frames = len(full_trajectory)
+        target_trajectory = target_pcd.unsqueeze(0).repeat(n_frames, 1, 1)  # [n_frames, n_particles_target, 3]
+        
+        # Create output directory and file path
+        output_dir = "./tasks"
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = os.path.join(output_dir, f"mpc_episode_{episode_idx}.mp4")
+        
+        # Initialize visualizer with camera calibration
+        # Use a reasonable default camera calibration path
+        camera_calib_path = "PhysTwin/data/different_types/single_push_rope"
+        visualizer = Visualizer(camera_calib_path)
+        
+        # Use the visualizer to create the video
+        # Pass target as "actual_objects" to show it in blue
+        video_path = visualizer.visualize_object_motion(
+            predicted_states=full_trajectory,
+            tool_mask=robot_mask,
+            actual_objects=target_trajectory,  # Target shown as "actual" (blue)
+            episode_num=episode_idx,
+            save_path=save_path,
+            topological_edges=topological_edges
+        )
+        
+        print(f"MPC visualization saved to: {video_path}")
+        return video_path
 
 if __name__ == "__main__":
     """

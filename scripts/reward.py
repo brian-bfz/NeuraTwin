@@ -16,11 +16,11 @@ class RewardFn:
             
         # Load first frame of object point cloud as target
         with h5py.File(data_file, 'r') as f:
-            pcd = torch.tensor(f['episode_000000/object'][0], dtype=torch.float32) # [n_particles, 3]
+            pcd = torch.tensor(f['episode_000000/object'][0], dtype=torch.float32, device=self.device) # [n_particles, 3]
         
         # Apply translation to target if specified
-        target_translation = [1.0, 0.0, 0.0]  # Default translation
-        target = pcd + torch.full(pcd.shape, target_translation, dtype=torch.float32)
+        target_translation = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=self.device)  # Default translation
+        target = pcd + target_translation
 
         # Move to device and shape to [n_sample, n_particles, 3]
         target = target.to(self.device)

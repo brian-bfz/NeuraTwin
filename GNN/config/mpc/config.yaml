@@ -13,3 +13,6 @@ action_upper_bound: 0.1        # Upper bound for robot actions (m)
 # Optimization Parameters
 lr: 0.001                      # Learning rate for gradient descent (if using GD)
 verbose: false                 # Enable detailed logging during optimization
+
+# Reward Function Configuration
+action_weight: 1.0              # Weight for action penalty in reward function

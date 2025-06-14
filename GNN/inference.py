@@ -1,50 +1,32 @@
-import os
 import numpy as np
 import torch
-import cv2
-import open3d as o3d
-import pickle
-import json
 from .dataset.dataset_gnn_dyn import ParticleDataset
 from .model.gnn_dyn import PropNetDiffDenModel
 from .model.rollout import Rollout
-from .utils import load_yaml, visualize_edges
+from .utils import load_yaml, Visualizer
 from .paths import *
 import argparse
 from scripts.utils import parse_episodes
 
 
-class Visualizer:
+class InferenceEngine:
     """
-    GNN-based object motion visualizer for complete episode analysis.
-    Handles loading trained models, camera calibration, and generating predictions
-    with visualization capabilities using the Rollout class.
+    GNN-based model inference engine for object motion prediction.
+    Handles loading trained models and generating predictions with error calculation.
     """
     
-    def __init__(self, model_path, config_path, camera_calib_path, data_file):
+    def __init__(self, model_path, config_path, data_file):
         """
-        Initialize the visualizer with trained model and data pipeline.
+        Initialize the inference engine with trained model and data pipeline.
         
         Args:
             model_path: str - path to trained model checkpoint
             config_path: str - path to training configuration file
-            camera_calib_path: str - path to camera calibration data
             data_file: str - path to HDF5 dataset file
         """
         # Load configuration and setup device
         self.config = load_yaml(config_path)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Load camera to world transforms
-        with open(os.path.join(camera_calib_path, "calibrate.pkl"), "rb") as f:
-            self.c2ws = pickle.load(f)
-        self.w2cs = [np.linalg.inv(c2w) for c2w in self.c2ws]
-            
-        with open(os.path.join(camera_calib_path, "metadata.json"), "r") as f:
-            data = json.load(f)
-        self.intrinsics = np.array(data["intrinsics"])
-        self.WH = data["WH"]
-        self.FPS = data["fps"] / self.config['dataset']['downsample_rate']
         
         # Initialize dataset for consistent data loading
         if data_file is None:
@@ -142,142 +124,6 @@ class Visualizer:
             errors.append(error)
             
         return errors
-        
-    def visualize_object_motion(self, predicted_states, tool_mask, actual_objects, 
-                               episode_num, save_path, topological_edges=None):
-        """
-        Create 3D visualization comparing predicted vs actual object motion.
-        Renders particles as colored point clouds with connectivity edges.
-        
-        Args:
-            predicted_states: [timesteps, total_particles, 3] tensor - predicted trajectory (objects + robots)
-            tool_mask: [total_particles] tensor - boolean mask (False=object, True=robot)
-            actual_objects: [timesteps, n_obj, 3] tensor - ground truth object trajectory  
-            episode_num: int - episode number for labeling
-            save_path: str - output video file path
-            topological_edges: [N, N] tensor - topological edges for object and robot particles
-            
-        Returns:
-            save_path: str - path where video was saved
-        """
-        print(f"Creating visualization for episode {episode_num}...")
-        
-        # Video parameters
-        width, height = self.WH
-        fps = self.FPS
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
-        
-        # Create Open3D visualizer
-        vis = o3d.visualization.Visualizer()
-        vis.create_window(width=width, height=height, visible=False)
-        
-        render_option = vis.get_render_option()
-        render_option.point_size = 10.0
-
-        # Move tensors to CPU
-        predicted_states = predicted_states.cpu()
-        tool_mask = tool_mask.cpu()
-        topological_edges = topological_edges.cpu()
-        
-        # Split predicted states into objects and robots using tool_mask. Convert to numpy for o3d. Keep predicted_states as tensor. 
-        actual_objects = actual_objects.cpu().numpy()
-        pred_objects = predicted_states[:, ~tool_mask, :].numpy()
-        pred_robots = predicted_states[:, tool_mask, :].numpy()
-        
-        # Create point clouds            
-        actual_pcd = o3d.geometry.PointCloud()
-        actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0])
-        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
-            
-        robot_pcd = o3d.geometry.PointCloud()
-        robot_pcd.points = o3d.utility.Vector3dVector(pred_robots[0])
-        robot_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Red for robot
-        
-        pred_pcd = o3d.geometry.PointCloud()
-        pred_pcd.points = o3d.utility.Vector3dVector(pred_objects[0])
-        pred_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for predicted
-
-        # Add geometries to visualizer
-        vis.add_geometry(actual_pcd)
-        vis.add_geometry(robot_pcd)
-        vis.add_geometry(pred_pcd)
-
-        n_frames = min(len(predicted_states), len(actual_objects))
-        print(f"Rendering {n_frames} frames...")
-        
-        # Set up camera parameters if available
-        if self.w2cs is not None:
-            view_control = vis.get_view_control()
-            camera_params = o3d.camera.PinholeCameraParameters()
-            intrinsic_parameter = o3d.camera.PinholeCameraIntrinsic(
-                width, height, self.intrinsics[0]  # Using first camera
-            )
-            camera_params.intrinsic = intrinsic_parameter
-            camera_params.extrinsic = self.w2cs[0]
-            view_control.convert_from_pinhole_camera_parameters(
-                camera_params, allow_arbitrary=True
-            )
-
-        # Initialize edge sets
-        pred_line_sets = []
-
-        # Render each frame
-        for frame_idx in range(n_frames):
-            # Update particle positions
-            pred_obj_pos = pred_objects[frame_idx]
-            actual_obj_pos = actual_objects[frame_idx]
-            robot_pos = pred_robots[frame_idx]
-            
-            if frame_idx == 0:
-                print(f"Sampled object particles: {pred_obj_pos.shape[0]}")
-                print(f"Robot particles: {robot_pos.shape[0]}")
-            
-            # Update point cloud positions
-            pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
-            robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
-            actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
-
-            vis.update_geometry(pred_pcd)
-            vis.update_geometry(actual_pcd)
-            vis.update_geometry(robot_pcd)
-
-            # Remove old edges
-            for line_set in pred_line_sets:
-                if line_set is not None:
-                    vis.remove_geometry(line_set, reset_bounding_box=False)
-            
-            pred_line_sets = visualize_edges(
-                predicted_states[frame_idx], topological_edges, tool_mask, 
-                self.adj_thresh, self.topk, False, 
-                [[1.0, 0.6, 0.2], [0.3, 0.6, 0.3]]  # light orange, light green
-            )
-            for line_set in pred_line_sets:
-                if line_set is not None:
-                    vis.add_geometry(line_set, reset_bounding_box=False)
-                        
-            # Render frame
-            vis.poll_events()
-            vis.update_renderer()
-            
-            static_image = np.asarray(
-                vis.capture_screen_float_buffer(do_render=True)
-            )
-            static_image = (static_image * 255).astype(np.uint8)
-            static_image_bgr = cv2.cvtColor(static_image, cv2.COLOR_RGB2BGR)
-            out.write(static_image_bgr)
-                        
-            if frame_idx % 10 == 0:
-                print(f"  Rendered frame {frame_idx}/{n_frames}")
-        
-        # Cleanup
-        out.release()
-        vis.destroy_window()
-        
-        print(f"Video saved to: {save_path}")
-        return save_path
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -322,8 +168,13 @@ def main():
     data_file = args.data_file 
     camera_calib_path = args.camera_calib_path
     
-    # Initialize visualizer
-    visualizer = Visualizer(model_path, config_path, camera_calib_path, data_file)
+    # Initialize inference engine
+    inference_engine = InferenceEngine(model_path, config_path, data_file)
+    
+    # Initialize visualizer if video generation is requested
+    visualizer = None
+    if args.video:
+        visualizer = Visualizer(camera_calib_path)
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")
@@ -341,12 +192,12 @@ def main():
         
         with torch.no_grad():
             # Load episode data
-            states, states_delta, attrs, particle_num, topological_edges, first_states = visualizer.dataset.load_full_episode(episode_num)
-            states = states.to(visualizer.device)
-            states_delta = states_delta.to(visualizer.device)
-            attrs = attrs.to(visualizer.device)
-            topological_edges = topological_edges.to(visualizer.device)
-            first_states = first_states.to(visualizer.device)
+            states, states_delta, attrs, particle_num, topological_edges, first_states = inference_engine.dataset.load_full_episode(episode_num)
+            states = states.to(inference_engine.device)
+            states_delta = states_delta.to(inference_engine.device)
+            attrs = attrs.to(inference_engine.device)
+            topological_edges = topological_edges.to(inference_engine.device)
+            first_states = first_states.to(inference_engine.device)
 
             # Determine particle counts from attributes (0=object, 1=robot)
             n_obj = (attrs[0] == 0).sum().item()
@@ -356,14 +207,14 @@ def main():
             print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
                         
             # Run autoregressive rollout prediction
-            predicted_states = visualizer.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges, first_states)
+            predicted_states = inference_engine.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges, first_states)
             
             # Split into object and robot components for evaluation
             predicted_objects = predicted_states[:, :n_obj, :]
             actual_objects = states[:, :n_obj, :]
             
             # Calculate prediction errors (evaluate object motion only)
-            errors = visualizer.calculate_prediction_error(predicted_objects, actual_objects)
+            errors = inference_engine.calculate_prediction_error(predicted_objects, actual_objects)
             all_errors.extend(errors)
             
             avg_error = np.mean(errors)
@@ -374,8 +225,7 @@ def main():
                 tool_mask = (attrs[0] > 0.5).bool()  # attrs is 0 for objects, 1 for robots; use first timestep only
                 video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
                 visualizer.visualize_object_motion(
-                    predicted_states, tool_mask, actual_objects, 
-                    episode_num, video_path, topological_edges
+                    predicted_states, tool_mask, actual_objects, video_path, topological_edges
                 )
                 
     # Overall results
