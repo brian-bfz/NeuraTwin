@@ -16,7 +16,7 @@ class RewardFn:
         self.robot_mask = robot_mask.to(self.device)
         
         # Temporary path
-        data_file = "PhysTwin/generated_data/data.h5"
+        data_file = "PhysTwin/generated_data/sampled_with_12_edges.h5"
             
         # Load first frame of object point cloud as target
         with h5py.File(data_file, 'r') as f:

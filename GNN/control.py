@@ -192,6 +192,12 @@ class PlannerWrapper:
         # Set up the reward function
         reward_fn = RewardFn(self.action_weight, robot_mask)
 
+        # Debug: Test reward function with zero actions
+        zero_actions = torch.zeros(1, self.n_look_ahead, 3, device=self.device)
+        zero_states = state_cur[0].repeat(self.n_look_ahead, 1).unsqueeze(0)
+        zero_reward = reward_fn(zero_states, zero_actions)
+        print(f"Zero-action reward: {zero_reward['reward_seqs'][0].item():.6f}")
+
         # Set up the planner
         planner = Planner({
             'action_dim': self.action_dim,
@@ -211,6 +217,12 @@ class PlannerWrapper:
 
         # Plan action sequence
         result = planner.trajectory_optimization(state_cur, initial_action_seq)
+        
+        # Debug: Check final reward
+        final_reward = result.get('best_eval_output', {}).get('reward_seqs')
+        if final_reward is not None:
+            print(f"Final optimized reward: {final_reward[0].item():.6f}")
+        
         return result['act_seq']
 
     def visualize_action(self, episode_idx, action_seq):
