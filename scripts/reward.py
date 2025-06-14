@@ -44,15 +44,15 @@ class RewardFn:
         # Extract shape of state_seqs and action_seqs
         n_sample, n_look_ahead, _ = action_seqs.shape
 
-        # Extract final states and reshape to point clouds
-        final_states = state_seqs[:, -1, :].to(self.device)  # [n_sample, n_particles * 3]
-        final_pcd = final_states.reshape(n_sample, -1, 3)  # [n_sample, n_particles, 3]
-        final_pcd = final_pcd[:, ~self.robot_mask, :]  # [n_sample, n_objects, 3]
+        # Reshape to point clouds
+        states_seqs = state_seqs.reshape(n_sample, n_look_ahead, -1, 3)  # [n_sample, n_look_ahead, n_particles, 3]
             
         target = self.target.unsqueeze(0).repeat(n_sample, 1, 1) # [n_sample, n_particles, 3]
         
         # Compute Chamfer distance penalty in batch (only between objects and target)
-        chamfer_penalties = chamfer_distance(final_pcd, target)
+        chamfer_penalties = torch.zeros(n_sample, device=self.device)
+        for i in range(n_look_ahead):
+            chamfer_penalties += chamfer_distance(states_seqs[:, i, ~self.robot_mask, :], target) * i
         
         # Compute action magnitude penalty - now just 3D velocity magnitude
         speeds = torch.norm(action_seqs, dim=2)  # [n_sample, n_look_ahead]

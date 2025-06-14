@@ -3,6 +3,7 @@
 GNN/data
 GNN/build/
 GNN/visualize_edges/
+GNN/tasks
 
 # PhysTwin
 PhysTwin/experiments/

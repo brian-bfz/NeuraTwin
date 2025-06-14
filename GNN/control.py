@@ -3,6 +3,7 @@ import argparse
 import h5py
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 
 from .model.rollout import Rollout
 from .model.gnn_dyn import PropNetDiffDenModel
@@ -178,7 +179,10 @@ class PlannerWrapper:
             episode_idx: int - episode containing the initial state
 
         Returns:
-            action_seqs: [n_look_ahead, 3] - action sequence
+            dict containing:
+                act_seq: [n_look_ahead, 3] - action sequence
+                eval_outputs: list of dicts containing evaluation outputs for each iteration
+                best_model_output: dict containing best model output
         """
         # Prepare data
         first_states, topological_edges, robot_mask = self.load_data(episode_idx)
@@ -191,12 +195,6 @@ class PlannerWrapper:
 
         # Set up the reward function
         reward_fn = RewardFn(self.action_weight, robot_mask)
-
-        # Debug: Test reward function with zero actions
-        zero_actions = torch.zeros(1, self.n_look_ahead, 3, device=self.device)
-        zero_states = state_cur[0].repeat(self.n_look_ahead, 1).unsqueeze(0)
-        zero_reward = reward_fn(zero_states, zero_actions)
-        print(f"Zero-action reward: {zero_reward['reward_seqs'][0].item():.6f}")
 
         # Set up the planner
         planner = Planner({
@@ -218,14 +216,22 @@ class PlannerWrapper:
         # Plan action sequence
         result = planner.trajectory_optimization(state_cur, initial_action_seq)
         
-        # Debug: Check final reward
-        final_reward = result.get('best_eval_output', {}).get('reward_seqs')
-        if final_reward is not None:
-            print(f"Final optimized reward: {final_reward[0].item():.6f}")
-        
-        return result['act_seq']
+        # Plot rewards if verbose
+        if self.verbose and 'eval_outputs' in result and result['eval_outputs'] is not None:
+            rewards_per_iter = [torch.max(out['reward_seqs']).item() for out in result['eval_outputs']]
+            plt.figure()
+            plt.plot(rewards_per_iter)
+            plt.xlabel("Iteration")
+            plt.ylabel("Max Reward in Batch")
+            plt.title("Planner Reward vs. Iteration")
+            plot_path = os.path.join("GNN", "tasks", "reward_plot.png")
+            os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+            plt.savefig(plot_path)
+            print(f"Reward plot saved to: {plot_path}")
 
-    def visualize_action(self, episode_idx, action_seq):
+        return result
+
+    def visualize_action(self, episode_idx, action_seq, predicted_states):
         """
         Use ModelRolloutFn to infer the state sequence from initial state and action sequence
         Use Open3D to visualize the state and action sequences, and target of reward function
@@ -234,21 +240,13 @@ class PlannerWrapper:
         Args:
             episode_idx: int - episode containing the initial state
             action_seq: [n_look_ahead, 3] torch tensor 
+            predicted_states: [n_look_ahead, n_particles*3] predicted states
         """
         # Prepare data
         first_states, topological_edges, robot_mask = self.load_data(episode_idx)
-        state_cur = first_states.clone().unsqueeze(0).repeat(self.n_history, 1, 1) # [n_history, n_particles, 3]
-        state_cur = state_cur.flatten(start_dim=1) # [n_history, n_particles*3]
-
-        # Set up the model rollout function
-        model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
-                     
-        # Get state sequence prediction
-        result = model_rollout_fn(state_cur, action_seq.unsqueeze(0))
-        predicted_states = result['state_seqs'][0]  # [n_look_ahead, n_particles*3]
         
         # Reshape to [n_look_ahead, n_particles, 3]
-        n_particles = model_rollout_fn.n_particles
+        n_particles = robot_mask.shape[0]
         predicted_states = predicted_states.reshape(-1, n_particles, 3)
         
         # Add initial state to create full trajectory
@@ -321,9 +319,11 @@ if __name__ == "__main__":
         print("="*60)
     
         # Plan action sequence for the specified episode
-        optimal_actions = planner_wrapper.plan_action(args.episode)
+        planning_result = planner_wrapper.plan_action(args.episode)
+        optimal_actions = planning_result['act_seq']
         print(f"Planned action sequence shape: {optimal_actions.shape}")
         print("Planning demonstration complete!")
 
         # Visualize action sequence
-        planner_wrapper.visualize_action(args.episode, optimal_actions)
+        predicted_states = planning_result['best_model_output']['state_seqs']
+        planner_wrapper.visualize_action(args.episode, optimal_actions, predicted_states)
