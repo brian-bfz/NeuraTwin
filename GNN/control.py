@@ -1,7 +1,6 @@
-import os
 import torch
 import argparse
-from typing import Dict, Any
+import h5py
 
 from .model.rollout import Rollout
 from .model.gnn_dyn import PropNetDiffDenModel
@@ -9,8 +8,6 @@ from .utils import load_yaml
 from .paths import get_model_paths
 from scripts.planner import Planner
 from scripts.reward import RewardFunction
-import h5py
-
 
 class ModelRolloutFn:
     def __init__(self, model, config, robot_mask, n_sample, topological_edges, first_states):
@@ -177,7 +174,8 @@ class PlannerWrapper:
         """
         # Prepare data
         first_states, topological_edges, robot_mask = self.load_data(episode_idx)
-        state_cur = first_states.clone().unsqueeze(0).repeat(self.n_history)
+        state_cur = first_states.clone().unsqueeze(0).repeat(self.n_history, 1, 1) # [n_history, n_particles, 3]
+        state_cur = state_cur.flatten(start_dim=1) # [n_history, n_particles*3]
 
         # Set up the model rollout function
         model_rollout_fn = ModelRolloutFn(self.model, self.train_config, robot_mask, self.n_sample, topological_edges, first_states)
@@ -197,20 +195,29 @@ class PlannerWrapper:
             'n_look_ahead': self.n_look_ahead,
             'n_update_iter': self.n_update_iter,
             'reward_weight': self.reward_weight,
-            'action_lower_lim': torch.tensor([self.action_lower_bound] * action_dim, device=self.device),
-            'action_upper_lim': torch.tensor([self.action_upper_bound] * action_dim, device=self.device),
+            'action_lower_lim': torch.full((action_dim,), self.action_lower_bound, device=self.device),
+            'action_upper_lim': torch.full((action_dim,), self.action_upper_bound, device=self.device),
             'planner_type': self.planner_type,
             'noise_level': self.noise_level,
             'verbose': self.verbose,
             'device': self.device
         })
 
-        # Flatten state_cur for planner interface: [n_history * n_particles * 3]
-        state_cur_flat = state_cur.flatten()
-
         # Plan action sequence
-        result = planner.trajectory_optimization(state_cur_flat, initial_action_seq)
+        result = planner.trajectory_optimization(state_cur, initial_action_seq)
         return result['act_seq']
+
+    def visualize_action(self, episode_idx, action_seqs):
+        """
+        Use ModelRolloutFn to infer the state sequence from initial state and action seqeuence
+        Use Open3D to visualize the state and action sequences, and target of reward function
+        Save the video to ./tasks as an mp4 file with avc1 codec
+
+        Args:
+            episode_idx: int - episode containing the initial state
+            action_seqs: [n_sample, n_look_ahead, n_robots*3] torch tensor 
+        """
+        
         
 
 if __name__ == "__main__":

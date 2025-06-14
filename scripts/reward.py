@@ -1,77 +1,70 @@
 import torch
+import h5py
+from .utils import chamfer_distance
 
-
-def stub_reward_function(state_seqs, action_seqs):
-    """
-    Stub reward function for trajectory evaluation.
-    Replace this with your actual reward computation logic.
-    
-    Args:
-        state_seqs: [n_sample, n_look_ahead, state_dim] - predicted state trajectories
-        action_seqs: [n_sample, n_look_ahead, action_dim] - action trajectories
-        
-    Returns:
-        dict containing:
-            reward_seqs: [n_sample] - reward for each trajectory sample
-    """
-    n_sample = state_seqs.shape[0]
-    
-    # Placeholder reward computation - replace with actual logic
-    # Example: negative distance to some target, energy minimization, etc.
-    reward_seqs = torch.zeros(n_sample, device=state_seqs.device)
-    
-    # Example reward computation (customize as needed):
-    # - Distance to target
-    # - Smoothness penalty  
-    # - Collision avoidance
-    # - Task-specific objectives
-    
-    return {'reward_seqs': reward_seqs}
-
-
-class RewardFunction:
-    """
-    Class-based reward function interface for more complex reward computations.
-    """
-    
-    def __init__(self, config=None):
+class RewardFn:
+    def __init__(self, n_sample, ap_weight):
         """
-        Initialize reward function with configuration.
-        
-        Args:
-            config: dict - reward function configuration parameters
+        load the target point cloud and other configs
         """
-        self.config = config or {}
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.ap_weight = ap_weight  # action penalty weight
+        self.n_sample = n_sample 
         
+        # Temporary path
+        data_file = "PhysTwin/data/different_types/single_push_rope/data.h5"
+            
+        # Load first frame of object point cloud as target
+        with h5py.File(data_file, 'r') as f:
+            pcd = torch.tensor(f['episode_000000/object'][0], dtype=torch.float32) # [n_particles, 3]
+        
+        # Apply translation to target if specified
+        target_translation = [1.0, 0.0, 0.0]  # Default translation
+        target = pcd + torch.full(pcd.shape, target_translation, dtype=torch.float32)
+
+        # Move to device and shape to [n_sample, n_particles, 3]
+        target = target.to(self.device)
+        self.target = target.unsqueeze(0).repeat(self.n_sample, 1, 1)
+
+
     def __call__(self, state_seqs, action_seqs):
         """
-        Evaluate reward for given state and action sequences.
-        
-        Args:
-            state_seqs: [n_sample, n_look_ahead, state_dim] - predicted state trajectories
-            action_seqs: [n_sample, n_look_ahead, action_dim] - action trajectories
-            
+        reward = -chamfer_distance - action_penalty
+
+        Args: 
+            state_seqs: [n_sample, n_look_ahead, n_particles * 3] torch tensor
+            action_seqs: [n_sample, n_look_ahead, n_robot * 3] torch tensor
+
         Returns:
-            dict containing:
-                reward_seqs: [n_sample] - reward for each trajectory sample
+            Dict containing:
+            - reward_seqs: [n_sample] torch tensor - total rewards
         """
-        return self.compute_reward(state_seqs, action_seqs)
+        # Extract shape of state_seqs and action_seqs
+        n_sample, n_look_ahead, action_dim = action_seqs.shape
+        assert n_sample == self.n_sample
+        n_robot = action_dim // 3
+
+        # Extract final states and reshape to point clouds
+        assert state_seqs.shape[0] == self.n_sample
+        final_states = state_seqs[:, -1, :].to(self.device)  # [n_sample, n_particles * 3]
+        final_pcd = final_states.reshape(self.n_sample, -1, 3)  # [n_sample, n_particles, 3]
         
-    def compute_reward(self, state_seqs, action_seqs):
-        """
-        Implement actual reward computation logic here.
+        # Compute Chamfer distance penalty in batch
+        chamfer_penalties = chamfer_distance(final_pcd, self.target)
         
-        Args:
-            state_seqs: [n_sample, n_look_ahead, state_dim] - predicted state trajectories
-            action_seqs: [n_sample, n_look_ahead, action_dim] - action trajectories
-            
-        Returns:
-            dict containing:
-                reward_seqs: [n_sample] - reward for each trajectory sample
-        """
-        n_sample = state_seqs.shape[0]
+        # Compute action magnitude penalty
+        action_seqs = action_seqs.reshape(n_sample, n_look_ahead, n_robot, 3)
         
-        # Placeholder - implement your reward logic here
-        reward_seqs = torch.zeros(n_sample, device=state_seqs.device)
+        # Compute speed (magnitude) of each robot point
+        speeds = torch.norm(action_seqs, dim=3)  # [n_sample, n_look_ahead, n_robot]
         
-        return {'reward_seqs': reward_seqs} 
+        # For each timestep, take mean speed across robot points and sum across timesteps
+        action_penalties = torch.mean(speeds, dim=2).sum(dim=1) * self.ap_weight
+
+
+        print(f"chamfer_penalties: {chamfer_penalties}")
+        print(f"action_penalties: {action_penalties}")
+        return {
+            'reward_seqs': -(chamfer_penalties + action_penalties)
+        }
+        

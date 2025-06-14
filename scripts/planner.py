@@ -21,39 +21,39 @@ class Planner(object):
     """
 
     def __init__(self, config):
-        # config contains following keys:
-        
-        # REQUIRED
-        # - action_dim: the dimension of the action
-        # - model_rollout_fn:
-        #   - description: the function to rollout the model
-        #   - input:
-        #     - state_cur (shape: [n_his, state_dim] torch tensor)
-        #     - action_seqs (shape: [n_sample, n_look_ahead, action_dim] torch tensor)
-        #   - output: a dict containing the following keys:
-        #     - state_seqs: the sequence of the state, shape: [n_sample, n_look_ahead, state_dim] torch tensor
-        #     - any other keys that you want to return
-        # - evaluate_traj_fn:
-        #   - description: the function to evaluate the trajectory
-        #   - input:
-        #     - state_seqs (shape: [n_sample, n_look_ahead, state_dim] torch tensor)
-        #     - action_seqs (shape: [n_sample, n_look_ahead, action_dim] torch tensor)
-        #   - output: a dict containing the following keys:
-        #     - reward_seqs (shape: [n_sample] torch tensor)
-        #     - any other keys that you want to return
-        # - n_sample: the number of action trajectories to sample
-        # - n_look_ahead: the number of steps to look ahead
-        # - n_update_iter: the number of iterations to update the action sequence
-        # - reward_weight: the weight of the reward to aggregate action sequences
-        # - action_lower_lim:
-        #   - description: the lower limit of the action
-        #   - shape: [action_dim]
-        #   - type: torch tensor
-        # - action_upper_lim: the upper limit of the action
-        #   - description: the upper limit of the action
-        #   - shape: [action_dim]
-        #   - type: torch tensor
-        # - planner_type: the type of the planner (options: 'GD', 'MPPI', 'MPPI_GD')
+        """
+        config contains following keys:
+        - action_dim: the dimension of the action
+        - model_rollout_fn:
+          - description: the function to rollout the model
+          - input:
+            - state_cur (shape: [n_his, state_dim] torch tensor)
+            - action_seqs (shape: [n_sample, n_look_ahead, action_dim] torch tensor)
+          - output: a dict containing the following keys:
+            - state_seqs: the sequence of the state, shape: [n_sample, n_look_ahead, state_dim] torch tensor
+            - any other keys that you want to return
+        - evaluate_traj_fn:
+          - description: the function to evaluate the trajectory
+          - input:
+            - state_seqs (shape: [n_sample, n_look_ahead, state_dim] torch tensor)
+            - action_seqs (shape: [n_sample, n_look_ahead, action_dim] torch tensor)
+          - output: a dict containing the following keys:
+            - reward_seqs (shape: [n_sample] torch tensor)
+            - any other keys that you want to return
+        - n_sample: the number of action trajectories to sample
+        - n_look_ahead: the number of steps to look ahead
+        - n_update_iter: the number of iterations to update the action sequence
+        - reward_weight: the weight of the reward to aggregate action sequences
+        - action_lower_lim:
+          - description: the lower limit of the action
+          - shape: [action_dim]
+          - type: torch tensor
+        - action_upper_lim: the upper limit of the action
+          - description: the upper limit of the action
+          - shape: [action_dim]
+          - type: torch tensor
+        - planner_type: the type of the planner (options: 'GD', 'MPPI', 'MPPI_GD')
+        """
         self.config = config
         self.action_dim = config['action_dim']
         self.model_rollout = config['model_rollout_fn']
