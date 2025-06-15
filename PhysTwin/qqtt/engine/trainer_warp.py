@@ -1219,7 +1219,7 @@ class InvPhyTrainerWarp:
         print(f"Saved episode {episode_id} to {data_file_path}: object {object_array.shape}, robot {robot_array.shape}")
 
     def generate_data(
-        self, model_path, gs_path, n_ctrl_parts=1, data_file_path=None, episode_id=0, custom_control_points=None, 
+        self, model_path, gs_path, translation, target_changes, n_ctrl_parts=1, data_file_path=None, episode_id=0, custom_control_points=None, 
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
@@ -1235,7 +1235,6 @@ class InvPhyTrainerWarp:
         )
         
         # set robot position and movement parameters
-        translation, target_changes = self.push_once(offset_dist=0.1, keep_off=0.025, travel_dist=0.3, speed=0.005)
         n_frames = target_changes.shape[0]
         current_finger = 0.0
         finger_changes = np.zeros((n_frames), dtype=np.float32)
