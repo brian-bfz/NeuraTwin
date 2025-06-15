@@ -3,7 +3,7 @@ import h5py
 from .utils import chamfer_distance
 
 class RewardFn:
-    def __init__(self, ap_weight, robot_mask):
+    def __init__(self, ap_weight, fsp_weight, robot_mask):
         """
         load the target point cloud and other configs
         
@@ -13,6 +13,7 @@ class RewardFn:
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.ap_weight = ap_weight  # action penalty weight
+        self.fsp_weight = fsp_weight # final speed penalty weight
         self.robot_mask = robot_mask.to(self.device)
         
         # Temporary path
@@ -31,7 +32,10 @@ class RewardFn:
 
     def __call__(self, state_seqs, action_seqs):
         """
-        reward = -chamfer_distance - action_penalty
+        Goals:
+            - Minimize chamfer distance between object and target throughout the trajectory
+            - Minimize object speed in the last frame 
+            - Minimize robot speed throughout the trajectory
 
         Args: 
             state_seqs: [n_sample, n_look_ahead, n_particles * 3] torch tensor
@@ -53,14 +57,18 @@ class RewardFn:
         chamfer_penalties = torch.zeros(n_sample, device=self.device)
         for i in range(n_look_ahead):
             chamfer_penalties += chamfer_distance(states_seqs[:, i, ~self.robot_mask, :], target) * i * i
+
+        final_delta = states_seqs[:, -1, ~self.robot_mask, :] - states_seqs[:, -2, ~self.robot_mask, :]
+        final_speed = torch.norm(final_delta, dim=2) # [n_sample, n_particles] 
+        final_speed_penalty = torch.mean(final_speed, dim=1) * n_look_ahead * self.final_speed_weight # [n_sample]
         
         # Compute action magnitude penalty - now just 3D velocity magnitude
         speeds = torch.norm(action_seqs, dim=2)  # [n_sample, n_look_ahead]
-        action_penalties = speeds.sum(dim=1) * self.ap_weight  # [n_sample]
+        action_penalties = speeds.sum(dim=1) * self.fsp_weight  # [n_sample]
 
         # print(f"chamfer_penalties: {chamfer_penalties}")
         # print(f"action_penalties: {action_penalties}")
         return {
-            'reward_seqs': -(chamfer_penalties + action_penalties)
+            'reward_seqs': -(chamfer_penalties + final_speed_penalty + action_penalties)
         }
         

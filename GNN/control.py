@@ -47,6 +47,8 @@ class ModelRolloutFn:
                 state_seqs: [n_sample, n_look_ahead, state_dim] - predicted trajectories
         """
         n_sample, n_look_ahead, _ = action_seqs.shape
+        filler = torch.zeros((n_sample, n_look_ahead, 1), device=action_seqs.device)
+        action_seqs = torch.cat([action_seqs, filler], dim=2)
 
         # Reshape states: [n_history, n_particles*3]] -> [n_sample, n_history, n_particles, 3]
         states = state_cur.view(self.n_history, self.n_particles, 3)
@@ -131,7 +133,7 @@ class PlannerWrapper:
         self.verbose = self.mpc_config.get('verbose', False)
 
         self.action_weight = self.mpc_config['action_weight']
-        
+        self.fsp_weight = self.mpc_config['fsp_weight']
         print(f"Loaded model from: {model_path}")
         print(f"Using device: {self.device}")
         print(f"History length: {self.n_history}")
@@ -194,7 +196,7 @@ class PlannerWrapper:
         initial_action_seq = torch.zeros(self.n_look_ahead, self.action_dim, device=self.device)
 
         # Set up the reward function
-        reward_fn = RewardFn(self.action_weight, robot_mask)
+        reward_fn = RewardFn(self.action_weight, self.fsp_weight, robot_mask)
 
         # Set up the planner
         planner = Planner({
