@@ -102,7 +102,7 @@ class PhysTwinModelRolloutFn:
             robot_translation = action_seq[step_idx].cpu().numpy()
             accumulate_trans[0] += robot_translation
             
-            # Update robot mesh with accumulated translation
+            # Update robot mesh with accumulated translation - following trainer_warp pattern
             finger_meshes = self.trainer.robot.get_finger_mesh(0.0)  # Fixed gripper opening
             dynamic_vertices = torch.tensor([
                 np.asarray(finger_mesh.vertices) + accumulate_trans[0] 
@@ -121,22 +121,34 @@ class PhysTwinModelRolloutFn:
             # Calculate interpolated center
             interpolated_center = torch.mean(current_trans_dynamic_points, dim=0)
             
-            # Update simulator with robot movement
+            # Create proper interpolated points for all substeps (like trainer_warp.py)
+            ratios = torch.linspace(1, cfg.num_substeps, cfg.num_substeps, device=self.device).view(-1, 1, 1) / cfg.num_substeps
+            prev_trans_dynamic_points = current_trans_dynamic_points - torch.tensor(robot_translation, device=self.device, dtype=torch.float32)
+            
+            interpolated_trans_dynamic_points = (
+                prev_trans_dynamic_points.unsqueeze(0) + 
+                (current_trans_dynamic_points - prev_trans_dynamic_points).unsqueeze(0) * ratios
+            )
+            interpolated_center_substeps = torch.mean(interpolated_trans_dynamic_points, dim=1)
+            
+            # Update simulator with proper robot movement (following trainer_warp pattern)
             self.trainer.simulator.set_mesh_interactive(
-                current_trans_dynamic_points.unsqueeze(0),  # Add substep dimension
-                interpolated_center.unsqueeze(0),
+                interpolated_trans_dynamic_points,  # [num_substeps, n_robot_vertices, 3]
+                interpolated_center_substeps,       # [num_substeps, 3]
                 dynamic_velocity,
                 dynamic_omega,
             )
             
-            # Run physics step
+            # Run physics step with collision detection
+            if self.trainer.simulator.object_collision_flag:
+                self.trainer.simulator.update_collision_graph()
             wp.capture_launch(self.trainer.simulator.forward_graph)
             
             # Get new object state
             x = wp.to_torch(self.trainer.simulator.wp_states[-1].wp_x, requires_grad=False)
             object_state = x[:self.n_object_particles]  # Only object particles
             
-            # Combine object and robot states
+            # Combine object and robot states (use final robot position)
             combined_state = torch.cat([object_state, current_trans_dynamic_points], dim=0)
             predicted_states.append(combined_state)
             
