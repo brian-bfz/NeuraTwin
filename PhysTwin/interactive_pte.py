@@ -1,14 +1,9 @@
 from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
-from datetime import datetime
+from .config_manager import PhysTwinConfig, create_common_parser
 import random
 import numpy as np
 import torch
-from argparse import ArgumentParser
-import glob
-import os
-import pickle
-import json
 import open3d as o3d
 import sapien.core as sapien
 from urdfpy import URDF
@@ -160,23 +155,10 @@ class RobotPcSampler:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument(
-        "--base_path",
-        type=str,
-        default=str(DATA_DIFFERENT_TYPES),
-    )
-    parser.add_argument(
-        "--gaussian_path",
-        type=str,
-        default=str(GAUSSIAN_OUTPUT_DIR),
-    )
-    parser.add_argument(
-        "--bg_img_path",
-        type=str,
-        default=str(DATA_BG_IMG),
-    )
-    parser.add_argument("--case_name", type=str, default="single_push_rope")
+    # Create parser with common arguments
+    parser = create_common_parser()
+    
+    # Add script-specific arguments
     parser.add_argument("--n_ctrl_parts", type=int, default=1)
     parser.add_argument(
         "--inv_ctrl", action="store_true", help="invert horizontal control direction"
@@ -191,82 +173,20 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    base_path = args.base_path
-    case_name = args.case_name
-
-    case_paths = get_case_paths(case_name)
-
-    if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml(CONFIG_CLOTH)
-    else:
-        cfg.load_from_yaml(CONFIG_REAL)
-
-    base_dir = str(TEMP_EXPERIMENTS_DIR / case_name)
-
-    # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = case_paths['optimal_params']
-    logger.info(f"Load optimal parameters from: {optimal_path}")
-    assert os.path.exists(
-        optimal_path
-    ), f"{case_name}: Optimal parameters not found: {optimal_path}"
-    with open(optimal_path, "rb") as f:
-        optimal_params = pickle.load(f)
-    cfg.set_optimal_params(optimal_params)
-
-    # Set the intrinsic and extrinsic parameters for visualization
-    with open(case_paths["data_dir"] / "calibrate.pkl", "rb") as f:
-        c2ws = pickle.load(f)
-    w2cs = [np.linalg.inv(c2w) for c2w in c2ws]
-    cfg.c2ws = np.array(c2ws)
-    cfg.w2cs = np.array(w2cs)
-    with open(case_paths["data_dir"] / "metadata.json", "r") as f:
-        data = json.load(f)
-    cfg.intrinsics = np.array(data["intrinsics"])
-    cfg.WH = data["WH"]
-    cfg.bg_img_path = args.bg_img_path
-
-    # Load the static_meshes
-    static_meshes = []
-    # clip_mesh = o3d.io.read_triangle_mesh("clip.stl")
-    # clip_mesh.scale(0.0015, center=[0, 0, 0])
-    # static_poses = np.array(
-    #     [
-    #         [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, -0.005], [0, 0, 0, 1]],
-    #         [[1, 0, 0, 0.1], [0, -1, 0, 0.3], [0, 0, -1, -0.005], [0, 0, 0, 1]],
-    #     ],
-    #     dtype=np.float32,
-    # )
-    # static_poses = np.array(
-    #     [
-    #         [[0, -1, 0, 0], [-1, 0, 0, 0], [0, 0, -1, -0.005], [0, 0, 0, 1]],
-    #         [[0, -1, 0, 0.2], [-1, 0, 0, 0.2], [0, 0, -1, -0.005], [0, 0, 0, 1]],
-    #     ],
-    #     dtype=np.float32,
-    # )
-    # for static_pose in static_poses:
-    #     new_mesh = o3d.geometry.TriangleMesh(clip_mesh)
-    #     new_mesh.transform(static_pose)
-    #     new_mesh.paint_uniform_color([0.929, 0, 1])
-    #     new_mesh.compute_vertex_normals()
-    #     static_meshes.append(new_mesh)
-    # coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-    # o3d.visualization.draw_geometries(static_meshes + [coordinate])
-
-    # Load the robot finger
-    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
-
-    init_pose = np.eye(4)
-    init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.2, 0.0, 0.23]
-    sample_robot = RobotPcSampler(
-        str(URDF_XARM7), link_names=["left_finger", "right_finger"], init_pose=init_pose
+    # Initialize configuration - this replaces ~80 lines of setup code
+    config = PhysTwinConfig(
+        case_name=args.case_name,
+        base_path=args.base_path,
+        bg_img_path=args.bg_img_path,
+        gaussian_path=args.gaussian_path
     )
-    # meshes = sample_robot.get_finger_mesh(gripper_openness=1.0)
-    # coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-    # o3d.visualization.draw_geometries(meshes + [coordinate])
 
-    exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
-    gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
+
+    # Load the static_meshes (keeping existing static mesh setup)
+    static_meshes = []
+
+    # Create robot with interactive pose
+    sample_robot = config.create_robot("interactive")
 
     # Load GNN model and config
     gnn_model = None
@@ -302,16 +222,19 @@ if __name__ == "__main__":
             gnn_model = None
             gnn_config = None
 
-    logger.set_log_file(path=base_dir, name="inference_log")
+    # Create trainer
     trainer = InvPhyTrainerWarp(
-        data_path=str(case_paths['data_dir'] / "final_data.pkl"),
-        base_dir=base_dir,
+        data_path=config.get_data_path(),
+        base_dir=config.get_temp_base_dir(),
         pure_inference_mode=True,
         static_meshes=static_meshes,
         robot=sample_robot,
     )
 
-    best_model_path = glob.glob(str(case_paths['model_dir'] / "best_*.pth"))[0]
+    # Run interactive session
+    best_model_path = config.get_best_model_path()
+    gaussians_path = config.get_gaussian_path()
+    
     trainer.interactive_robot(
         best_model_path,
         gaussians_path,
@@ -320,26 +243,3 @@ if __name__ == "__main__":
         gnn_model=gnn_model,
         gnn_config=gnn_config,
     )
-
-'''rope
-[ 0.25215911 -0.25688532 -0.02905989]
-cloth
-[ 0.25215911 -0.25688532 -0.02905989]
-rope
-camera parameters:  PinholeCameraIntrinsic(width=848, height=480, ) [[-0.00651439  0.99932604  0.03612512 -0.08345831]
- [-0.78932813 -0.02731824  0.61336353  0.15281548]
- [ 0.61393702 -0.02451888  0.78897412  0.55585475]
- [ 0.          0.          0.          1.        ]]
- cloth
- camera parameters:  PinholeCameraIntrinsic(width=848, height=480, ) [[ 0.00376547 -0.99918123  0.04028274  0.15342079]
- [ 0.7874922   0.02779003  0.61569777  0.01038025]
- [-0.61631311  0.02940395  0.78695206  0.65531986]
- [ 0.          0.          0.          1.        ]]
- intrinsic parameters:  [[426.76251221   0.         424.43331909]
- [  0.         426.37734985 246.92410278]
- [  0.           0.           1.        ]]
-extrinsic parameters:  [[ 0.00376547 -0.99918123  0.04028274  0.15342079]
- [ 0.7874922   0.02779003  0.61569777  0.01038025]
- [-0.61631311  0.02940395  0.78695206  0.65531986]
- [ 0.          0.          0.          1.        ]]
-'''

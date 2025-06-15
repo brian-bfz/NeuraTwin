@@ -3,17 +3,11 @@
 from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
 from .paths import *
+from .config_manager import PhysTwinConfig, create_common_parser
 from datetime import datetime
 import random
-import numpy as np
-import torch
-from argparse import ArgumentParser
-import glob
 import os
-import pickle
-from .SampleRobot import RobotPcSampler
 import h5py
-import sys
 from scripts.utils import parse_episodes
 
 # def set_all_seeds(seed):
@@ -75,18 +69,10 @@ def initialize_data_file(data_file_path):
         print(f"Using existing data file: {data_file_path}")
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument(
-        "--base_path",
-        type=str,
-        default=str(DATA_DIFFERENT_TYPES),
-    )
-    parser.add_argument(
-        "--gaussian_path",
-        type=str,
-        default=str(GAUSSIAN_OUTPUT_DIR),
-    )
-    parser.add_argument("--case_name", type=str, default="double_lift_cloth_3")
+    # Create parser with common arguments
+    parser = create_common_parser()
+    
+    # Add script-specific arguments
     parser.add_argument("--n_ctrl_parts", type=int, default=1)
     parser.add_argument("--custom_ctrl_points", type=str, help="Path to directory containing custom control points")
     parser.add_argument("--episodes", nargs='+', type=str, required=True,
@@ -94,62 +80,23 @@ if __name__ == "__main__":
     parser.add_argument("--include_gaussian", action="store_true")
     args = parser.parse_args()
 
-    # Parse episode specification
-    try:
-        episode_list = parse_episodes(args.episodes)
-    except ValueError as e:
-        print(f"Error parsing episodes: {e}")
-        print("Examples:")
-        print("  Space-separated: --episodes 0 1 2 3 4")
-        print("  Range format: --episodes 0-4")
-        sys.exit(1)
+    episode_list = parse_episodes(args.episodes)
 
-    base_path = args.base_path
-    case_name = args.case_name
-
-    if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml(str(CONFIG_CLOTH))
-    else:
-        cfg.load_from_yaml(str(CONFIG_REAL))
-    print(cfg.__dict__)
-
-    case_paths = get_case_paths(case_name)
-    base_dir = str(case_paths['base_dir'])
-
-    # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = str(case_paths['optimal_params'])
-    logger.info(f"Load optimal parameters from: {optimal_path}")
-    assert os.path.exists(
-        optimal_path
-    ), f"{case_name}: Optimal parameters not found: {optimal_path}"
-    with open(optimal_path, "rb") as f:
-        optimal_params = pickle.load(f)
-    cfg.set_optimal_params(optimal_params)
-
-    # Load the robot finger
-    urdf_path = str(URDF_XARM7)
-    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
-
-    init_pose = np.eye(4)
-    init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.0, 0.0, 0.0]
-
-    exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
-    gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
-
-    logger.set_log_file(path=base_dir, name="inference_log")
-
-    best_model_path = glob.glob(str(case_paths['model_dir'] / "best_*.pth"))[0]
-    
-    # Create timestamped folder for this simulation run
-    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # print(case_name, timestamp, f"{case_name}_{timestamp}")
-    sample_robot = RobotPcSampler(
-        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+    # Initialize configuration - this replaces ~50 lines of setup code
+    config = PhysTwinConfig(
+        case_name=args.case_name,
+        base_path=args.base_path,
+        bg_img_path=args.bg_img_path,
+        gaussian_path=args.gaussian_path
     )
+    
+    # Create robot with default pose for data generation
+    sample_robot = config.create_robot("default")
+
+    # Create trainer
     trainer = InvPhyTrainerWarp(
-        data_path=f"{base_path}/{case_name}/final_data.pkl",
-        base_dir=base_dir,
+        data_path=config.get_data_path(),
+        base_dir=str(config.case_paths['base_dir']),
         pure_inference_mode=True,
         static_meshes=[],
         robot=sample_robot,
@@ -163,6 +110,9 @@ if __name__ == "__main__":
     initialize_data_file(data_file_path)
 
     # Generate episodes
+    best_model_path = config.get_best_model_path()
+    gaussians_path = config.get_gaussian_path()
+    
     for i in episode_list:
         translation, target_changes = trainer.push_once(offset_dist=0.1, keep_off=0.025, travel_dist=0.3, speed=0.005)
         trainer.generate_data(

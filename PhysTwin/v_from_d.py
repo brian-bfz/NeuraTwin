@@ -1,18 +1,13 @@
 from .qqtt.utils import logger, cfg
+from .config_manager import PhysTwinConfig, create_common_parser
 import numpy as np
-import torch
-from argparse import ArgumentParser
 from .SampleRobot import RobotPcSampler
 from .paths import *
 import os
-import pickle
-import json
 import cv2
 import open3d as o3d
 import h5py
-import sys
 from scripts.utils import parse_episodes
-import glob
 
 def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
         logger.info(f"Starting video generation for episode {episode_id}")
@@ -114,72 +109,34 @@ def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument(
-        "--base_path",
-        type=str,
-        default=str(DATA_DIFFERENT_TYPES),
-    )
+    # Create parser with common arguments
+    parser = create_common_parser()
+    
+    # Add script-specific arguments
     parser.add_argument(
         "--data_file",
         type=str,
         default=str(GENERATED_DATA_DIR / "data.h5"),
         help="Path to the shared HDF5 data file"
     )
-    parser.add_argument(
-        "--bg_img_path",
-        type=str,
-        default=str(DATA_BG_IMG),
-    )
-    parser.add_argument("--case_name", type=str, required=True)
     parser.add_argument("--episodes", nargs='+', type=str, default=["0-4"],
                        help="Episodes to generate videos for. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--output_dir", type=str, default=str(GENERATED_VIDEOS_DIR), help="Output directory for videos")
     args = parser.parse_args()
 
-    base_path = args.base_path
-    case_name = args.case_name
-
-    if "cloth" in case_name or "package" in case_name:
-        cfg.load_from_yaml(str(CONFIG_CLOTH))
-    else:
-        cfg.load_from_yaml(str(CONFIG_REAL))
-
-    case_paths = get_case_paths(case_name)
-    base_dir = str(case_paths['base_dir'])
-
-    # Load the robot finger
-    urdf_path = str(URDF_XARM7)
-    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
-
-    init_pose = np.eye(4)
-    init_pose[:3, :3] = R
-    init_pose[:3, 3] = [0.2, 0.0, 0.23]
-    sample_robot = RobotPcSampler(
-        urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
+    # Initialize configuration - this replaces ~40 lines of setup code
+    config = PhysTwinConfig(
+        case_name=args.case_name,
+        base_path=args.base_path,
+        bg_img_path=args.bg_img_path,
+        gaussian_path=args.gaussian_path
     )
 
-    # Set the intrinsic and extrinsic parameters for visualization
-    with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
-        c2ws = pickle.load(f)
-    w2cs = [np.linalg.inv(c2w) for c2w in c2ws]
-    cfg.c2ws = np.array(c2ws)
-    cfg.w2cs = np.array(w2cs)
-    with open(f"{base_path}/{case_name}/metadata.json", "r") as f:
-        data = json.load(f)
-    cfg.intrinsics = np.array(data["intrinsics"])
-    cfg.WH = data["WH"]
-    cfg.bg_img_path = args.bg_img_path
+    # Create robot with video pose
+    sample_robot = config.create_robot("video")
 
     # Parse episode specification
-    try:
-        episode_list = parse_episodes(args.episodes)
-    except ValueError as e:
-        print(f"Error parsing episodes: {e}")
-        print("Examples:")
-        print("  Space-separated: --episodes 0 1 2 3 4")
-        print("  Range format: --episodes 0-4")
-        sys.exit(1)
+    episode_list = parse_episodes(args.episodes)
 
     # Generate videos for specified episodes
     with h5py.File(args.data_file, 'r') as f:

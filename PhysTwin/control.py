@@ -13,7 +13,7 @@ import json
 
 from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
-from .SampleRobot import RobotPcSampler
+from .config_manager import PhysTwinConfig, create_common_parser
 from .paths import get_case_paths, URDF_XARM7
 from scripts.planner import Planner
 from scripts.reward import RewardFn
@@ -173,22 +173,33 @@ class PhysTwinModelRolloutFn:
 
 
 class PhysTwinPlannerWrapper:
-    def __init__(self, model_path: str, mpc_config_path: str, case_name: str):
+    """Wrapper for PhysTwin-based model predictive control"""
+    
+    def __init__(self, mpc_config_path: str, case_name: str, 
+                 base_path: str = None, bg_img_path: str = None, gaussian_path: str = None):
         """
         Initialize the PhysTwin planner wrapper.
         
         Args:
-            model_path: path to trained PhysTwin model checkpoint
-            mpc_config_path: path to MPC configuration file
-            case_name: name of the case for loading data and configuration
+            mpc_config_path: Path to MPC configuration file
+            case_name: Name of the case/experiment
+            base_path: Base path for data (optional)
+            bg_img_path: Path to background image (optional)
+            gaussian_path: Path to gaussian output directory (optional)
         """
-        # Load configurations
-        self.mpc_config = load_yaml(mpc_config_path)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.case_name = case_name
+        # Initialize configuration
+        self.config = PhysTwinConfig(
+            case_name=case_name,
+            base_path=base_path,
+            bg_img_path=bg_img_path,
+            gaussian_path=gaussian_path
+        )
         
-        # Initialize PhysTwin trainer
-        self.trainer = self._initialize_trainer(model_path, case_name)
+        # Load MPC configuration
+        self.mpc_config = load_yaml(mpc_config_path)   
+             
+        # Setup device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Extract MPC parameters
         self.action_dim = self.mpc_config['action_dim']
@@ -202,46 +213,32 @@ class PhysTwinPlannerWrapper:
         self.noise_level = self.mpc_config['noise_level']
         self.verbose = self.mpc_config.get('verbose', False)
         self.action_weight = self.mpc_config['action_weight']
+        self.fsp_weight = self.mpc_config['fsp_weight']
         
-        print(f"Loaded PhysTwin model from: {model_path}")
+        # Initialize trainer
+        self.trainer = self._initialize_trainer()
+        
+        print(f"PhysTwin MPC initialized for case: {case_name}")
         print(f"Using device: {self.device}")
-        print(f"Case: {case_name}")
+        print(f"History length: {self.n_history}")
 
-    def _initialize_trainer(self, model_path, case_name):
+    def _initialize_trainer(self):
         """Initialize PhysTwin trainer with loaded model."""
-        # Load case configuration
-        if "cloth" in case_name or "package" in case_name:
-            from .paths import CONFIG_CLOTH
-            cfg.load_from_yaml(str(CONFIG_CLOTH))
-        else:
-            from .paths import CONFIG_REAL
-            cfg.load_from_yaml(str(CONFIG_REAL))
-        
-        # Get case paths
-        case_paths = get_case_paths(case_name)
-        
-        # Load robot sampler
-        urdf_path = str(URDF_XARM7)
-        R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
-        init_pose = np.eye(4)
-        init_pose[:3, :3] = R
-        init_pose[:3, 3] = [0.0, 0.0, 0.0]
-        
-        sample_robot = RobotPcSampler(
-            urdf_path, link_names=["left_finger", "right_finger"], init_pose=init_pose
-        )
+        # Create robot
+        sample_robot = self.config.create_robot("default")
         
         # Create trainer
         trainer = InvPhyTrainerWarp(
-            data_path=f"{case_paths['data_dir']}/final_data.pkl",
-            base_dir=str(case_paths['base_dir']),
+            data_path=self.config.get_data_path(),
+            base_dir=str(self.config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
             robot=sample_robot,
         )
         
         # Initialize simulator with trained model
-        trainer.initialize_simulator(model_path)
+        best_model_path = self.config.get_best_model_path()
+        trainer.initialize_simulator(best_model_path)
         
         return trainer
         
@@ -473,22 +470,27 @@ if __name__ == "__main__":
     """
     Demonstrate PhysTwin-based model predictive control.
     """
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--case_name", type=str, required=True,
-                       help="Case name (e.g., single_push_rope)")
+    # Create parser with common arguments
+    parser = create_common_parser()
+    
+    # Add script-specific arguments
     parser.add_argument("--episode", type=int, required=True,
                        help="Episode index to load")
     parser.add_argument("--mpc_config", type=str, default="PhysTwin/configs/mpc_config.yaml",
                        help="Path to MPC config file")
+    parser.add_argument("--data_file", type=str, default=None,
+                       help="Path to episode data file")
     args = parser.parse_args()
     
-    # Setup paths
-    case_paths = get_case_paths(args.case_name)
-    best_model_path = glob.glob(str(case_paths['model_dir'] / "best_*.pth"))[0]
-        
     with torch.no_grad():
         # Initialize planner wrapper
-        planner_wrapper = PhysTwinPlannerWrapper(best_model_path, args.mpc_config, args.case_name)
+        planner_wrapper = PhysTwinPlannerWrapper(
+            mpc_config_path=args.mpc_config,
+            case_name=args.case_name,
+            base_path=args.base_path,
+            bg_img_path=args.bg_img_path,
+            gaussian_path=args.gaussian_path
+        )
     
         # Demonstrate planning
         print("="*60)
@@ -501,5 +503,7 @@ if __name__ == "__main__":
         print(f"Planned action sequence shape: {optimal_actions.shape}")
         print("Planning demonstration complete!")
 
-        predicted_states = planning_result['best_model_output']['state_seqs']
-        planner_wrapper.visualize_action(args.episode, optimal_actions, predicted_states) 
+        # Visualize action sequence
+        if 'best_model_output' in planning_result:
+            predicted_states = planning_result['best_model_output']['state_seqs']
+            planner_wrapper.visualize_action(args.episode, optimal_actions, predicted_states, args.data_file) 
