@@ -52,7 +52,7 @@ class RewardFn:
         # Compute Chamfer distance penalty in batch (only between objects and target)
         chamfer_penalties = torch.zeros(n_sample, device=self.device)
         for i in range(n_look_ahead):
-            chamfer_penalties += chamfer_distance(states_seqs[:, i, ~self.robot_mask, :], target) * i
+            chamfer_penalties += chamfer_distance(states_seqs[:, i, ~self.robot_mask, :], target) * i * i
         
         # Compute action magnitude penalty - now just 3D velocity magnitude
         speeds = torch.norm(action_seqs, dim=2)  # [n_sample, n_look_ahead]
