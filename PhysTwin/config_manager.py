@@ -39,13 +39,13 @@ class PhysTwinConfig:
         self.gaussian_path = gaussian_path or str(GAUSSIAN_OUTPUT_DIR)
         
         # Initialize paths and configuration
-        if inference: 
-            self.setup_logging("inference_log")
         self.case_paths = get_case_paths(case_name)
         self._setup_config()
         self._load_optimal_params()
         self._load_calibration_data()
-    
+        if inference: 
+            self.setup_logging("inference_log")
+
     def _setup_config(self) -> None:
         """Load case-specific configuration (cloth vs real)"""
         if "cloth" in self.case_name or "package" in self.case_name:
@@ -130,7 +130,11 @@ class PhysTwinConfig:
         
         init_pose = np.eye(4)
         init_pose[:3, :3] = R
-        init_pose[:3, 3] = [0.0, 0.0, 0.0]
+
+        if robot_type == "interactive":
+            init_pose[:3, 3] = [0.2, 0.0, 0.23]
+        else:
+            init_pose[:3, 3] = [0.0, 0.0, 0.0]
         
         return RobotPcSampler(
             urdf_path, 

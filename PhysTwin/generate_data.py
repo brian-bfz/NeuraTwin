@@ -114,12 +114,9 @@ if __name__ == "__main__":
     gaussians_path = config.get_gaussian_path()
     
     for i in episode_list:
-        translation, target_changes = trainer.push_once(offset_dist=0.1, keep_off=0.025, travel_dist=0.3, speed=0.005)
         trainer.generate_data(
             best_model_path, 
             gaussians_path, 
-            translation,
-            target_changes,
             args.n_ctrl_parts, 
             data_file_path,
             i,
