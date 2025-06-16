@@ -102,7 +102,10 @@ class PlannerWrapper(ABC):
         })
         
         # Plan action sequence
+        start_time = time.time()
         result = planner.trajectory_optimization(state_cur, initial_action_seq)
+        end_time = time.time()
+        print(f"Time taken for planning: {end_time - start_time:.2f} seconds")
         
         self._save_planning_results(result, episode_idx, save_dir)
         

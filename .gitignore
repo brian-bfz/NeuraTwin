@@ -14,6 +14,7 @@ PhysTwin/generated_data/
 PhysTwin/generated_videos/
 PhysTwin/temp_experiments/
 PhysTwin/xarm/
+PhysTwin/tasks/
 
 PhysTwin/data_process/models/weights/
 PhysTwin/data_process/groundedSAM_checkpoints/

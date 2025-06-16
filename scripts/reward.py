@@ -83,9 +83,9 @@ class RewardFn:
         energy = torch.sum(torch.abs(energy), dim=1)
         action_penalties = energy * self.ap_weight  # [n_sample]
 
-        print(f"chamfer_penalties: {chamfer_penalties}")
-        print(f"final_speed_penalty: {final_speed_penalty}")
-        print(f"action_penalties: {action_penalties}")
+        # print(f"chamfer_penalties: {chamfer_penalties}")
+        # print(f"final_speed_penalty: {final_speed_penalty}")
+        # print(f"action_penalties: {action_penalties}")
         return {
             'reward_seqs': -(chamfer_penalties + final_speed_penalty + action_penalties)
         }
