@@ -55,20 +55,18 @@ class RobotMovementController:
         self.device = device
         
         # Initialize state variables
-        self.accumulate_trans = np.zeros((n_ctrl_parts, 3), dtype=np.float32)
-        self.accumulate_rot = torch.eye(3, dtype=torch.float32, device=device)
-        self.current_finger = 0.0
-        self.current_trans_dynamic_points = None
         self.origin_force_judge = torch.tensor(
             [[-1, 0, 0], [1, 0, 0]], dtype=torch.float32, device=device
         )
+        self.reset()
+               
+    def reset(self):
+        """Reset all state variables to initial values"""
+        self.accumulate_trans = np.zeros((self.n_ctrl_parts, 3), dtype=np.float32)
+        self.accumulate_rot = torch.eye(3, dtype=torch.float32, device=self.device)
+        self.current_finger = 0.0
         self.current_force_judge = self.origin_force_judge.clone()
-        
-        # Initialize dynamic points from robot
-        self._initialize_dynamic_points()
-        
-    def _initialize_dynamic_points(self):
-        """Initialize dynamic points from robot"""
+
         finger_meshes = self.robot.get_finger_mesh(0.0)
         dynamic_vertices = torch.tensor(
             [np.asarray(finger_mesh.vertices) for finger_mesh in finger_meshes],
@@ -76,14 +74,6 @@ class RobotMovementController:
             dtype=torch.float32
         )
         self.current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
-        
-    def reset(self):
-        """Reset all state variables to initial values"""
-        self.accumulate_trans = np.zeros((self.n_ctrl_parts, 3), dtype=np.float32)
-        self.accumulate_rot = torch.eye(3, dtype=torch.float32, device=self.device)
-        self.current_finger = 0.0
-        self.current_force_judge = self.origin_force_judge.clone()
-        self._initialize_dynamic_points()
         
     def update_robot_movement(self, target_change, finger_change=0.0, rot_change=None):
         """

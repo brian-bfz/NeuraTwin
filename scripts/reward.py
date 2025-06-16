@@ -2,31 +2,48 @@ import torch
 import h5py
 from .utils import chamfer_distance
 
+
+def create_default_target(robot_mask, device, translation=None):
+    """
+    Create default target point cloud by loading and translating object data.
+    
+    Args:
+        robot_mask: [n_particles] boolean tensor - mask for robot particles
+        device: torch device
+        translation: [3] tensor - translation to apply to target (optional)
+        
+    Returns:
+        target: [n_target_particles, 3] - target point cloud
+    """
+    # Temporary path - should be configurable
+    data_file = "PhysTwin/generated_data/sampled_with_12_edges.h5"
+        
+    # Load first frame of object point cloud as target
+    with h5py.File(data_file, 'r') as f:
+        pcd = torch.tensor(f['episode_000000/object'][0], dtype=torch.float32, device=device) # [n_particles, 3]
+    
+    # Apply translation to target if specified
+    if translation is None:
+        return pcd
+    else:
+        return pcd + translation
+
+
 class RewardFn:
-    def __init__(self, ap_weight, fsp_weight, robot_mask):
+    def __init__(self, ap_weight, fsp_weight, robot_mask, target):
         """
-        load the target point cloud and other configs
+        Initialize reward function with target point cloud and other configs.
         
         Args:
             ap_weight: float - action penalty weight
-            robot_mask: [n_particles] boolean tensor - mask for robot particles (optional)
+            fsp_weight: float - final speed penalty weight
+            robot_mask: [n_particles] boolean tensor - mask for robot particles
+            target: [n_target_particles, 3] tensor - target point cloud
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.ap_weight = ap_weight  # action penalty weight
         self.fsp_weight = fsp_weight # final speed penalty weight
         self.robot_mask = robot_mask.to(self.device)
-        
-        # Temporary path
-        data_file = "PhysTwin/generated_data/sampled_with_12_edges.h5"
-            
-        # Load first frame of object point cloud as target
-        with h5py.File(data_file, 'r') as f:
-            pcd = torch.tensor(f['episode_000000/object'][0], dtype=torch.float32, device=self.device) # [n_particles, 3]
-        
-        # Apply translation to target if specified
-        target_translation = torch.tensor([-0.1, 0.0, 0.0], dtype=torch.float32, device=self.device)  # Default translation
-        target = pcd + target_translation
-
         self.target = target.to(self.device)
 
 
@@ -74,4 +91,3 @@ class RewardFn:
         return {
             'reward_seqs': -(chamfer_penalties + final_speed_penalty + action_penalties)
         }
-        

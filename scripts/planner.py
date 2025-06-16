@@ -1,9 +1,168 @@
 import numpy as np
-
 import torch
 import torch.nn.functional as F
+import time
+import os
+import matplotlib.pyplot as plt
+from abc import ABC, abstractmethod
+from .reward import RewardFn
+
 torch.autograd.set_detect_anomaly(True)
-from GNN.utils import fps_rad
+from GNN.utils import fps_rad, load_yaml
+
+
+class PlannerWrapper(ABC):
+    """
+    Abstract base class for planner wrappers that provides common functionality.
+    Contains shared features between different planner implementations.
+    """
+    
+    def __init__(self, mpc_config_path: str):
+        """
+        Initialize common planner wrapper functionality.
+        
+        Args:
+            mpc_config_path: str - path to MPC configuration file
+        """
+        
+        # Load MPC configuration
+        self.mpc_config = load_yaml(mpc_config_path)
+        
+        # Setup device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Extract common MPC parameters
+        self.action_dim = self.mpc_config['action_dim']
+        self.n_look_ahead = self.mpc_config['n_look_ahead']
+        self.n_sample = self.mpc_config['n_sample']
+        self.n_update_iter = self.mpc_config['n_update_iter']
+        self.reward_weight = self.mpc_config['reward_weight']
+        self.action_lower_bound = torch.full((self.action_dim,), self.mpc_config['action_lower_bound'], device=self.device)
+        self.action_upper_bound = torch.full((self.action_dim,), self.mpc_config['action_upper_bound'], device=self.device)
+        self.planner_type = self.mpc_config['planner_type']
+        self.noise_level = self.mpc_config['noise_level']
+        self.verbose = self.mpc_config.get('verbose', False)
+        
+        self.action_weight = self.mpc_config['action_weight']
+        self.fsp_weight = self.mpc_config['fsp_weight']
+        self.timestamp = time.strftime('%Y-%m-%d_%H-%M-%S')
+        
+        print(f"Using device: {self.device}")
+    
+    @abstractmethod
+    def _initialize_model(self):
+        """Initialize the specific model (GNN or PhysTwin)."""
+        pass
+    
+    @abstractmethod
+    def _create_model_rollout_fn(self, robot_mask, **kwargs):
+        """Create model rollout function specific to the implementation."""
+        pass
+    
+    def plan_action(self, episode_idx, target_pcd, save_dir, first_states, robot_mask, topological_edges=None):
+        """
+        Plan action sequence to go from the initial state to the goal state.
+        
+        Args:
+            episode_idx: int - episode containing the initial state
+            target_pcd: torch.Tensor - target point cloud for reward function
+            save_dir: str - directory to save results (optional)
+            
+        Returns:
+            dict containing:
+                act_seq: [n_look_ahead, action_dim] - action sequence
+                eval_outputs: list of dicts containing evaluation outputs for each iteration
+                best_model_output: dict containing best model output
+        """
+        # Prepare initial state for model
+        state_cur = self._prepare_initial_state(first_states, robot_mask)
+        
+        # Set up model rollout function
+        model_rollout_fn = self._create_model_rollout_fn(robot_mask, first_states=first_states, topological_edges=topological_edges)
+        initial_action_seq = torch.zeros(self.n_look_ahead, self.action_dim, device=self.device)
+        
+        # Set up reward function with provided target
+        reward_fn = RewardFn(self.action_weight, self.fsp_weight, robot_mask, target_pcd)
+        
+        # Set up planner
+        planner = Planner({
+            'action_dim': self.action_dim,
+            'model_rollout_fn': model_rollout_fn,
+            'evaluate_traj_fn': reward_fn,
+            'n_sample': self.n_sample,
+            'n_look_ahead': self.n_look_ahead,
+            'n_update_iter': self.n_update_iter,
+            'reward_weight': self.reward_weight,
+            'action_lower_lim': self.action_lower_bound,
+            'action_upper_lim': self.action_upper_bound,
+            'planner_type': self.planner_type,
+            'noise_level': self.noise_level,
+            'verbose': self.verbose,
+            'device': self.device
+        })
+        
+        # Plan action sequence
+        result = planner.trajectory_optimization(state_cur, initial_action_seq)
+        
+        self._save_planning_results(result, episode_idx, save_dir)
+        
+        # Plot rewards if verbose
+        if self.verbose and 'eval_outputs' in result and result['eval_outputs'] is not None:
+            self._plot_rewards(result['eval_outputs'], save_dir)
+        
+        # Print best evaluation output
+        if 'best_eval_output' in result and result['best_eval_output'] is not None:
+            print("Best evaluation output:")
+            for key, value in result['best_eval_output'].items():
+                if torch.is_tensor(value):
+                    if value.numel() == 1:
+                        print(f"  {key}: {value.item()}")
+                    else:
+                        print(f"  {key}: shape {value.shape}, mean={value.mean().item():.6f}")
+                else:
+                    print(f"  {key}: {value}")
+        
+        return result
+    
+    @abstractmethod
+    def _prepare_initial_state(self, first_states, robot_mask):
+        """Prepare initial state format specific to the model."""
+        pass
+    
+    def _save_planning_results(self, result, episode_idx, save_dir):
+        """Save planning results to specified directory."""
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Save action sequence
+        act_seq_path = os.path.join(save_dir, f"act_seq_episode_{episode_idx:06d}_{self.timestamp}.npz")
+        np.savez(act_seq_path, act_seq=result['act_seq'].cpu().numpy())
+        
+        # Save best model output
+        if 'best_model_output' in result:
+            bmo_path = os.path.join(save_dir, f"bmo_episode_{episode_idx:06d}_{self.timestamp}.npz")
+            bmo_data = {k: v.cpu().numpy() if torch.is_tensor(v) else v 
+                       for k, v in result['best_model_output'].items()}
+            np.savez(bmo_path, **bmo_data)
+        
+        print(f"Planning results saved to: {save_dir}")
+    
+    def _plot_rewards(self, eval_outputs, save_dir=None):
+        """Plot reward progression over iterations."""
+        rewards_per_iter = [torch.max(out['reward_seqs']).item() for out in eval_outputs]
+        plt.figure()
+        plt.plot(rewards_per_iter)
+        plt.xlabel("Iteration")
+        plt.ylabel("Max Reward in Batch")
+        plt.title("Planner Reward vs. Iteration")
+        
+        if save_dir is not None:
+            plot_path = os.path.join(save_dir, f"reward_{self.timestamp}.png")
+            plt.savefig(plot_path)
+            print(f"Reward plot saved to: {plot_path}")
+        else:
+            plt.show()
+        plt.close()
+
 
 # Tips to tune MPC:
 # - When sampling actions, noise_level should be large enough to have enough coverage, but not too large to cause instability

@@ -380,6 +380,7 @@ class Visualizer:
         vis.add_geometry(actual_pcd)
         vis.add_geometry(robot_pcd)
         vis.add_geometry(pred_pcd)
+        vis.add_geometry(target_pcd)
 
         n_frames = min(len(predicted_states), len(actual_objects))
         print(f"Rendering {n_frames} frames...")
