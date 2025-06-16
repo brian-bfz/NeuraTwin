@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import time
 
 from .model.rollout import Rollout
 from .model.gnn_dyn import PropNetDiffDenModel
@@ -257,7 +258,7 @@ class PlannerWrapper:
         full_trajectory = torch.cat([initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
         
         # Set up reward function to get target
-        reward_fn = RewardFn(self.action_weight, robot_mask)
+        reward_fn = RewardFn(self.action_weight, self.fsp_weight, robot_mask)
         target_pcd = reward_fn.target.cpu()  # [n_particles_target, 3]
         
         # Create target trajectory (static target repeated for all timesteps)
@@ -267,7 +268,7 @@ class PlannerWrapper:
         # Create output directory and file path
         output_dir = "GNN/tasks"
         os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, f"mpc_episode_{episode_idx}.mp4")
+        save_path = os.path.join(output_dir, f"episode_{episode_idx:06d}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.mp4")
         
         # Initialize visualizer with camera calibration
         # Use a reasonable default camera calibration path

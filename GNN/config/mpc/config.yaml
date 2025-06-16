@@ -16,5 +16,5 @@ lr: 0.001                      # Learning rate for gradient descent (if using GD
 verbose: true                 # Enable detailed logging during optimization
 
 # Reward Function Configuration
-action_weight: 1              # Weight for action penalty in reward function
-fsp_weight: 1              # Weight for final speed penalty in reward function
+action_weight: 1000              # Weight for action penalty in reward function
+fsp_weight: 100              # Weight for final speed penalty in reward function

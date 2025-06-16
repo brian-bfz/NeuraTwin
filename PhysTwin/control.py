@@ -10,6 +10,7 @@ import open3d as o3d
 import cv2
 import pickle
 import json
+import time
 
 from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
@@ -205,7 +206,6 @@ class PhysTwinPlannerWrapper:
         
         print(f"PhysTwin MPC initialized for case: {case_name}")
         print(f"Using device: {self.device}")
-        print(f"History length: {self.n_history}")
 
     def _initialize_trainer(self):
         """Initialize PhysTwin trainer with loaded model."""
@@ -286,7 +286,7 @@ class PhysTwinPlannerWrapper:
         initial_action_seq = torch.zeros(self.n_look_ahead, self.action_dim, device=self.device)
 
         # Set up the reward function
-        reward_fn = RewardFn(self.action_weight, robot_mask)
+        reward_fn = RewardFn(self.action_weight, self.fsp_weight, robot_mask)
 
         # Set up the planner
         planner = Planner({
@@ -412,7 +412,7 @@ class PhysTwinPlannerWrapper:
         # Create output directory and video writer
         output_dir = "PhysTwin/tasks"
         os.makedirs(output_dir, exist_ok=True)
-        video_path = os.path.join(output_dir, f"mpc_episode_{episode_idx}.mp4")
+        video_path = os.path.join(output_dir, f"episode_{episode_idx:06d}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.mp4")
         
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         fps = cfg.FPS  # Use FPS from config

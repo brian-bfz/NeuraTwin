@@ -39,7 +39,7 @@ class RewardFn:
 
         Args: 
             state_seqs: [n_sample, n_look_ahead, n_particles * 3] torch tensor
-            action_seqs: [n_sample, n_look_ahead, 3] torch tensor - robot velocity
+            action_seqs: [n_sample, n_look_ahead, 2] torch tensor - robot velocity
 
         Returns:
             Dict containing:
@@ -60,14 +60,17 @@ class RewardFn:
 
         final_delta = states_seqs[:, -1, ~self.robot_mask, :] - states_seqs[:, -2, ~self.robot_mask, :]
         final_speed = torch.norm(final_delta, dim=2) # [n_sample, n_particles] 
-        final_speed_penalty = torch.mean(final_speed, dim=1) * n_look_ahead * self.final_speed_weight # [n_sample]
+        final_speed_penalty = torch.mean(final_speed, dim=1) * n_look_ahead * self.fsp_weight # [n_sample]
         
-        # Compute action magnitude penalty - now just 3D velocity magnitude
-        speeds = torch.norm(action_seqs, dim=2)  # [n_sample, n_look_ahead]
-        action_penalties = speeds.sum(dim=1) * self.fsp_weight  # [n_sample]
+        # Energy = \int v \cdot dv
+        acceleration = action_seqs[:, 1:] - action_seqs[:, :-1]
+        energy = torch.sum(acceleration * action_seqs[:, :-1], dim=2)  # [n_sample, n_look_ahead]
+        energy = torch.sum(torch.abs(energy), dim=1)
+        action_penalties = energy * self.ap_weight  # [n_sample]
 
-        # print(f"chamfer_penalties: {chamfer_penalties}")
-        # print(f"action_penalties: {action_penalties}")
+        print(f"chamfer_penalties: {chamfer_penalties}")
+        print(f"final_speed_penalty: {final_speed_penalty}")
+        print(f"action_penalties: {action_penalties}")
         return {
             'reward_seqs': -(chamfer_penalties + final_speed_penalty + action_penalties)
         }

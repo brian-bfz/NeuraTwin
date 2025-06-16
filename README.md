@@ -16,6 +16,8 @@ If error pops up for urdfpy, click on the problematic file, and change ```np.flo
 
 ```python -m PhysTwin.html_video```
 
+```python -m PhysTwin.control --case_name single_push_rope --episode```
+
 ## GNN
 ```python -m GNN.dataset.preprocess --data_file```
 
@@ -28,3 +30,5 @@ If error pops up for urdfpy, click on the problematic file, and change ```np.flo
 ```python -m GNN.html_video --model```
 
 ```python -m GNN.plot_training_loss --model --save_plots```
+
+```python -m GNN.control --case_name single_push_rope --episode```
