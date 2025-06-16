@@ -55,7 +55,7 @@ class PhysTwinModelRolloutFn:
         
         Args:
             state_cur: [1, state_dim] - current state (object + robot particles)
-            action_seqs: [n_sample, n_look_ahead, 3] - robot translation sequences
+            action_seqs: [n_sample, n_look_ahead, 2] - robot translation sequences
             
         Returns:
             dict containing:
@@ -75,7 +75,7 @@ class PhysTwinModelRolloutFn:
             predicted_states = self._rollout_single_sequence(
                 initial_object_state,
                 initial_robot_state, 
-                action_seqs[sample_idx]  # [n_look_ahead, 3]
+                action_seqs[sample_idx]  # [n_look_ahead, 2]
             )
             state_seqs[sample_idx] = predicted_states.flatten(start_dim=1)  # [n_look_ahead, n_particles * 3]
             
@@ -88,11 +88,14 @@ class PhysTwinModelRolloutFn:
         Args:
             initial_object_state: [n_object_particles, 3]
             initial_robot_state: [n_robot_particles, 3] 
-            action_seq: [n_look_ahead, 3] - robot translation sequence
+            action_seq: [n_look_ahead, 2] - robot translation sequence
             
         Returns:
             predicted_states: [n_look_ahead, n_particles, 3] - combined object + robot states
         """
+        # Set z velocity to 0
+        action_seq = torch.cat([action_seq, torch.zeros(action_seq.shape[0], 1, device=self.device)], dim=1)
+
         # Reset simulator to initial object state
         initial_state_warp = wp.from_torch(initial_object_state.contiguous(), dtype=wp.vec3)
         self.trainer.simulator.set_init_state(
@@ -198,9 +201,11 @@ class PhysTwinPlannerWrapper:
         self.planner_type = self.mpc_config['planner_type']
         self.noise_level = self.mpc_config['noise_level']
         self.verbose = self.mpc_config.get('verbose', False)
+
         self.action_weight = self.mpc_config['action_weight']
         self.fsp_weight = self.mpc_config['fsp_weight']
-        
+        self.timestamp = time.strftime('%Y-%m-%d_%H-%M-%S')
+
         # Initialize trainer
         self.trainer = self._initialize_trainer()
         
@@ -316,7 +321,7 @@ class PhysTwinPlannerWrapper:
             plt.xlabel("Iteration")
             plt.ylabel("Max Reward in Batch")
             plt.title("PhysTwin Planner Reward vs. Iteration")
-            plot_path = os.path.join("PhysTwin", "tasks", "reward_plot.png")
+            plot_path = os.path.join("PhysTwin", "tasks", f"reward_{self.timestamp}.png")
             os.makedirs(os.path.dirname(plot_path), exist_ok=True)
             plt.savefig(plot_path)
             print(f"Reward plot saved to: {plot_path}")
@@ -345,11 +350,11 @@ class PhysTwinPlannerWrapper:
         full_trajectory = torch.cat([initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
         
         # Get target from reward function
-        reward_fn = RewardFn(self.action_weight, robot_mask)
+        reward_fn = RewardFn(self.action_weight, self.fsp_weight, robot_mask)
         target_pcd = reward_fn.target.cpu().numpy()  # [n_target_particles, 3]
         
         # Load camera parameters from config files (same as v_from_d.py)
-        case_paths = get_case_paths(self.case_name)
+        case_paths = get_case_paths(self.config.case_name)
         data_path = case_paths['data_dir'] 
         
         # Load camera calibration
@@ -412,7 +417,7 @@ class PhysTwinPlannerWrapper:
         # Create output directory and video writer
         output_dir = "PhysTwin/tasks"
         os.makedirs(output_dir, exist_ok=True)
-        video_path = os.path.join(output_dir, f"episode_{episode_idx:06d}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.mp4")
+        video_path = os.path.join(output_dir, f"episode_{episode_idx:06d}_{self.timestamp}.mp4")
         
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         fps = cfg.FPS  # Use FPS from config
@@ -491,4 +496,4 @@ if __name__ == "__main__":
         # Visualize action sequence
         if 'best_model_output' in planning_result:
             predicted_states = planning_result['best_model_output']['state_seqs']
-            planner_wrapper.visualize_action(args.episode, optimal_actions, predicted_states, args.data_file) 
+            planner_wrapper.visualize_action(args.episode, optimal_actions, predicted_states) 

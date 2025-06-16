@@ -136,6 +136,7 @@ class PlannerWrapper:
 
         self.action_weight = self.mpc_config['action_weight']
         self.fsp_weight = self.mpc_config['fsp_weight']
+        self.timestamp = time.strftime('%Y-%m-%d_%H-%M-%S')
         print(f"Loaded model from: {model_path}")
         print(f"Using device: {self.device}")
         print(f"History length: {self.n_history}")
@@ -228,7 +229,7 @@ class PlannerWrapper:
             plt.xlabel("Iteration")
             plt.ylabel("Max Reward in Batch")
             plt.title("Planner Reward vs. Iteration")
-            plot_path = os.path.join("GNN", "tasks", "reward_plot.png")
+            plot_path = os.path.join("GNN", "tasks", f"reward_{self.timestamp}.png")
             os.makedirs(os.path.dirname(plot_path), exist_ok=True)
             plt.savefig(plot_path)
             print(f"Reward plot saved to: {plot_path}")
@@ -268,7 +269,7 @@ class PlannerWrapper:
         # Create output directory and file path
         output_dir = "GNN/tasks"
         os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, f"episode_{episode_idx:06d}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.mp4")
+        save_path = os.path.join(output_dir, f"episode_{episode_idx:06d}_{self.timestamp}.mp4")
         
         # Initialize visualizer with camera calibration
         # Use a reasonable default camera calibration path
