@@ -1,20 +1,21 @@
-data_file: "PhysTwin/generated_data/mixed_push_rope.h5"
+data_file: "PhysTwin/generated_data/sampled_with_12_edges.h5"
+phystwin_data_file: "PhysTwin/generated_data/mixed_push_rope.h5"
 action_dim: 2
 planner_type: "MPPI"           # Options: "MPPI", "GD", "MPPI_GD"
-n_sample: 20                  # Number of action trajectories to sample
-n_look_ahead: 30              # Number of steps to look ahead
-n_update_iter: 10            # Number of optimization iterations
+n_sample: 100                  # Number of action trajectories to sample
+n_look_ahead: 50              # Number of steps to look ahead
+n_update_iter: 50            # Number of optimization iterations
 reward_weight: 100.0            # Temperature parameter for MPPI softmax
-noise_level: 0.02              # Standard deviation for action noise
+noise_level: 0.005              # Standard deviation for action noise
   
 # Action Space Configuration
-action_lower_bound: -0.04       # Lower bound for robot actions (m)
-action_upper_bound: 0.04        # Upper bound for robot actions (m)
+action_lower_bound: -0.02       # Lower bound for robot actions (m)
+action_upper_bound: 0.02        # Upper bound for robot actions (m)
   
 # Optimization Parameters
 lr: 0.001                      # Learning rate for gradient descent (if using GD)
 verbose: true                 # Enable detailed logging during optimization
 
 # Reward Function Configuration
-action_weight: 10              # Weight for action penalty in reward function
-fsp_weight: 0              # Weight for final speed penalty in reward function
+action_weight: 1000              # Weight for action penalty in reward function
+fsp_weight: 100              # Weight for final speed penalty in reward function

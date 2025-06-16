@@ -3,24 +3,22 @@ import h5py
 from .utils import chamfer_distance
 
 
-def create_default_target(robot_mask, device, translation=None):
+def create_default_target(translation=None):
     """
     Create default target point cloud by loading and translating object data.
     
     Args:
-        robot_mask: [n_particles] boolean tensor - mask for robot particles
-        device: torch device
-        translation: [3] tensor - translation to apply to target (optional)
+        translation: [3] numpy array - translation to apply to target (optional)
         
     Returns:
-        target: [n_target_particles, 3] - target point cloud
+        target: [n_target_particles, 3] numpy array - target point cloud
     """
     # Temporary path - should be configurable
     data_file = "PhysTwin/generated_data/sampled_with_12_edges.h5"
         
     # Load first frame of object point cloud as target
     with h5py.File(data_file, 'r') as f:
-        pcd = torch.tensor(f['episode_000000/object'][0], dtype=torch.float32, device=device) # [n_particles, 3]
+        pcd = f['episode_000000/object'][0] # [n_particles, 3]
     
     # Apply translation to target if specified
     if translation is None:

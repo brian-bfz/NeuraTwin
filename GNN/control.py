@@ -9,6 +9,7 @@ from .utils import load_yaml, Visualizer
 from .paths import get_model_paths
 from scripts.planner import PlannerWrapper
 from scripts.utils import load_mpc_data, setup_task_directory
+from scripts.reward import RewardFn
 
 # PhysTwin imports for actual deformation simulation
 from PhysTwin.qqtt import InvPhyTrainerWarp
@@ -195,8 +196,7 @@ def _compute_phystwin_deformation(episode_idx, action_seq, case_name, downsample
         actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory
     """
     # Load PhysTwin data (full resolution with different robot mask)
-    phystwin_data_file = config_data.get('phystwin_data_file', 
-                                       "PhysTwin/data/different_types/single_push_rope/mixed_push_rope.h5")
+    phystwin_data_file = config_data['phystwin_data_file']
     phystwin_first_states, phystwin_robot_mask, _ = load_mpc_data(episode_idx, phystwin_data_file, device)
     
     # Adjust PhysTwin configuration for GNN downsampling
@@ -230,6 +230,12 @@ def _compute_phystwin_deformation(episode_idx, action_seq, case_name, downsample
         # Filter out robot particles for visualization
         actual_trajectory = actual_trajectory[:, ~phystwin_robot_mask, :]
         
+        # Calculate reward with actual trajectory
+        reward_fn = RewardFn(config_data['action_weight'], config_data['fsp_weight'], phystwin_robot_mask, target_pcd)
+        actual_reward = reward_fn(phystwin_result['state_seqs'], action_seqs)['reward_seqs'][0].item()
+        
+        print(f"Actual reward (PhysTwin deformation): {actual_reward:.6f}")
+
         return actual_trajectory
         
     finally:
@@ -262,7 +268,7 @@ def visualize_action_gnn(save_dir, file_name):
     if not os.path.exists(target_path):
         raise FileNotFoundError(f"Target file not found: {target_path}")
     target_data = np.load(target_path)
-    target_pcd = torch.tensor(target_data['target'], device=device)
+    target_pcd = torch.tensor(target_data['target'], dtype=torch.float32, device=device)
     
     # Load predicted states from bmo file
     bmo_path = os.path.join(save_dir, f"bmo_{file_name}.npz")
@@ -334,26 +340,8 @@ def visualize_action_gnn(save_dir, file_name):
         actual_objects=actual_trajectory,
         save_path=save_path,
         topological_edges=topological_edges,
-        target=target_pcd
+        target=target_pcd.cpu().numpy()
     )
-    
-    # Calculate and print actual reward if actual_trajectory was computed
-    if actual_trajectory is not None:
-        from scripts.reward import RewardFn
-        
-        # Reshape actual trajectory for reward calculation
-        actual_states_reshaped = actual_trajectory[1:].unsqueeze(0)  # [1, n_look_ahead, n_particles, 3]
-        actual_states_flat = actual_states_reshaped.flatten(start_dim=2)  # [1, n_look_ahead, n_particles*3]
-        
-        # Create reward function
-        reward_fn = RewardFn(config_data['action_weight'], config_data['fsp_weight'], robot_mask, target_pcd)
-        
-        # Calculate reward with actual trajectory
-        actual_action_seqs = action_seq[:, :2].unsqueeze(0)  # [1, n_look_ahead, 2]
-        actual_reward_result = reward_fn(actual_states_flat, actual_action_seqs)
-        actual_reward = actual_reward_result['reward_seqs'][0].item()
-        
-        print(f"Actual reward (PhysTwin deformation): {actual_reward:.6f}")
     
     print(f"GNN MPC visualization saved to: {video_path}")
     return video_path
@@ -396,7 +384,7 @@ if __name__ == "__main__":
         first_states, robot_mask, topological_edges = load_mpc_data(args.episode, planner_wrapper.mpc_config['data_file'], planner_wrapper.device)
         
         # Setup task directory and get target
-        save_dir, target_pcd = setup_task_directory(args.dir_name, args.mpc_config, robot_mask, planner_wrapper.device)
+        save_dir, target_pcd = setup_task_directory(args.dir_name, args.mpc_config, planner_wrapper.device, model_type="GNN")
     
         # Demonstrate planning
         print("="*60)

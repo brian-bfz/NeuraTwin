@@ -81,23 +81,23 @@ def load_mpc_data(episode_idx, data_file, device):
         return first_states, robot_mask, topological_edges
 
 
-def setup_task_directory(dir_name, mpc_config_path, robot_mask, device):
+def setup_task_directory(dir_name, mpc_config_path, device, model_type):
     """
     Set up task directory with target and config files.
     
     Args:
         dir_name: str - subdirectory name within tasks folder
         mpc_config_path: str - path to current MPC config
-        robot_mask: torch.Tensor - robot mask for target creation
         device: torch device
+        model_type: str - "GNN" or "PhysTwin" to determine base directory
         
     Returns:
         tuple: (save_dir, target_pcd) where save_dir is the full path and target_pcd is loaded/created target
     """
     from scripts.reward import create_default_target
     
-    # Create task subdirectory
-    save_dir = os.path.join("tasks", dir_name)
+    # Create task subdirectory in model-specific folder
+    save_dir = os.path.join(f"{model_type}/tasks", dir_name)
     os.makedirs(save_dir, exist_ok=True)
     
     # Check for existing target
@@ -105,11 +105,12 @@ def setup_task_directory(dir_name, mpc_config_path, robot_mask, device):
     if os.path.exists(target_path):
         print(f"Loading existing target from: {target_path}")
         target_data = np.load(target_path)
-        target_pcd = torch.tensor(target_data['target'], device=device)
+        target_pcd = torch.tensor(target_data['target'], dtype=torch.float32, device=device)
     else:
         print(f"Creating new target for: {dir_name}")
-        target_pcd = create_default_target(robot_mask, device)
-        np.savez(target_path, target=target_pcd.cpu().numpy())
+        target_pcd = create_default_target(np.array([-0.1, 0.0, 0.0]))
+        np.savez(target_path, target=target_pcd)
+        target_pcd = torch.tensor(target_pcd, dtype=torch.float32, device=device)
         print(f"Target saved to: {target_path}")
     
     # Check for existing config

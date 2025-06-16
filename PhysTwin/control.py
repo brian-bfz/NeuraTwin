@@ -247,7 +247,7 @@ def visualize_action_phystwin(save_dir, file_name, case_name):
     if not os.path.exists(target_path):
         raise FileNotFoundError(f"Target file not found: {target_path}")
     target_data = np.load(target_path)
-    target_pcd = torch.tensor(target_data['target'], device=device)
+    target_pcd = torch.tensor(target_data['target'], dtype=torch.float32, device=device)
     
     # Load predicted states from bmo file
     bmo_path = os.path.join(save_dir, f"bmo_{file_name}.npz")
@@ -302,9 +302,9 @@ def visualize_action_phystwin(save_dir, file_name, case_name):
     robot_pcd = o3d.geometry.PointCloud()
     target_pcd_vis = o3d.geometry.PointCloud()
     
-    # Set target point cloud (static, blue)
+    # Set target point cloud (static, orange)
     target_pcd_vis.points = o3d.utility.Vector3dVector(target_pcd.cpu().numpy())
-    target_pcd_vis.paint_uniform_color([0, 0, 1])  # Blue
+    target_pcd_vis.paint_uniform_color([1.0, 0.6, 0.2])  # Orange
     vis.add_geometry(target_pcd_vis)
     
     # Initialize with first frame
@@ -398,7 +398,7 @@ if __name__ == "__main__":
         first_states, robot_mask, topological_edges = load_mpc_data(args.episode, planner_wrapper.mpc_config['data_file'], planner_wrapper.device)
         
         # Setup task directory and get target
-        save_dir, target_pcd = setup_task_directory(args.dir_name, args.mpc_config, robot_mask, planner_wrapper.device)
+        save_dir, target_pcd = setup_task_directory(args.dir_name, args.mpc_config, planner_wrapper.device, model_type="PhysTwin")
     
         # Demonstrate planning
         print("="*60)
