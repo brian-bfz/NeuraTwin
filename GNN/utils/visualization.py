@@ -296,7 +296,7 @@ class Visualizer:
     Handles 3D visualization of particle motion with proper camera setup.
     """
     
-    def __init__(self, camera_calib_path):
+    def __init__(self, camera_calib_path, downsample_rate=1):
         """
         Initialize visualizer with camera calibration data.
         
@@ -312,12 +312,12 @@ class Visualizer:
             data = json.load(f)
         self.intrinsics = np.array(data["intrinsics"])
         self.WH = data["WH"]
-        self.FPS = data["fps"] / data.get("downsample_rate", 1)  # Handle missing downsample_rate
+        self.FPS = data["fps"] / downsample_rate  # Handle missing downsample_rate
         
         print(f"Loaded camera calibration from: {camera_calib_path}")
         print(f"Resolution: {self.WH}, FPS: {self.FPS}")
 
-    def visualize_object_motion(self, predicted_states, tool_mask, actual_objects, save_path, topological_edges=None):
+    def visualize_object_motion(self, predicted_states, tool_mask, actual_objects, save_path, topological_edges=None, target=None):
         """
         Create 3D visualization comparing predicted vs actual object motion.
         Renders particles as colored point clouds with connectivity edges.
@@ -328,6 +328,7 @@ class Visualizer:
             actual_objects: [timesteps, n_obj, 3] tensor - ground truth object trajectory  
             save_path: str - output video file path
             topological_edges: [N, N] tensor - topological edges for object and robot particles
+            target: [N, 3] tensor - target point cloud for MPC
             
         Returns:
             save_path: str - path where video was saved
@@ -370,6 +371,10 @@ class Visualizer:
         pred_pcd = o3d.geometry.PointCloud()
         pred_pcd.points = o3d.utility.Vector3dVector(pred_objects[0])
         pred_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for predicted
+
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(target)
+        target_pcd.paint_uniform_color([1.0, 0.6, 0.2])  # Orange for target
 
         # Add geometries to visualizer
         vis.add_geometry(actual_pcd)

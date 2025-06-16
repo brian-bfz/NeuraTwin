@@ -1237,11 +1237,13 @@ class InvPhyTrainerWarp:
         
         # set robot position and movement parameters
         n_frames = target_changes.shape[0]
-        current_finger = 0.0
+        rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
         finger_changes = np.zeros((n_frames), dtype=np.float32)
+
         accumulate_trans = np.zeros((n_ctrl_parts, 3), dtype=np.float32)
         accumulate_rot = torch.eye(3, dtype=torch.float32, device=cfg.device)
-        rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
+        current_finger = 0.0
+
         self.robot.change_init_pose(translation)
         self.reset_robot()
         

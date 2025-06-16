@@ -117,6 +117,7 @@ class PlannerWrapper:
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
+        self.downsample_rate = self.train_config['dataset']['downsample_rate']
         
         # Extract episode-independent parameters
         self.action_dim = self.mpc_config['action_dim']
@@ -271,16 +272,17 @@ class PlannerWrapper:
         # Initialize visualizer with camera calibration
         # Use a reasonable default camera calibration path
         camera_calib_path = "PhysTwin/data/different_types/single_push_rope"
-        visualizer = Visualizer(camera_calib_path)
+        visualizer = Visualizer(camera_calib_path, self.downsample_rate)
         
         # Use the visualizer to create the video
         # Pass target as "actual_objects" to show it in blue
         video_path = visualizer.visualize_object_motion(
             predicted_states=full_trajectory,
             tool_mask=robot_mask,
-            actual_objects=target_trajectory,  # Target shown as "actual" (blue)
+            actual_objects=target_trajectory,  
             save_path=save_path,
-            topological_edges=topological_edges
+            topological_edges=topological_edges,
+            target=target_pcd
         )
         
         print(f"MPC visualization saved to: {video_path}")

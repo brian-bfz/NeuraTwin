@@ -44,6 +44,9 @@ class InferenceEngine:
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
+
+        # For visualization
+        self.downsample_rate = self.config['dataset']['downsample_rate']
         
         print(f"Loaded model from: {model_path}")
         print(f"Using device: {self.device}")
@@ -174,7 +177,7 @@ def main():
     # Initialize visualizer if video generation is requested
     visualizer = None
     if args.video:
-        visualizer = Visualizer(camera_calib_path)
+        visualizer = Visualizer(camera_calib_path, inference_engine.downsample_rate)
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")

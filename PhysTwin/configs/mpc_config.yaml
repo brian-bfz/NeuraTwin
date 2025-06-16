@@ -1,9 +1,9 @@
 data_file: "PhysTwin/generated_data/mixed_push_rope.h5"
 action_dim: 3
 planner_type: "MPPI"           # Options: "MPPI", "GD", "MPPI_GD"
-n_sample: 20                  # Number of action trajectories to sample
+n_sample: 5                  # Number of action trajectories to sample
 n_look_ahead: 10              # Number of steps to look ahead
-n_update_iter: 20            # Number of optimization iterations
+n_update_iter: 5            # Number of optimization iterations
 reward_weight: 100.0            # Temperature parameter for MPPI softmax
 noise_level: 0.01              # Standard deviation for action noise
   
