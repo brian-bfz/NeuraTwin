@@ -13,6 +13,7 @@ import json
 
 from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
+from .qqtt.engine.robot_movement_controller import RobotMovementController
 from .config_manager import PhysTwinConfig, create_common_parser
 from .paths import get_case_paths, URDF_XARM7
 from scripts.planner import Planner
@@ -39,6 +40,13 @@ class PhysTwinModelRolloutFn:
         
         # Calculate frame duration for velocity conversion
         self.frame_duration = cfg.dt * cfg.num_substeps
+        
+        # Create robot movement controller
+        self.robot_controller = RobotMovementController(
+            robot=self.trainer.robot,
+            n_ctrl_parts=1,
+            device=device
+        )
         
     def __call__(self, state_cur, action_seqs):
         """
@@ -94,49 +102,25 @@ class PhysTwinModelRolloutFn:
         # Reset robot to initial position (reconstruct from initial_robot_state)
         self._reset_robot_to_state(initial_robot_state)
         
-        accumulate_trans = np.zeros((1, 3), dtype=np.float32)  # Assuming 1 control part
         predicted_states = []
         
         for step_idx in range(len(action_seq)):
-            # Apply robot translation
+            # Apply robot translation using controller
             robot_translation = action_seq[step_idx].cpu().numpy()
-            accumulate_trans[0] += robot_translation
             
-            # Update robot mesh with accumulated translation - following trainer_warp pattern
-            finger_meshes = self.trainer.robot.get_finger_mesh(0.0)  # Fixed gripper opening
-            dynamic_vertices = torch.tensor([
-                np.asarray(finger_mesh.vertices) + accumulate_trans[0] 
-                for finger_mesh in finger_meshes
-            ], device=self.device, dtype=torch.float32)
-            
-            current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
-            
-            # Convert translation to velocity (following PhysTwin's formula)
-            dynamic_velocity = torch.tensor(
-                robot_translation / (2 * self.frame_duration),
-                dtype=torch.float32, device=self.device
+            # Update robot movement using the controller
+            movement_result = self.robot_controller.update_robot_movement(
+                target_change=np.array([robot_translation]),  # Shape: [1, 3] for n_ctrl_parts=1
+                finger_change=0.0,  # Fixed gripper opening
+                rot_change=None
             )
-            dynamic_omega = torch.zeros(3, dtype=torch.float32, device=self.device)
             
-            # Calculate interpolated center
-            interpolated_center = torch.mean(current_trans_dynamic_points, dim=0)
-            
-            # Create proper interpolated points for all substeps (like trainer_warp.py)
-            ratios = torch.linspace(1, cfg.num_substeps, cfg.num_substeps, device=self.device).view(-1, 1, 1) / cfg.num_substeps
-            prev_trans_dynamic_points = current_trans_dynamic_points - torch.tensor(robot_translation, device=self.device, dtype=torch.float32)
-            
-            interpolated_trans_dynamic_points = (
-                prev_trans_dynamic_points.unsqueeze(0) + 
-                (current_trans_dynamic_points - prev_trans_dynamic_points).unsqueeze(0) * ratios
-            )
-            interpolated_center_substeps = torch.mean(interpolated_trans_dynamic_points, dim=1)
-            
-            # Update simulator with proper robot movement (following trainer_warp pattern)
+            # Update simulator with proper robot movement
             self.trainer.simulator.set_mesh_interactive(
-                interpolated_trans_dynamic_points,  # [num_substeps, n_robot_vertices, 3]
-                interpolated_center_substeps,       # [num_substeps, 3]
-                dynamic_velocity,
-                dynamic_omega,
+                movement_result['interpolated_dynamic_points'],
+                movement_result['interpolated_center'],
+                movement_result['dynamic_velocity'],
+                movement_result['dynamic_omega'],
             )
             
             # Run physics step with collision detection
@@ -149,7 +133,7 @@ class PhysTwinModelRolloutFn:
             object_state = x[:self.n_object_particles]  # Only object particles
             
             # Combine object and robot states (use final robot position)
-            combined_state = torch.cat([object_state, current_trans_dynamic_points], dim=0)
+            combined_state = torch.cat([object_state, movement_result['current_trans_dynamic_points']], dim=0)
             predicted_states.append(combined_state)
             
             # Update simulator state for next step
@@ -165,11 +149,12 @@ class PhysTwinModelRolloutFn:
         # For simplicity, reset to initial robot configuration
         # In a full implementation, this would reconstruct robot pose from robot_state
         start_position = np.mean(robot_state.cpu().numpy(), axis=0)
-        all_vertices = np.concatenate([vertices for vertices in self.trainer.dynamic_vertices], axis=0)
-        robot_position = np.mean(all_vertices, axis=0)
-        translation = start_position - robot_position
+        current_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
+        translation = start_position - current_position
         self.trainer.robot.change_init_pose(translation)
         self.trainer.reset_robot()
+        # Reset the robot controller to match the new robot position
+        self.robot_controller.reset()
 
 
 class PhysTwinPlannerWrapper:

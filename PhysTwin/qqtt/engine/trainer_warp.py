@@ -4,6 +4,7 @@ from ..utils.misc import random_direction
 from ..model.diff_simulator import (
     SpringMassSystemWarp,
 )
+from .robot_movement_controller import RobotMovementController
 import open3d as o3d
 import numpy as np
 import torch
@@ -1240,12 +1241,15 @@ class InvPhyTrainerWarp:
         rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
         finger_changes = np.zeros((n_frames), dtype=np.float32)
 
-        accumulate_trans = np.zeros((n_ctrl_parts, 3), dtype=np.float32)
-        accumulate_rot = torch.eye(3, dtype=torch.float32, device=cfg.device)
-        current_finger = 0.0
-
         self.robot.change_init_pose(translation)
         self.reset_robot()
+        
+        # Create robot movement controller
+        robot_controller = RobotMovementController(
+            robot=self.robot,
+            n_ctrl_parts=n_ctrl_parts,
+            device=cfg.device
+        )
         
         logger.info("Starting data generation")
 
@@ -1264,12 +1268,6 @@ class InvPhyTrainerWarp:
             prev_x = None
 
         frame_count = 0
-
-        origin_force_judge = torch.tensor(
-            [[-1, 0, 0], [1, 0, 0]], dtype=torch.float32, device=cfg.device
-        )
-        current_force_judge = origin_force_judge.clone()
-        current_trans_dynamic_points = self.dynamic_points
 
         # Initialize storage for all frames
         object_frames = []
@@ -1292,7 +1290,7 @@ class InvPhyTrainerWarp:
             # Store first frame data
             if frame_count == 0:
                 object_frames.append(x.detach().cpu())
-                robot_frames.append(current_trans_dynamic_points.detach().cpu())
+                robot_frames.append(robot_controller.current_trans_dynamic_points.detach().cpu())
                 if self.include_gaussian:
                     gaussians_frames.append({
                         'xyz': gaussians._xyz,
@@ -1338,75 +1336,25 @@ class InvPhyTrainerWarp:
                 prev_x = x.clone()
 
             # =====================robot stuff=====================
-            current_finger += finger_changes[i]
-            current_finger = max(0.0, min(1.0, current_finger))
-
-            accumulate_trans += target_changes[i]
-            finger_meshes = self.robot.get_finger_mesh(current_finger)
-            dynamic_vertices = torch.tensor(
-                [np.asarray(finger_mesh.vertices) + accumulate_trans[0] for finger_mesh in finger_meshes],
-                device=cfg.device,
-                dtype=torch.float32
-            ) # Directly converting from list to tensor is okay because there are only 2 fingers. 
-            prev_trans_dynamic_points = current_trans_dynamic_points
-            current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
-
-            # Caclulate the interpolated points considering finger and translation
-            ratios = (
-                torch.linspace(
-                    1, cfg.num_substeps, cfg.num_substeps, device=cfg.device
-                ).view(-1, 1, 1)
-                / cfg.num_substeps
+            # Update robot movement using the controller
+            movement_result = robot_controller.update_robot_movement(
+                target_change=target_changes[i],
+                finger_change=finger_changes[i],
+                rot_change=rot_changes[i]
             )
-            interpolated_trans_dynamic_points = (
-                prev_trans_dynamic_points.unsqueeze(0)
-                + (current_trans_dynamic_points - prev_trans_dynamic_points).unsqueeze(
-                    0
-                )
-                * ratios
-            )
-            interpolated_center = torch.mean(interpolated_trans_dynamic_points, dim=1)
-
-            # Do the rotation on the interpolated points
-            new_rot = torch.tensor(rot_changes[i], dtype=torch.float32, device=cfg.device)
-            interpolated_rot_angle =  new_rot.unsqueeze(
-                0
-            ) * ratios.reshape(-1, 1)
-            interpolated_rot_temp = axis_angle_to_matrix(interpolated_rot_angle)
-            interpolated_rot_mat = torch.matmul(accumulate_rot.unsqueeze(0), interpolated_rot_temp)
-            accumulate_rot = interpolated_rot_mat[-1]
-
-            interpolated_dynamic_points = (
-                interpolated_trans_dynamic_points - interpolated_center.unsqueeze(1)
-            ) @ interpolated_rot_mat.permute(0, 2, 1) + interpolated_center.unsqueeze(1)
-
-            # Calculate the velocity and omega for calculating relative velocity
-            dynamic_velocity = torch.tensor(
-                target_changes[i][0] / (2 * cfg.dt * cfg.num_substeps),
-                dtype=torch.float32,
-                device=cfg.device,
-            )
-            dynamic_omega = torch.tensor(
-                rot_changes[i] / (2 * cfg.dt * cfg.num_substeps),
-                dtype=torch.float32,
-                device=cfg.device,
-            )
-
-            # Update the force judge direction
-            current_force_judge = origin_force_judge.clone() @ interpolated_rot_mat[-1]
-
+            
             # Update the simulator with the gripper changes
             self.simulator.set_mesh_interactive(
-                interpolated_dynamic_points,
-                interpolated_center,
-                dynamic_velocity,
-                dynamic_omega,
+                movement_result['interpolated_dynamic_points'],
+                movement_result['interpolated_center'],
+                movement_result['dynamic_velocity'],
+                movement_result['dynamic_omega'],
             )
             frame_count += 1
 
             # Store frame data
             object_frames.append(x.detach().cpu())
-            robot_frames.append(interpolated_dynamic_points[-1].detach().cpu())
+            robot_frames.append(movement_result['current_trans_dynamic_points'].detach().cpu())
             if self.include_gaussian:
                 gaussians_frames.append({
                     'xyz': gaussians._xyz,
@@ -1653,19 +1601,17 @@ class InvPhyTrainerWarp:
             # cv2.imshow("test", vis_image)
             # cv2.waitKey(0)
 
-        accumulate_trans = np.zeros((n_ctrl_parts, 3))
-        accumulate_rot = torch.eye(3, dtype=torch.float32, device=cfg.device)
+        # Create robot movement controller for interactive mode
+        robot_controller = RobotMovementController(
+            robot=self.robot,
+            n_ctrl_parts=n_ctrl_parts,
+            device=cfg.device
+        )
 
         self.dynamic_vertices = [
             np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
         ]
 
-        origin_force_judge = torch.tensor(
-            [[-1, 0, 0], [1, 0, 0]], dtype=torch.float32, device=cfg.device
-        )
-        current_force_judge = origin_force_judge.clone()
-        current_trans_dynamic_points = self.dynamic_points
-        current_finger = 0.0  # Start with grippers closed
         close_flag = False
         is_closing = True
 
@@ -1680,7 +1626,7 @@ class InvPhyTrainerWarp:
             # Get initial positions
             initial_x = wp.to_torch(self.simulator.wp_states[0].wp_x, requires_grad=False).clone()
             object_indices = fps_rad_tensor(initial_x[:self.num_all_points], gnn_config['train']['particle']['fps_radius'])
-            robot_indices = fps_rad_tensor(current_trans_dynamic_points, gnn_config['train']['particle']['fps_radius']) 
+            robot_indices = fps_rad_tensor(robot_controller.current_trans_dynamic_points, gnn_config['train']['particle']['fps_radius']) 
 
             n_history = gnn_config['train']['n_history']
             
@@ -1690,7 +1636,7 @@ class InvPhyTrainerWarp:
             total_particles = n_object_particles + n_robot_particles
             
             # Create initial state by concatenating object and robot positions
-            initial_positions = torch.cat([initial_x[object_indices], current_trans_dynamic_points[robot_indices]], dim=0)
+            initial_positions = torch.cat([initial_x[object_indices], robot_controller.current_trans_dynamic_points[robot_indices]], dim=0)
             
             initial_states = initial_positions.unsqueeze(0) # [1, particles, 3]
 
@@ -1786,7 +1732,7 @@ class InvPhyTrainerWarp:
                 self.simulator.collision_forces, requires_grad=False
             )[: self.num_dynamic]
             filter_forces = torch.einsum(
-                "ij,ij->i", collision_forces, current_force_judge
+                "ij,ij->i", collision_forces, robot_controller.get_current_force_judge()
             )
             if torch.all(filter_forces > 3e4):
                 close_flag = False
@@ -1975,7 +1921,7 @@ class InvPhyTrainerWarp:
             finger_change = self.get_finger_change()
             rot_change = self.get_rot_change()
 
-            # Galculate the substep vertices
+            # Calculate the substep vertices
             if finger_change > 0:
                 is_closing = False
             elif finger_change < 0:
@@ -1989,77 +1935,25 @@ class InvPhyTrainerWarp:
             else:
                 finger_change = 0.05
 
-            current_finger += finger_change
-            current_finger = max(0.0, min(1.0, current_finger))
-
-            accumulate_trans += target_change
-            finger_meshes = self.robot.get_finger_mesh(current_finger)
-            dynamic_vertices = torch.tensor(
-                [
-                    np.asarray(finger_mesh.vertices) + accumulate_trans[0]
-                    for finger_mesh in finger_meshes
-                ],
-                dtype=torch.float32,
-                device=cfg.device,
+            # Update robot movement using the controller
+            movement_result = robot_controller.update_robot_movement(
+                target_change=target_change,
+                finger_change=finger_change,
+                rot_change=rot_change
             )
-            prev_trans_dynamic_points = current_trans_dynamic_points
-            current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
-
-            # Caclulate the interpolated points considering finger and translation
-            ratios = (
-                torch.linspace(
-                    1, cfg.num_substeps, cfg.num_substeps, device=cfg.device
-                ).view(-1, 1, 1)
-                / cfg.num_substeps
-            )
-            interpolated_trans_dynamic_points = (
-                prev_trans_dynamic_points.unsqueeze(0)
-                + (current_trans_dynamic_points - prev_trans_dynamic_points).unsqueeze(
-                    0
-                )
-                * ratios
-            )
-            interpolated_center = torch.mean(interpolated_trans_dynamic_points, dim=1)
-
-            # Do the rotation on the interpolated points
-            new_rot = torch.tensor(rot_change, dtype=torch.float32, device=cfg.device)
-            interpolated_rot_angle =  new_rot.unsqueeze(
-                0
-            ) * ratios.reshape(-1, 1)
-            interpolated_rot_temp = axis_angle_to_matrix(interpolated_rot_angle)
-            interpolated_rot_mat = torch.matmul(accumulate_rot.unsqueeze(0), interpolated_rot_temp)
-            accumulate_rot = interpolated_rot_mat[-1]
-
-            interpolated_dynamic_points = (
-                interpolated_trans_dynamic_points - interpolated_center.unsqueeze(1)
-            ) @ interpolated_rot_mat.permute(0, 2, 1) + interpolated_center.unsqueeze(1)
+            
+            # Update dynamic vertices for visualization
             self.dynamic_vertices = (
-                interpolated_dynamic_points[-1]
+                movement_result['interpolated_dynamic_points'][-1]
                 .reshape([-1] + list(self.dynamic_vertices[0].shape))
                 .cpu()
                 .numpy()
             )
 
-            # Calculate the velocity and omega for calculating relative velocity
-            dynamic_velocity = torch.tensor(
-                target_change[0] / (2 * cfg.dt * cfg.num_substeps),
-                dtype=torch.float32,
-                device=cfg.device,
-            )
-            dynamic_omega = torch.tensor(
-                rot_change / (2 * cfg.dt * cfg.num_substeps),
-                dtype=torch.float32,
-                device=cfg.device,
-            )
-            # print(dynamic_omega)
-
-            # Update the force judge direction
-            current_force_judge = origin_force_judge.clone() @ interpolated_rot_mat[-1]
-
             # GNN prediction logic
             if gnn_rollout is not None:
                 # Store current robot positions for delta calculation
-                robot_positions_history.append(interpolated_dynamic_points[-1][robot_indices].clone())
+                robot_positions_history.append(movement_result['current_trans_dynamic_points'][robot_indices].clone())
                 
                 # Keep only the last downsample_rate+1 frames for delta calculation
                 if len(robot_positions_history) > downsample_rate + 1:
@@ -2084,10 +1978,10 @@ class InvPhyTrainerWarp:
                 
             # Update the simulator with the gripper changes
             self.simulator.set_mesh_interactive(
-                interpolated_dynamic_points,
-                interpolated_center,
-                dynamic_velocity,
-                dynamic_omega,
+                movement_result['interpolated_dynamic_points'],
+                movement_result['interpolated_center'],
+                movement_result['dynamic_velocity'],
+                movement_result['dynamic_omega'],
             )
 
             ############### Temporary timer ###############
@@ -2886,41 +2780,4 @@ def calculate_energy(x, spring_Y, springs, rest_lengths, num_object_springs):
         total_energy = energy.sum()
         return total_energy
 
-# Copy From pytorch3d implementation
-def axis_angle_to_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
-    """
-    Convert rotations given as axis/angle to rotation matrices.
 
-    Args:
-        axis_angle: Rotations given as a vector in axis angle form,
-            as a tensor of shape (..., 3), where the magnitude is
-            the angle turned anticlockwise in radians around the
-            vector's direction.
-        fast: Whether to use the new faster implementation (based on the
-            Rodrigues formula) instead of the original implementation (which
-            first converted to a quaternion and then back to a rotation matrix).
-
-    Returns:
-        Rotation matrices as tensor of shape (..., 3, 3).
-    """
-
-    shape = axis_angle.shape
-    device, dtype = axis_angle.device, axis_angle.dtype
-
-    angles = torch.norm(axis_angle, p=2, dim=-1, keepdim=True).unsqueeze(-1)
-
-    rx, ry, rz = axis_angle[..., 0], axis_angle[..., 1], axis_angle[..., 2]
-    zeros = torch.zeros(shape[:-1], dtype=dtype, device=device)
-    cross_product_matrix = torch.stack(
-        [zeros, -rz, ry, rz, zeros, -rx, -ry, rx, zeros], dim=-1
-    ).view(shape + (3,))
-    cross_product_matrix_sqrd = cross_product_matrix @ cross_product_matrix
-
-    identity = torch.eye(3, dtype=dtype, device=device)
-    angles_sqrd = angles * angles
-    angles_sqrd = torch.where(angles_sqrd == 0, 1, angles_sqrd)
-    return (
-        identity.expand(cross_product_matrix.shape)
-        + torch.sinc(angles / torch.pi) * cross_product_matrix
-        + ((1 - torch.cos(angles)) / angles_sqrd) * cross_product_matrix_sqrd
-    )
