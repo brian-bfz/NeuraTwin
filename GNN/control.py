@@ -178,7 +178,7 @@ class GNNPlannerWrapper(PlannerWrapper):
         return ModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
 
 
-def _compute_phystwin_deformation(episode_idx, action_seq, case_name, downsample_rate, 
+def compute_phystwin_deformation(episode_idx, action_seq, case_name, downsample_rate, 
                                  phystwin_trainer, device, config_data):
     """
     Compute actual object deformation using PhysTwin simulation.
@@ -315,7 +315,7 @@ def visualize_action_gnn(save_dir, file_name):
     phystwin_trainer.initialize_simulator(best_model_path)
         
     # Compute actual deformation
-    actual_trajectory = _compute_phystwin_deformation(
+    actual_trajectory = compute_phystwin_deformation(
         episode_idx, action_seq, case_name, downsample_rate, 
         phystwin_trainer, device, config_data
     )

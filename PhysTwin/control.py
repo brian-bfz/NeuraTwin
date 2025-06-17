@@ -150,14 +150,27 @@ class PhysTwinModelRolloutFn:
     
     def _reset_robot_to_state(self, robot_state):
         """Reset robot to match the given robot state."""
-        # For simplicity, reset to initial robot configuration
-        # In a full implementation, this would reconstruct robot pose from robot_state
+        # Calculate translation from default robot position to target position from data file
         start_position = np.mean(robot_state.cpu().numpy(), axis=0)
-        current_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
-        translation = start_position - current_position
+        
+        # Get default robot position (after reset)
         self.robot_controller.reset()
-        self.trainer.robot.change_init_pose(translation)
-        self.trainer.reset_robot()
+        default_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
+        
+        # Calculate required translation
+        translation = start_position - default_position
+        
+        # Set the accumulate_trans to the calculated translation so controller knows its position
+        self.robot_controller.accumulate_trans[0] = translation
+        
+        # Update current_trans_dynamic_points to reflect the translated position
+        finger_meshes = self.trainer.robot.get_finger_mesh(self.robot_controller.current_finger)
+        dynamic_vertices = torch.tensor(
+            [np.asarray(finger_mesh.vertices) + translation for finger_mesh in finger_meshes],
+            device=self.device,
+            dtype=torch.float32
+        )
+        self.robot_controller.current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
 
 
 class PhysTwinPlannerWrapper(PlannerWrapper):

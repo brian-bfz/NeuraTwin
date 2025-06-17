@@ -53,23 +53,6 @@ def sample_points(data_file, output_file, config):
                 episode_group_out.create_dataset('robot', data=sampled_robot_trajectory)
 
 
-def construct_edges_from_dataset(name, points, adj_thresh, topk):
-    """
-    Wrapper function for h5py.File.visititems
-    """
-    if isinstance(points, h5py.Dataset) and "object" in name:
-        # Use first frame for computing topological edges
-        points_data = points[0, :, :]  # [n_sampled_obj, 3] - first frame positions
-        adj_matrix = construct_edges_from_numpy(points_data, adj_thresh, topk)
-        
-        # Save edges
-        name = name.split('/')[-1]
-        edge_name = f'{name}_edges'
-        if edge_name in points.parent:
-            del points.parent[edge_name]
-        points.parent.create_dataset(edge_name, data=adj_matrix)
-
-
 def construct_edges_from_file(data_file, config):
     """
     Construct topological edges for points in data_file
