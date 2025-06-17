@@ -232,20 +232,20 @@ class InvPhyTrainerWarp:
         self.simulator.set_collide_object(collide_object_elas.detach().clone(), collide_object_fric.detach().clone())
 
     def reset_robot(self):
-                finger_meshes = self.robot.get_finger_mesh(0.0)
-                self.dynamic_meshes = finger_meshes
-                self.num_dynamic = len(self.dynamic_meshes)
-                dynamic_vertices = [
-                    np.asarray(finger_mesh.vertices) for finger_mesh in finger_meshes
-                ]
-                new_vertices = np.concatenate(dynamic_vertices, axis=0)
-                new_vertices = torch.tensor(
-                    new_vertices, dtype=torch.float32, device=cfg.device
-                )
-                self.dynamic_points = new_vertices
-                self.dynamic_vertices = [
-                    np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
-                ]
+        finger_meshes = self.robot.get_finger_mesh(0.0)
+        self.dynamic_meshes = finger_meshes
+        self.num_dynamic = len(self.dynamic_meshes)
+        dynamic_vertices = [
+            np.asarray(finger_mesh.vertices) for finger_mesh in finger_meshes
+        ]
+        new_vertices = np.concatenate(dynamic_vertices, axis=0)
+        new_vertices = torch.tensor(
+        new_vertices, dtype=torch.float32, device=cfg.device
+        )
+        self.dynamic_points = new_vertices
+        self.dynamic_vertices = [
+            np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
+        ]
 
     def _init_start(
         self,

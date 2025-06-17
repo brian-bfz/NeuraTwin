@@ -155,10 +155,9 @@ class PhysTwinModelRolloutFn:
         start_position = np.mean(robot_state.cpu().numpy(), axis=0)
         current_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
         translation = start_position - current_position
+        self.robot_controller.reset()
         self.trainer.robot.change_init_pose(translation)
         self.trainer.reset_robot()
-        # Reset the robot controller to match the new robot position
-        self.robot_controller.reset()
 
 
 class PhysTwinPlannerWrapper(PlannerWrapper):
