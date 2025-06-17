@@ -12,7 +12,7 @@ class RelationEncoder(nn.Module):
     Encodes relation features between connected particles in the graph.
     """
     
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size, dropout_rate):
         """
         Args:
             input_size: int - dimension of input relation features
@@ -28,8 +28,10 @@ class RelationEncoder(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(hidden_size, output_size),
             nn.ReLU()
         )
@@ -52,7 +54,7 @@ class ParticleEncoder(nn.Module):
     Encodes particle features including position history and attributes.
     """
     
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size, dropout_rate):
         """
         Args:
             input_size: int - dimension of input particle features
@@ -68,6 +70,7 @@ class ParticleEncoder(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(hidden_size, output_size),
             nn.ReLU()
         )
@@ -129,7 +132,7 @@ class ParticlePredictor(nn.Module):
     Predicts particle positions based on propagated graph features.
     """
     
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size, dropout_rate):
         """
         Args:
             input_size: int - dimension of input particle features
@@ -145,6 +148,7 @@ class ParticlePredictor(nn.Module):
         self.linear_0 = nn.Linear(input_size, hidden_size)
         self.linear_1 = nn.Linear(hidden_size, output_size)
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):
         """
@@ -156,7 +160,7 @@ class ParticlePredictor(nn.Module):
         """
         B, N, D = x.size()
         x = x.view(B * N, D)
-        x = self.linear_1(self.relu(self.linear_0(x)))
+        x = self.linear_1(self.dropout(self.relu(self.linear_0(x))))
         return x.view(B, N, self.output_size)
 
 
@@ -185,15 +189,16 @@ class PropModuleDiffDen(nn.Module):
         # History length for temporal modeling
         self.n_history = config['train']['n_history']
         self.use_gpu = use_gpu
+        self.dropout_rate = config['train']['dropout_rate']
 
         # Particle encoder:
         # Input: displacement (3 * n_history) + attributes (1)
         self.particle_encoder = ParticleEncoder(
-            3 * self.n_history + 1, nf_effect, nf_effect)
+            3 * self.n_history + 1, nf_effect, nf_effect, self.dropout_rate)
 
         # Separate encoders for collision and topological edges
-        self.collision_encoder = RelationEncoder(5, nf_effect, nf_effect)
-        self.topo_encoder = RelationEncoder(6, nf_effect, nf_effect)
+        self.collision_encoder = RelationEncoder(5, nf_effect, nf_effect, self.dropout_rate)
+        self.topo_encoder = RelationEncoder(6, nf_effect, nf_effect, self.dropout_rate)
 
         # Propagators for message passing
         self.particle_propagator = Propagator(
@@ -204,7 +209,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Final position predictor
         self.particle_predictor = ParticlePredictor(
-            nf_effect, nf_effect, 3)
+            nf_effect, nf_effect, 3, self.dropout_rate)
 
     def forward(self, a_cur, s_cur, s_delta, Rr_collision, Rs_collision, Rr_topo, Rs_topo, first_edge_lengths):
         """
