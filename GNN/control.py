@@ -98,7 +98,107 @@ class ModelRolloutFn:
             state_seqs[:, step_idx, :] = predicted_states.flatten(start_dim=1)           
         
         return {'state_seqs': state_seqs}
+
+
+class PhysTwinSimulator:
+    """
+    Compute ground truth deformation using PhysTwin.
+    """
     
+    def __init__(self, case_name, downsample_rate):
+        """
+        Initialize PhysTwin simulator.
+        
+        Args:
+            case_name: str - case name for PhysTwin configuration
+            downsample_rate: int - downsampling rate for configuration adjustment
+        """
+        self.case_name = case_name
+        self.downsample_rate = downsample_rate
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                
+        # Create PhysTwin configuration
+        phystwin_config = PhysTwinConfig(case_name=self.case_name)
+        
+        # Adjust PhysTwin configuration for GNN downsampling
+        cfg.num_substeps = int(cfg.num_substeps * self.downsample_rate)
+        cfg.FPS = int(cfg.FPS / self.downsample_rate)
+        print(f"Adjusted PhysTwin config: substeps={cfg.num_substeps}, FPS={cfg.FPS}")
+        
+        # Create robot and trainer for PhysTwin simulation
+        sample_robot = phystwin_config.create_robot("default")
+        self.trainer = InvPhyTrainerWarp(
+            data_path=phystwin_config.get_data_path(),
+            base_dir=str(phystwin_config.case_paths['base_dir']),
+            pure_inference_mode=True,
+            static_meshes=[],
+            robot=sample_robot,
+        )
+        
+        # Initialize simulator with trained model
+        best_model_path = phystwin_config.get_best_model_path()
+        self.trainer.initialize_simulator(best_model_path)
+        
+        print("PhysTwin initialization completed!")
+        
+    def compute_deformation(self, action_seq, phystwin_states, phystwin_robot_mask, 
+                          action_weight=None, fsp_weight=None, target_pcd=None):
+        """
+        Compute actual object deformation using PhysTwin simulation.
+        Compute reward if target_pcd is provided.
+        
+        Args:
+            action_seq: [n_look_ahead, action_dim] - action sequence
+            phystwin_states: [n_particles, 3] - initial particle states
+            phystwin_robot_mask: [n_particles] - robot mask
+            action_weight: float - action penalty weight (for reward calculation) (optional)
+            fsp_weight: float - final speed penalty weight (for reward calculation) (optional)
+            target_pcd: torch.Tensor - target for reward calculation (optional)
+            
+        Returns:
+            actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory
+        """
+        # Adjust PhysTwin configuration for GNN downsampling
+        original_substeps = cfg.num_substeps
+        original_fps = cfg.FPS
+        cfg.num_substeps = int(cfg.num_substeps * self.downsample_rate)
+        cfg.FPS = int(cfg.FPS / self.downsample_rate)
+        
+        try:
+            # Create PhysTwin model rollout function with PhysTwin robot mask
+            phystwin_rollout_fn = PhysTwinModelRolloutFn(self.trainer, phystwin_robot_mask, self.device)
+            
+            # Prepare state and action sequences for PhysTwin
+            phystwin_state_cur = phystwin_states.clone().unsqueeze(0)  # [1, n_particles, 3]
+            phystwin_state_cur = phystwin_state_cur.flatten(start_dim=1)  # [1, n_particles * 3]
+            
+            # Convert action sequence to required format [1, n_look_ahead, action_dim]
+            action_seqs = action_seq[:, :2].unsqueeze(0)  # [1, n_look_ahead, 2] - only x,y translation
+            
+            # Get actual deformation from PhysTwin
+            print("Computing actual deformation with PhysTwin...")
+            phystwin_result = phystwin_rollout_fn(phystwin_state_cur, action_seqs)
+            actual_states = phystwin_result['state_seqs'][0]  # [n_look_ahead, n_particles*3]
+            
+            # Reshape and add initial state for actual trajectory
+            phystwin_n_particles = len(phystwin_robot_mask)
+            actual_states = actual_states.reshape(-1, phystwin_n_particles, 3)
+            phystwin_initial_state = phystwin_states.unsqueeze(0)  # [1, n_particles, 3]
+            actual_trajectory = torch.cat([phystwin_initial_state, actual_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
+                        
+            # Calculate reward with actual trajectory (optional)
+            if target_pcd is not None and action_weight is not None and fsp_weight is not None:
+                reward_fn = RewardFn(action_weight, fsp_weight, phystwin_robot_mask, target_pcd)
+                actual_reward = reward_fn(phystwin_result['state_seqs'], action_seqs)['reward_seqs'][0].item()
+                print(f"Actual reward (PhysTwin deformation): {actual_reward:.6f}")
+
+            return actual_trajectory
+            
+        finally:
+            # Restore original PhysTwin configuration
+            cfg.num_substeps = original_substeps
+            cfg.FPS = original_fps
+
 
 class GNNPlannerWrapper(PlannerWrapper): 
     def __init__(self, model_path: str, train_config_path: str, mpc_config_path: str, case_name: str):
@@ -120,8 +220,8 @@ class GNNPlannerWrapper(PlannerWrapper):
         # Initialize GNN model
         self._initialize_model(model_path)
         
-        # Initialize PhysTwin for actual deformation calculation
-        self.phystwin_trainer = self._initialize_phystwin()
+        # Initialize PhysTwin simulator for actual deformation calculation
+        self.phystwin_simulator = PhysTwinSimulator(case_name, self.downsample_rate)
         
         print(f"Loaded GNN model from: {model_path}")
         print(f"History length: {self.n_history}")
@@ -136,34 +236,7 @@ class GNNPlannerWrapper(PlannerWrapper):
         self.downsample_rate = self.train_config['dataset']['downsample_rate']
         self.n_history = self.train_config['train']['n_history'] # mpc and model n_history must agree
 
-    def _initialize_phystwin(self):
-        """Initialize PhysTwin trainer for actual deformation calculation."""
-        print("Initializing PhysTwin for actual deformation simulation...")
-        
-        # Create PhysTwin configuration
-        phystwin_config = PhysTwinConfig(case_name=self.case_name)
-        
-        # Adjust PhysTwin configuration for GNN downsampling
-        cfg.num_substeps = int(cfg.num_substeps * self.downsample_rate)
-        cfg.FPS = int(cfg.FPS / self.downsample_rate)
-        print(f"Adjusted PhysTwin config: substeps={cfg.num_substeps}, FPS={cfg.FPS}")
-        
-        # Create robot and trainer for PhysTwin simulation
-        sample_robot = phystwin_config.create_robot("default")
-        trainer = InvPhyTrainerWarp(
-            data_path=phystwin_config.get_data_path(),
-            base_dir=str(phystwin_config.case_paths['base_dir']),
-            pure_inference_mode=True,
-            static_meshes=[],
-            robot=sample_robot,
-        )
-        
-        # Initialize simulator with trained model
-        best_model_path = phystwin_config.get_best_model_path()
-        trainer.initialize_simulator(best_model_path)
-        
-        print("PhysTwin initialization completed!")
-        return trainer
+
 
     def _prepare_initial_state(self, first_states, robot_mask):
         """Prepare initial state for GNN model."""
@@ -177,71 +250,28 @@ class GNNPlannerWrapper(PlannerWrapper):
         first_states = kwargs.get('first_states')
         return ModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
 
-
-def compute_phystwin_deformation(episode_idx, action_seq, case_name, downsample_rate, 
-                                 phystwin_trainer, device, config_data):
-    """
-    Compute actual object deformation using PhysTwin simulation.
-    
-    Args:
-        episode_idx: int - episode index
-        action_seq: [n_look_ahead, 3] - action sequence
-        case_name: str - case name
-        downsample_rate: int - downsampling rate
-        phystwin_trainer: PhysTwin trainer instance
-        device: torch device
-        config_data: dict - MPC configuration data
+    def compute_phystwin_deformation(self, action_seq, phystwin_states, phystwin_robot_mask, target_pcd=None):
+        """
+        Compute actual object deformation using PhysTwin simulation.
+        Delegates to PhysTwinSimulator for the actual computation.
         
-    Returns:
-        actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory
-    """
-    # Load PhysTwin data (full resolution with different robot mask)
-    phystwin_data_file = config_data['phystwin_data_file']
-    phystwin_first_states, phystwin_robot_mask, _ = load_mpc_data(episode_idx, phystwin_data_file, device)
-    
-    # Adjust PhysTwin configuration for GNN downsampling
-    original_substeps = cfg.num_substeps
-    original_fps = cfg.FPS
-    cfg.num_substeps = int(cfg.num_substeps * downsample_rate)
-    cfg.FPS = int(cfg.FPS / downsample_rate)
-    
-    try:
-        # Create PhysTwin model rollout function with PhysTwin robot mask
-        phystwin_rollout_fn = PhysTwinModelRolloutFn(phystwin_trainer, phystwin_robot_mask, device)
-        
-        # Prepare state and action sequences for PhysTwin
-        phystwin_state_cur = phystwin_first_states.clone().unsqueeze(0)  # [1, n_particles, 3]
-        phystwin_state_cur = phystwin_state_cur.flatten(start_dim=1)  # [1, n_particles * 3]
-        
-        # Convert action sequence to required format [1, n_look_ahead, action_dim]
-        action_seqs = action_seq[:, :2].unsqueeze(0)  # [1, n_look_ahead, 2] - only x,y translation
-        
-        # Get actual deformation from PhysTwin
-        print("Computing actual deformation with PhysTwin...")
-        phystwin_result = phystwin_rollout_fn(phystwin_state_cur, action_seqs)
-        actual_states = phystwin_result['state_seqs'][0]  # [n_look_ahead, n_particles*3]
-        
-        # Reshape and add initial state for actual trajectory
-        phystwin_n_particles = len(phystwin_robot_mask)
-        actual_states = actual_states.reshape(-1, phystwin_n_particles, 3)
-        phystwin_initial_state = phystwin_first_states.unsqueeze(0)  # [1, n_particles, 3]
-        actual_trajectory = torch.cat([phystwin_initial_state, actual_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
-        
-        # Filter out robot particles for visualization
-        actual_trajectory = actual_trajectory[:, ~phystwin_robot_mask, :]
-        
-        # Calculate reward with actual trajectory
-        reward_fn = RewardFn(config_data['action_weight'], config_data['fsp_weight'], phystwin_robot_mask, target_pcd)
-        actual_reward = reward_fn(phystwin_result['state_seqs'], action_seqs)['reward_seqs'][0].item()
-        
-        print(f"Actual reward (PhysTwin deformation): {actual_reward:.6f}")
-
-        return actual_trajectory
-        
-    finally:
-        # Restore original PhysTwin configuration
-        cfg.num_substeps = original_substeps
-        cfg.FPS = original_fps
+        Args:
+            action_seq: [n_look_ahead, action_dim] - action sequence
+            phystwin_states: [n_particles, 3] - initial particle states
+            phystwin_robot_mask: [n_particles] - robot mask
+            target_pcd: torch.Tensor - target for reward calculation (optional)
+            
+        Returns:
+            actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory
+        """
+        return self.phystwin_simulator.compute_deformation(
+            action_seq=action_seq,
+            phystwin_states=phystwin_states,
+            phystwin_robot_mask=phystwin_robot_mask,
+            action_weight=self.action_weight,
+            fsp_weight=self.fsp_weight,
+            target_pcd=target_pcd
+        )
 
 
 def visualize_action_gnn(save_dir, file_name):
@@ -298,27 +328,29 @@ def visualize_action_gnn(save_dir, file_name):
     initial_state = first_states.unsqueeze(0)  # [1, n_particles, 3]
     full_trajectory = torch.cat([initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
     
-    # Initialize PhysTwin for actual deformation calculation
-    case_name = config_data.get('case_name', 'single_push_rope')
-    downsample_rate = config_data.get('downsample_rate', 1)
-    print("Initializing PhysTwin for actual deformation computation...")
-    phystwin_config = PhysTwinConfig(case_name=case_name)
-    sample_robot = phystwin_config.create_robot("default")
-    phystwin_trainer = InvPhyTrainerWarp(
-        data_path=phystwin_config.get_data_path(),
-        base_dir=str(phystwin_config.case_paths['base_dir']),
-        pure_inference_mode=True,
-        static_meshes=[],
-        robot=sample_robot,
+    # Initialize PhysTwin simulator for actual deformation calculation
+    downsample_rate = config_data['downsample_rate']
+    phystwin_simulator = PhysTwinSimulator(
+        case_name=config_data['case_name'],
+        downsample_rate=downsample_rate
     )
-    best_model_path = phystwin_config.get_best_model_path()
-    phystwin_trainer.initialize_simulator(best_model_path)
+    
+    # Load PhysTwin data for this specific episode
+    phystwin_data_file = config_data['phystwin_data_file']
+    phystwin_first_states, phystwin_robot_mask, _ = load_mpc_data(episode_idx, phystwin_data_file, device)
         
     # Compute actual deformation
-    actual_trajectory = compute_phystwin_deformation(
-        episode_idx, action_seq, case_name, downsample_rate, 
-        phystwin_trainer, device, config_data
+    actual_trajectory = phystwin_simulator.compute_deformation(
+        action_seq=action_seq,
+        phystwin_states=phystwin_first_states,
+        phystwin_robot_mask=phystwin_robot_mask,
+        action_weight=config_data['action_weight'],
+        fsp_weight=config_data['fsp_weight'],
+        target_pcd=target_pcd
     )
+    
+    # Filter out robot particles for visualization (only show object particles)
+    actual_trajectory = actual_trajectory[:, ~phystwin_robot_mask, :]
     print("PhysTwin actual deformation computed successfully!")
     
     # Set up visualization paths

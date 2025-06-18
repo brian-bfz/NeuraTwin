@@ -29,7 +29,7 @@ train:
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
-  nf_hidden: 96
+  nf_hidden: 64
   num_workers: 10
   train_valid_ratio: 0.9
   log_per_iter: 350
@@ -37,7 +37,7 @@ train:
   n_history: 4
   n_rollout: 4
   rollout_decay: 1.0
-  dropout_rate: 0.5
+  dropout_rate: 0.2
   lr_scheduler:
     type: "ReduceLROnPlateau"
     enabled: true
@@ -49,17 +49,17 @@ train:
     cooldown: 0 # ReduceLROnPlateau
     min_lr: 0.000008 # ReduceLROnPlateau
   rollback:
-    enabled: true
+    enabled: false
     patience: 8
     threshold: 1.7
   particle:
-    nf_effect: 96
+    nf_effect: 64
     fps_radius: 0.02
   resume:
-    active: false
-    epoch: -1
+    active: true
+    epoch: 59
     iter: 0
-    folder: "debug_encoders"
+    folder: "dropout_0.2"
   edges:
     topological: 
       enabled: true
