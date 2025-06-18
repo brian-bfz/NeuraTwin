@@ -1,15 +1,15 @@
-from .qqtt.utils import logger, cfg
-from .config_manager import PhysTwinConfig, create_common_parser
-import numpy as np
-from .SampleRobot import RobotPcSampler
-from .paths import *
 import os
 import cv2
-import open3d as o3d
 import h5py
+import numpy as np
+import open3d as o3d
+
+from .qqtt.utils import logger, cfg
+from .config_manager import PhysTwinConfig, create_common_parser
+from .paths import *
 from scripts.utils import parse_episodes
 
-def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
+def video_from_data(cfg, f, episode_id, robot_loader, robot_pose, output_dir=None):
         logger.info(f"Starting video generation for episode {episode_id}")
 
         vis_cam_idx = 0
@@ -17,7 +17,7 @@ def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
         intrinsic = cfg.intrinsics[vis_cam_idx]
         w2c = cfg.w2cs[vis_cam_idx]
 
-        dynamic_meshes = robot.get_finger_mesh(0.0)
+        dynamic_meshes = robot_loader.get_finger_mesh(gripper_openness=0.0, transform=robot_pose)
         finger_vertex_counts = [len(mesh.vertices) for mesh in dynamic_meshes]
 
         vis = o3d.visualization.Visualizer()
@@ -137,8 +137,9 @@ if __name__ == "__main__":
         gaussian_path=args.gaussian_path
     )
 
-    # Create robot with video pose
-    sample_robot = config.create_robot("video")
+    # Create robot loader and pose for video generation
+    robot_loader = config.create_robot_loader()
+    video_pose = config.get_robot_initial_pose("video")
 
     # Parse episode specification
     episode_list = parse_episodes(args.episodes)
@@ -146,4 +147,4 @@ if __name__ == "__main__":
     # Generate videos for specified episodes
     with h5py.File(args.data_file, 'r') as f:
         for episode_id in episode_list:
-            video_from_data(cfg, f, episode_id, sample_robot, args.output_dir)
+            video_from_data(cfg, f, episode_id, robot_loader, video_pose, args.output_dir)

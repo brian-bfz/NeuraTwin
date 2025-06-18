@@ -128,17 +128,13 @@ class PhysTwinInGNN:
         cfg.FPS = int(cfg.FPS / self.downsample_rate)
         print(f"Adjusted PhysTwin config: substeps={cfg.num_substeps}, FPS={cfg.FPS}")
         
-        # Create robot loader directly - no special initial pose needed
-        robot_loader = RobotLoader(str(URDF_XARM7), link_names=["left_finger", "right_finger"])
-        initial_pose = None  # Trainer will set its own robot position
-        
         self.trainer = InvPhyTrainerWarp(
             data_path=phystwin_config.get_data_path(),
             base_dir=str(phystwin_config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
-            robot_loader=robot_loader,
-            robot_initial_pose=initial_pose,
+            robot_loader=phystwin_config.create_robot_loader(),
+            robot_initial_pose=phystwin_config.get_robot_initial_pose("default"),
         )
         
         # Initialize simulator with trained model
@@ -317,7 +313,7 @@ def visualize_action_gnn(save_dir, file_name):
     )
     
     # Filter out robot particles for visualization (only show object particles)
-    actual_trajectory = actual_trajectory[:, ~phystwin_robot_mask, :]
+    # actual_trajectory = actual_trajectory[:, ~phystwin_robot_mask, :]
     print("PhysTwin actual deformation computed successfully!")
     
     # Set up visualization paths

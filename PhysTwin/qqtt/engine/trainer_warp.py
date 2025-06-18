@@ -48,6 +48,8 @@ import matplotlib.pyplot as plt
 
 from GNN.model.rollout import Rollout
 from GNN.utils import visualize_edges, fps_rad_tensor, construct_edges_from_tensor, construct_edges_with_attrs
+from ...robot import RobotController
+import h5py
 
 class InvPhyTrainerWarp:
     def __init__(
@@ -136,7 +138,6 @@ class InvPhyTrainerWarp:
         if static_meshes is not None:
             if robot_loader is not None:
                 # Create robot controller with loader and initial pose
-                from ...robot import RobotController
                 self.robot_loader = robot_loader
                 self.robot_controller = RobotController(robot_loader, device=device)
                 
@@ -1051,8 +1052,8 @@ class InvPhyTrainerWarp:
             speed: Speed of the robot movement
             
         Returns:
-            tuple: (initial_translation, target_changes)
-                - translation: numpy array of shape (3,) for initial robot position
+            tuple: (current_pose, target_changes)
+                - current_pose: numpy array [4,4] for robot transformation matrix
                 - target_changes: numpy array for target movement
         """
         # Get object points from the simulator
@@ -1101,7 +1102,12 @@ class InvPhyTrainerWarp:
     
     def push_once(self, offset_dist, keep_off, travel_dist, speed):
         """
-        Select a point on the rope, offset it by offset_dist, and move the pusher in a random direction.  
+        Select a point on the rope, offset it by offset_dist, and move the pusher in a random direction.
+        
+        Returns:
+            tuple: (current_pose, target_changes)
+                - current_pose: numpy array [4,4] for robot transformation matrix
+                - target_changes: numpy array for target movement
         """
         # Get object points from the simulator
         max_attempts = 100
@@ -1150,8 +1156,6 @@ class InvPhyTrainerWarp:
     
     def save_episode_data(self, data_file_path, episode_id, object_data, robot_data, gaussians_data=None):
         """Save episode data to a shared HDF5 file with each episode as a group"""
-        import h5py
-        from datetime import datetime
         
         # Convert to numpy arrays
         object_array = np.array([x.detach().cpu().numpy() for x in object_data])

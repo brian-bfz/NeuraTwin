@@ -72,16 +72,6 @@ if __name__ == "__main__":
     # Load the static_meshes (keeping existing static mesh setup)
     static_meshes = []
 
-    # Create robot loader and set up interactive pose
-    from .robot import RobotLoader
-    robot_loader = RobotLoader(str(URDF_XARM7), link_names=["left_finger", "right_finger"])
-    
-    # Interactive pose: special position for this script
-    R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
-    interactive_pose = np.eye(4)
-    interactive_pose[:3, :3] = R
-    interactive_pose[:3, 3] = [0.2, 0.0, 0.23]  # Special interactive position
-
     # Load GNN model and config
     gnn_model = None
     gnn_config = None
@@ -122,8 +112,8 @@ if __name__ == "__main__":
         base_dir=config.get_temp_base_dir(),
         pure_inference_mode=True,
         static_meshes=static_meshes,
-        robot_loader=robot_loader,
-        robot_initial_pose=interactive_pose,
+        robot_loader=config.create_robot_loader(),
+        robot_initial_pose=config.get_robot_initial_pose("interactive"),
     )
 
     # Run interactive session

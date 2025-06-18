@@ -9,7 +9,6 @@ import random
 import os
 import h5py
 from scripts.utils import parse_episodes
-from .robot.loader import RobotLoader
 
 # def set_all_seeds(seed):
 #     random.seed(seed)
@@ -91,21 +90,14 @@ if __name__ == "__main__":
         gaussian_path=args.gaussian_path
     )
     
-    # Create robot loader for data generation
-    robot_loader = RobotLoader(
-        str(URDF_XARM7), 
-        link_names=["left_finger", "right_finger"]
-    )
-    initial_pose = None  # Trainer will set its own robot position
-
     # Create trainer
     trainer = InvPhyTrainerWarp(
         data_path=config.get_data_path(),
         base_dir=str(config.case_paths['base_dir']),
         pure_inference_mode=True,
         static_meshes=[],
-        robot_loader=robot_loader,
-        robot_initial_pose=initial_pose,
+        robot_loader=config.create_robot_loader(),
+        robot_initial_pose=config.get_robot_initial_pose("default"),
         include_gaussian=args.include_gaussian,
     )
 

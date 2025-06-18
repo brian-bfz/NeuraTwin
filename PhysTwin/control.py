@@ -178,20 +178,14 @@ class PhysTwinPlannerWrapper(PlannerWrapper):
 
     def _initialize_model(self):
         """Initialize PhysTwin trainer with loaded model."""
-        # Create robot loader directly
-        from .paths import URDF_XARM7
-        from .robot import RobotLoader
-        robot_loader = RobotLoader(str(URDF_XARM7), link_names=["left_finger", "right_finger"])
-        initial_pose = None  # Trainer will set its own robot position
-        
         # Create trainer
         trainer = InvPhyTrainerWarp(
             data_path=self.config.get_data_path(),
             base_dir=str(self.config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
-            robot_loader=robot_loader,
-            robot_initial_pose=initial_pose,
+            robot_loader=self.config.create_robot_loader(),
+            robot_initial_pose=self.config.get_robot_initial_pose("default"),
         )
         
         # Initialize simulator with trained model

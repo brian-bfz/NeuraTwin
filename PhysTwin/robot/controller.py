@@ -4,7 +4,6 @@ Refactored from RobotMovementController to be the single source of robot state t
 """
 import torch
 import numpy as np
-from .loader import RobotLoader
 
 
 def axis_angle_to_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
@@ -54,7 +53,7 @@ class RobotController:
     It uses RobotLoader for stateless mesh generation.
     """
     
-    def __init__(self, robot_loader: RobotLoader, n_ctrl_parts=1, device='cuda'):
+    def __init__(self, robot_loader, n_ctrl_parts=1, device='cuda'):
         """
         Initialize the robot controller.
         

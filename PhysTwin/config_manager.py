@@ -16,6 +16,7 @@ from .paths import (
     get_case_paths, URDF_XARM7, GAUSSIAN_OUTPUT_DIR,
     DATA_BG_IMG, TEMP_EXPERIMENTS_DIR
 )
+from .robot import RobotLoader
 
 
 class PhysTwinConfig:
@@ -116,6 +117,41 @@ class PhysTwinConfig:
     def get_temp_base_dir(self) -> str:
         """Get temporary base directory for experiments"""
         return str(TEMP_EXPERIMENTS_DIR / self.case_name)
+    
+    def create_robot_loader(self) -> RobotLoader:
+        """
+        Create a robot loader for URDF parsing and mesh generation.
+        
+        Returns:
+            RobotLoader: Stateless robot loader instance
+        """
+        urdf_path = str(URDF_XARM7)
+        return RobotLoader(
+            urdf_path, 
+            link_names=["left_finger", "right_finger"]
+        )
+    
+    def get_robot_initial_pose(self, robot_type: str = "default") -> np.ndarray:
+        """
+        Get initial pose for robot type.
+        
+        Args:
+            robot_type: Type of robot configuration ("default", "interactive", "video")
+            
+        Returns:
+            np.ndarray [4,4]: Initial transformation matrix
+        """
+        R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+        
+        init_pose = np.eye(4)
+        init_pose[:3, :3] = R
+
+        if robot_type == "interactive":
+            init_pose[:3, 3] = [0.2, 0.0, 0.23]
+        else:
+            init_pose[:3, 3] = [0.0, 0.0, 0.0]
+        
+        return init_pose
     
     def get_paths(self) -> Dict[str, Path]:
         """Get all relevant paths for the case"""
