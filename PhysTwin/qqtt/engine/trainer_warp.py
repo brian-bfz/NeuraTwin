@@ -1081,8 +1081,8 @@ class InvPhyTrainerWarp:
             raise RuntimeError("Could not find valid robot position after maximum attempts")
         
         # 5. Find robot's current position and calculate translation
-        all_vertices = np.concatenate([vertices for vertices in self.dynamic_vertices], axis=0)
-        robot_position = np.mean(all_vertices, axis=0)
+        robot_vertices = self.robot_controller.current_trans_dynamic_points.cpu().numpy()
+        robot_position = np.mean(robot_vertices, axis=0)
         translation = start_position.cpu().numpy() - robot_position
         translation = translation.reshape(self.n_ctrl_parts, 3)
         # print(translation, start_position.cpu().numpy(), robot_position)
@@ -1133,8 +1133,8 @@ class InvPhyTrainerWarp:
             raise RuntimeError("Could not find valid robot position after maximum attempts")
         
         # 4. Find robot's current position and calculate translation
-        all_vertices = np.concatenate([vertices for vertices in self.dynamic_vertices], axis=0)
-        robot_position = np.mean(all_vertices, axis=0)
+        robot_vertices = self.robot_controller.current_trans_dynamic_points.cpu().numpy()
+        robot_position = np.mean(robot_vertices, axis=0)
         translation = start_position.cpu().numpy() - robot_position
         translation = translation.reshape(self.n_ctrl_parts, 3)
 

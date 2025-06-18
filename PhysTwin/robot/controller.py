@@ -231,16 +231,26 @@ class RobotController:
         """
         target_vertices_np = target_vertices.cpu().numpy()
         
-        # Calculate target position as mean of vertices
-        target_position = np.mean(target_vertices_np, axis=0)
+        # Calculate translation needed to match target vertices
+        # Current mesh center
+        current_mesh_center = torch.mean(self.current_trans_dynamic_points, dim=0).cpu().numpy()
         
-        # For now, keep current rotation and finger opening
-        # Could be enhanced to infer these from vertex positions
+        # Target mesh center  
+        target_mesh_center = np.mean(target_vertices_np, axis=0)
+        
+        # Calculate translation from current to target
+        translation = target_mesh_center - current_mesh_center
+        
+        # Apply translation to current position
+        current_position = self.accumulate_trans[0]
+        new_position = current_position + translation
+        
+        # Keep current rotation and finger opening
         current_rotation = self.accumulate_rot.cpu().numpy()
         current_finger = self.current_finger
         
-        # Set pose and directly update mesh vertices
-        self.set_pose(target_position, current_rotation, current_finger)
+        # Set pose and directly override with exact target vertices
+        self.set_pose(new_position, current_rotation, current_finger)
         self.current_trans_dynamic_points = target_vertices.to(self.device)
         
     def get_current_state(self):
