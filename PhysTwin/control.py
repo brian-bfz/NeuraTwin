@@ -42,12 +42,8 @@ class PhysTwinModelRolloutFn:
         # Calculate frame duration for velocity conversion
         self.frame_duration = cfg.dt * cfg.num_substeps
         
-        # Create robot movement controller
-        self.robot_controller = RobotMovementController(
-            robot=self.trainer.robot,
-            n_ctrl_parts=1,
-            device=device
-        )
+        # Create robot controller
+        self.robot_controller = self.trainer.robot_controller
         
     def __call__(self, state_cur, action_seqs):
         """
@@ -106,7 +102,7 @@ class PhysTwinModelRolloutFn:
         )
         
         # Reset robot to initial position (reconstruct from initial_robot_state)
-        self.reset_robot_to_state(initial_robot_state)
+        self.robot_controller.set_from_mesh_vertices(initial_robot_state)
         
         predicted_states = torch.zeros(n_look_ahead, self.n_particles, 3, device=self.device)
         
@@ -150,27 +146,6 @@ class PhysTwinModelRolloutFn:
         
         return predicted_states  # [n_look_ahead, n_particles, 3]
     
-    def reset_robot_to_state(self, robot_state):
-        """Reset robot to match the given robot state."""
-        # Get target robot points from data
-        target_robot_points = robot_state.cpu().numpy()  # [n_robot_particles, 3]
-        
-        # Don't reset the controller - this preserves the current gripper state
-        # Instead, calculate translation from current position to target position
-        current_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
-        target_position = np.mean(target_robot_points, axis=0)
-        
-        # Calculate required translation
-        translation = target_position - current_position
-        
-        # Update the accumulate_trans to reflect the new position
-        self.robot_controller.accumulate_trans[0] += translation
-        
-        # Update current_trans_dynamic_points to match target robot state exactly
-        self.robot_controller.current_trans_dynamic_points = torch.tensor(
-            target_robot_points, device=self.device, dtype=torch.float32
-        )
-
 
 class PhysTwinPlannerWrapper(PlannerWrapper):
     """Wrapper for PhysTwin-based model predictive control"""
@@ -203,8 +178,11 @@ class PhysTwinPlannerWrapper(PlannerWrapper):
 
     def _initialize_model(self):
         """Initialize PhysTwin trainer with loaded model."""
-        # Create robot
-        sample_robot = self.config.create_robot("default")
+        # Create robot loader directly
+        from .paths import URDF_XARM7
+        from .robot import RobotLoader
+        robot_loader = RobotLoader(str(URDF_XARM7), link_names=["left_finger", "right_finger"])
+        initial_pose = None  # Trainer will set its own robot position
         
         # Create trainer
         trainer = InvPhyTrainerWarp(
@@ -212,7 +190,8 @@ class PhysTwinPlannerWrapper(PlannerWrapper):
             base_dir=str(self.config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
-            robot=sample_robot,
+            robot_loader=robot_loader,
+            robot_initial_pose=initial_pose,
         )
         
         # Initialize simulator with trained model

@@ -16,7 +16,6 @@ from .paths import (
     get_case_paths, URDF_XARM7, GAUSSIAN_OUTPUT_DIR,
     DATA_BG_IMG, TEMP_EXPERIMENTS_DIR
 )
-from .SampleRobot import RobotPcSampler
 
 
 class PhysTwinConfig:
@@ -117,30 +116,6 @@ class PhysTwinConfig:
     def get_temp_base_dir(self) -> str:
         """Get temporary base directory for experiments"""
         return str(TEMP_EXPERIMENTS_DIR / self.case_name)
-    
-    def create_robot(self, robot_type: str = "default") -> RobotPcSampler:
-        """
-        Create a robot sampler with appropriate initial pose
-        
-        Args:
-            robot_type: Type of robot configuration ("default", "interactive", "video")
-        """
-        urdf_path = str(URDF_XARM7)
-        R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
-        
-        init_pose = np.eye(4)
-        init_pose[:3, :3] = R
-
-        if robot_type == "interactive":
-            init_pose[:3, 3] = [0.2, 0.0, 0.23]
-        else:
-            init_pose[:3, 3] = [0.0, 0.0, 0.0]
-        
-        return RobotPcSampler(
-            urdf_path, 
-            link_names=["left_finger", "right_finger"], 
-            init_pose=init_pose
-        )
     
     def get_paths(self) -> Dict[str, Path]:
         """Get all relevant paths for the case"""

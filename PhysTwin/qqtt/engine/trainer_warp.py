@@ -4,7 +4,7 @@ from ..utils.misc import random_direction
 from ..model.diff_simulator import (
     SpringMassSystemWarp,
 )
-from .robot_movement_controller import RobotMovementController
+# Robot import moved to where it's used to avoid circular imports
 import open3d as o3d
 import numpy as np
 import torch
@@ -60,7 +60,8 @@ class InvPhyTrainerWarp:
         pure_inference_mode=False,
         device="cuda:0",
         static_meshes=None,
-        robot=None,
+        robot_loader=None,
+        robot_initial_pose=None,
         include_gaussian=False,
     ):
         cfg.data_path = data_path
@@ -133,9 +134,18 @@ class InvPhyTrainerWarp:
 
         self.static_meshes = static_meshes
         if static_meshes is not None:
-            if robot is not None:
-                # Extract the dynamic meshes from the robot
-                self.robot = robot
+            if robot_loader is not None:
+                # Create robot controller with loader and initial pose
+                from ...robot import RobotController
+                self.robot_loader = robot_loader
+                self.robot_controller = RobotController(robot_loader, device=device)
+                
+                # Set initial pose if provided
+                if robot_initial_pose is not None:
+                    position = robot_initial_pose[:3, 3]
+                    rotation = robot_initial_pose[:3, :3]
+                    self.robot_controller.set_pose(position, rotation, finger_opening=0.0)
+                
                 self.reset_robot()
             else:
                 self.dynamic_meshes = []
@@ -232,7 +242,10 @@ class InvPhyTrainerWarp:
         self.simulator.set_collide_object(collide_object_elas.detach().clone(), collide_object_fric.detach().clone())
 
     def reset_robot(self):
-        finger_meshes = self.robot.get_finger_mesh(0.0)
+        finger_meshes = self.robot_controller.robot_loader.get_finger_mesh(
+            gripper_openness=self.robot_controller.current_finger,
+            transform=self.robot_controller.get_pose()
+        )
         self.dynamic_meshes = finger_meshes
         self.num_dynamic = len(self.dynamic_meshes)
         dynamic_vertices = [
@@ -240,7 +253,7 @@ class InvPhyTrainerWarp:
         ]
         new_vertices = np.concatenate(dynamic_vertices, axis=0)
         new_vertices = torch.tensor(
-        new_vertices, dtype=torch.float32, device=cfg.device
+            new_vertices, dtype=torch.float32, device=cfg.device
         )
         self.dynamic_points = new_vertices
         self.dynamic_vertices = [
@@ -1241,15 +1254,18 @@ class InvPhyTrainerWarp:
         rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
         finger_changes = np.zeros((n_frames), dtype=np.float32)
 
-        self.robot.change_init_pose(translation)
+        # Update robot position using the new controller system
+        current_pose = self.robot_controller.get_pose()
+        current_pose[:3, 3] += translation.flatten()
+        self.robot_controller.set_pose(
+            current_pose[:3, 3], 
+            current_pose[:3, :3], 
+            self.robot_controller.current_finger
+        )
         self.reset_robot()
         
-        # Create robot movement controller
-        robot_controller = RobotMovementController(
-            robot=self.robot,
-            n_ctrl_parts=n_ctrl_parts,
-            device=cfg.device
-        )
+        # Use the existing robot controller
+        robot_controller = self.robot_controller
         
         logger.info("Starting data generation")
 
@@ -1601,12 +1617,8 @@ class InvPhyTrainerWarp:
             # cv2.imshow("test", vis_image)
             # cv2.waitKey(0)
 
-        # Create robot movement controller for interactive mode
-        robot_controller = RobotMovementController(
-            robot=self.robot,
-            n_ctrl_parts=n_ctrl_parts,
-            device=cfg.device
-        )
+        # Use the existing robot controller for interactive mode
+        robot_controller = self.robot_controller
 
         self.dynamic_vertices = [
             np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes

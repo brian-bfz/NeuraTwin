@@ -16,6 +16,9 @@ from PhysTwin.qqtt import InvPhyTrainerWarp
 from PhysTwin.qqtt.utils import cfg
 from PhysTwin.config_manager import PhysTwinConfig
 from PhysTwin.control import PhysTwinModelRolloutFn
+from PhysTwin.paths import URDF_XARM7
+from PhysTwin.robot import RobotLoader
+
 
 class GNNModelRolloutFn:
     def __init__(self, model, config, robot_mask, topological_edges, first_states):
@@ -125,14 +128,17 @@ class PhysTwinInGNN:
         cfg.FPS = int(cfg.FPS / self.downsample_rate)
         print(f"Adjusted PhysTwin config: substeps={cfg.num_substeps}, FPS={cfg.FPS}")
         
-        # Create robot and trainer for PhysTwin simulation
-        sample_robot = phystwin_config.create_robot("default")
+        # Create robot loader directly - no special initial pose needed
+        robot_loader = RobotLoader(str(URDF_XARM7), link_names=["left_finger", "right_finger"])
+        initial_pose = None  # Trainer will set its own robot position
+        
         self.trainer = InvPhyTrainerWarp(
             data_path=phystwin_config.get_data_path(),
             base_dir=str(phystwin_config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
-            robot=sample_robot,
+            robot_loader=robot_loader,
+            robot_initial_pose=initial_pose,
         )
         
         # Initialize simulator with trained model
