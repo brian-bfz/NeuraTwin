@@ -51,17 +51,7 @@ def test_curiosity_planner():
         phystwin_robot_mask=phystwin_robot_mask,
         case_name="single_push_rope"
     )
-    
-    print("\nTesting plan_action...")
-    
-    # Test plan_action
-    with torch.no_grad():
-        result = curiosity_planner.plan_action()
         
-    print(f"Planning completed!")
-    print(f"Action sequence shape: {result['act_seq'].shape}")
-    print(f"Best reward (variance): {result['best_eval_output']['reward_seqs'].item():.6f}")
-    
     # Test explore method
     print("\nTesting explore method...")
     output_file = "GNN/test_curiosity_output.h5"
@@ -72,7 +62,7 @@ def test_curiosity_planner():
     except Exception as e:
         print(f"Error in explore method: {e}")
     
-    return curiosity_planner, result
+    return curiosity_planner
 
 if __name__ == "__main__":
     test_curiosity_planner() 

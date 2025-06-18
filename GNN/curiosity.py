@@ -177,6 +177,9 @@ class CuriosityPlanner(GNNPlannerWrapper):
         
         Args:
             data_file: str - file where the results will be saved
+
+        Returns:
+            next_states: [n_particles, 3] - states of object and robot after the action sequence
         """
         # Get action sequence with highest uncertainty
         result = self.plan_action()
@@ -209,6 +212,8 @@ class CuriosityPlanner(GNNPlannerWrapper):
         self._save_results(data_file, object_states, robot_states, object_edges)
         
         print(f"Exploration complete! Results saved to: {data_file}")
+
+        return full_trajectory[-1]
 
     def _save_results(self, data_file, object_states, robot_states, object_edges):
         """
