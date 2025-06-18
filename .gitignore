@@ -28,6 +28,7 @@ PhysTwin/gaussian_splatting/submodules/
 *.prof
 *.profile
 *.mp4
+*.h5
 *.zip
 __pycache__/
 .DS_Store

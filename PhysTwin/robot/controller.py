@@ -178,23 +178,14 @@ class RobotController:
             / cfg.num_substeps
         )
         
-        interpolated_trans_dynamic_points = (
+        # Simple linear interpolation between previous and current mesh vertices
+        # Both prev_trans_dynamic_points and current_trans_dynamic_points already have
+        # rotation applied via the robot loader, so we don't need to apply rotation here
+        interpolated_dynamic_points = (
             prev_trans_dynamic_points.unsqueeze(0)
             + (self.current_trans_dynamic_points - prev_trans_dynamic_points).unsqueeze(0) * ratios
         )
-        interpolated_center = torch.mean(interpolated_trans_dynamic_points, dim=1)
-        
-        # Handle rotation interpolation
-        interpolated_rot_angle = new_rot.unsqueeze(0) * ratios.reshape(-1, 1)
-        interpolated_rot_temp = axis_angle_to_matrix(interpolated_rot_angle)
-        # Get rotation before update for interpolation
-        prev_rot = self.accumulate_rot @ torch.inverse(axis_angle_to_matrix(new_rot.unsqueeze(0))[0])
-        interpolated_rot_mat = torch.matmul(prev_rot.unsqueeze(0), interpolated_rot_temp)
-        
-        # Apply rotation to interpolated points
-        interpolated_dynamic_points = (
-            interpolated_trans_dynamic_points - interpolated_center.unsqueeze(1)
-        ) @ interpolated_rot_mat.permute(0, 2, 1) + interpolated_center.unsqueeze(1)
+        interpolated_center = torch.mean(interpolated_dynamic_points, dim=1)
         
         # Calculate velocity and omega
         dynamic_velocity = torch.tensor(

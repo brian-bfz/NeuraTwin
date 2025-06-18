@@ -1624,9 +1624,9 @@ class InvPhyTrainerWarp:
         # Use the existing robot controller for interactive mode
         robot_controller = self.robot_controller
 
-        self.dynamic_vertices = [
-            np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
-        ]
+        # Note: self.dynamic_vertices and self.dynamic_meshes are already set correctly 
+        # by reset_robot() in __init__, which accounts for the robot's initial pose.
+        # Don't overwrite them here with raw mesh vertices.
 
         close_flag = False
         is_closing = True
@@ -1635,6 +1635,9 @@ class InvPhyTrainerWarp:
         gnn_rollout = None
         gnn_x = None
         robot_positions_history = []
+        gnn_obj_pcd = None
+        gnn_robot_pcd = None
+        gnn_line_sets = []
         
         if gnn_model is not None and gnn_config is not None:
             logger.info("Initializing GNN rollout for comparison")
@@ -1700,11 +1703,6 @@ class InvPhyTrainerWarp:
             
             logger.info(f"GNN rollout initialized with {n_object_particles} object + {n_robot_particles} robot particles")
 
-            # Add GNN prediction point cloud (both object and robot particles)
-            gnn_obj_pcd = None
-            gnn_robot_pcd = None
-            gnn_line_set = None
-            
             # Object particles in green
             gnn_obj_pcd = o3d.geometry.PointCloud()
             gnn_obj_positions = gnn_x[:n_object_particles].cpu().numpy()
@@ -1724,9 +1722,6 @@ class InvPhyTrainerWarp:
             topk = gnn_config['train']['edges']['collision']['topk']
             tool_mask = torch.zeros(gnn_x.shape[0], dtype=torch.bool, device='cpu')
             tool_mask[n_object_particles:] = True
-
-            # Initialize edge sets to empty list - will be created in the loop
-            gnn_line_sets = []
 
             # Move data to CPU
             topological_edges = topological_edges.squeeze(0).cpu()

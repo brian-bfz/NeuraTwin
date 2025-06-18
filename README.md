@@ -32,3 +32,5 @@ If error pops up for urdfpy, click on the problematic file, and change ```np.flo
 ```python -m GNN.plot_training_loss --model --save_plots```
 
 ```python -m GNN.control --model --dir_name --episode```
+
+```python -m GNN.test_curiosity.py```
