@@ -110,7 +110,7 @@ class PlannerWrapper(ABC):
         self._save_planning_results(result, episode_idx, save_dir)
         
         # Plot rewards if verbose
-        if self.verbose and 'eval_outputs' in result and result['eval_outputs'] is not None:
+        if self.verbose:
             self._plot_rewards(result['eval_outputs'], save_dir)
         
         # Print best evaluation output

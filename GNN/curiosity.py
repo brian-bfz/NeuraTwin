@@ -1,11 +1,7 @@
 import torch
-import torch.nn as nn
-import numpy as np
-from .utils import fps_rad_tensor, construct_edges_from_tensor, load_yaml
-from .model.gnn_dyn import PropNetDiffDenModel
-from .paths import get_model_paths
-from scripts.planner import PlannerWrapper
-from .control import ModelRolloutFn, GNNPlannerWrapper
+from .utils import fps_rad_tensor, construct_edges_from_tensor
+from .control import GNNPlannerWrapper, PhysTwinInGNN, GNNModelRolloutFn
+from scripts.planner import Planner
 import h5py
 import os
 
@@ -45,7 +41,7 @@ class VarianceRewardFn:
 
 class EnsembleModelRolloutFn:
     """
-    Wrapper around ModelRolloutFn that runs multiple forward passes with dropout
+    Wrapper around GNNModelRolloutFn that runs multiple forward passes with dropout
     to generate ensemble predictions for uncertainty estimation.
     """
     
@@ -54,7 +50,7 @@ class EnsembleModelRolloutFn:
         Initialize ensemble wrapper.
         
         Args:
-            base_rollout_fn: ModelRolloutFn instance
+            base_rollout_fn: GNNModelRolloutFn instance
             n_ensemble: number of ensemble forward passes
         """
         self.base_rollout_fn = base_rollout_fn
@@ -115,6 +111,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         # Store PhysTwin data
         self.phystwin_states = phystwin_states.to(self.device)
         self.phystwin_robot_mask = phystwin_robot_mask.to(self.device)
+        self.phystwin = PhysTwinInGNN(case_name, self.downsample_rate)
         
         # Convert PhysTwin data to GNN format
         self._convert_phystwin_to_gnn()
@@ -124,12 +121,8 @@ class CuriosityPlanner(GNNPlannerWrapper):
 
     def _initialize_model(self, model_path):
         """Override to keep model in training mode for MC dropout."""
-        # Call parent initialization
         super()._initialize_model(model_path)
-        
-        # Keep model in training mode to enable dropout for MC sampling
         self.model.train()
-        print(f"Model kept in training mode for MC dropout sampling")
 
     def _convert_phystwin_to_gnn(self):
         """
@@ -173,16 +166,8 @@ class CuriosityPlanner(GNNPlannerWrapper):
             self.topological_edges[:n_obj_sampled, :n_obj_sampled] = object_edges
 
     def _create_model_rollout_fn(self, robot_mask, **kwargs):
-        """Create ensemble model rollout function wrapped around base ModelRolloutFn."""
-        topological_edges = kwargs.get('topological_edges')
-        first_states = kwargs.get('first_states')
-        
-        # Create base rollout function
-        base_rollout_fn = ModelRolloutFn(
-            self.model, self.train_config, robot_mask, topological_edges, first_states
-        )
-        
-        # Wrap with ensemble functionality
+        """Create ensemble model rollout function wrapped around base GNNModelRolloutFn."""
+        base_rollout_fn = super()._create_model_rollout_fn(robot_mask, **kwargs)
         return EnsembleModelRolloutFn(base_rollout_fn, self.n_ensemble)
 
     def explore(self, data_file):
@@ -206,12 +191,12 @@ class CuriosityPlanner(GNNPlannerWrapper):
         
         # Use PhysTwin to simulate the action sequence
         print("Running PhysTwin simulation...")
-        full_trajectory = self.compute_phystwin_deformation(
-            act_seq, 
+        full_trajectory = self.phystwin.compute_deformation(
+            action_seq=act_seq,
             phystwin_states=self.phystwin_states,
             phystwin_robot_mask=self.phystwin_robot_mask
         )
-        
+
         # Split into object and robot states (full_trajectory now includes both)
         object_states = full_trajectory[:, ~self.phystwin_robot_mask, :].cpu().numpy()
         robot_states = full_trajectory[:, self.phystwin_robot_mask, :].cpu().numpy()
@@ -312,7 +297,6 @@ class CuriosityPlanner(GNNPlannerWrapper):
         reward_fn = VarianceRewardFn()
         
         # Set up planner with variance reward
-        from scripts.planner import Planner
         planner = Planner({
             'action_dim': self.action_dim,
             'model_rollout_fn': model_rollout_fn,

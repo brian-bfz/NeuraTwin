@@ -17,7 +17,7 @@ from PhysTwin.qqtt.utils import cfg
 from PhysTwin.config_manager import PhysTwinConfig
 from PhysTwin.control import PhysTwinModelRolloutFn
 
-class ModelRolloutFn:
+class GNNModelRolloutFn:
     def __init__(self, model, config, robot_mask, topological_edges, first_states):
         """
         Initialize the model rollout function.
@@ -100,7 +100,7 @@ class ModelRolloutFn:
         return {'state_seqs': state_seqs}
 
 
-class PhysTwinSimulator:
+class PhysTwinInGNN:
     """
     Compute ground truth deformation using PhysTwin.
     """
@@ -161,43 +161,43 @@ class PhysTwinSimulator:
         # Adjust PhysTwin configuration for GNN downsampling
         original_substeps = cfg.num_substeps
         original_fps = cfg.FPS
-        cfg.num_substeps = int(cfg.num_substeps * self.downsample_rate)
-        cfg.FPS = int(cfg.FPS / self.downsample_rate)
         
         try:
             # Create PhysTwin model rollout function with PhysTwin robot mask
             phystwin_rollout_fn = PhysTwinModelRolloutFn(self.trainer, phystwin_robot_mask, self.device)
             
-            # Prepare state and action sequences for PhysTwin
-            phystwin_state_cur = phystwin_states.clone().unsqueeze(0)  # [1, n_particles, 3]
-            phystwin_state_cur = phystwin_state_cur.flatten(start_dim=1)  # [1, n_particles * 3]
+            # Extract initial object and robot states
+            initial_object_state = phystwin_states[~phystwin_robot_mask]  # [n_object_particles, 3]
+            initial_robot_state = phystwin_states[phystwin_robot_mask]  # [n_robot_particles, 3]
             
-            # Convert action sequence to required format [1, n_look_ahead, action_dim]
-            action_seqs = action_seq[:, :2].unsqueeze(0)  # [1, n_look_ahead, 2] - only x,y translation
+            # Convert action sequence: [n_look_ahead, action_dim] -> [n_look_ahead, 2] (only x,y)
+            action_seq_2d = action_seq[:, :2]  # [n_look_ahead, 2]
             
-            # Get actual deformation from PhysTwin
+            # Get actual deformation from PhysTwin using rollout_single_sequence
             print("Computing actual deformation with PhysTwin...")
-            phystwin_result = phystwin_rollout_fn(phystwin_state_cur, action_seqs)
-            actual_states = phystwin_result['state_seqs'][0]  # [n_look_ahead, n_particles*3]
+            predicted_states = phystwin_rollout_fn.rollout_single_sequence(
+                initial_object_state, initial_robot_state, action_seq_2d
+            )  # [n_look_ahead, n_particles, 3]
             
-            # Reshape and add initial state for actual trajectory
-            phystwin_n_particles = len(phystwin_robot_mask)
-            actual_states = actual_states.reshape(-1, phystwin_n_particles, 3)
-            phystwin_initial_state = phystwin_states.unsqueeze(0)  # [1, n_particles, 3]
-            actual_trajectory = torch.cat([phystwin_initial_state, actual_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
+            print(f"Initial robot state: {initial_robot_state.shape}")
+            print(f"Initial object state: {initial_object_state.shape}")
+            actual_initial_state = torch.cat([initial_object_state, initial_robot_state], dim=0).unsqueeze(0)  # [1, n_particles, 3]
+            actual_trajectory = torch.cat([actual_initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
                         
             # Calculate reward with actual trajectory (optional)
             if target_pcd is not None and action_weight is not None and fsp_weight is not None:
                 reward_fn = RewardFn(action_weight, fsp_weight, phystwin_robot_mask, target_pcd)
-                actual_reward = reward_fn(phystwin_result['state_seqs'], action_seqs)['reward_seqs'][0].item()
+                # Convert predicted_states to format expected by reward function: [1, n_look_ahead, n_particles*3]
+                reward_states = predicted_states.flatten(start_dim=1).unsqueeze(0)  # [1, n_look_ahead, n_particles*3]
+                action_seqs = action_seq_2d.unsqueeze(0)  # [1, n_look_ahead, 2]
+                actual_reward = reward_fn(reward_states, action_seqs)['reward_seqs'][0].item()
                 print(f"Actual reward (PhysTwin deformation): {actual_reward:.6f}")
 
             return actual_trajectory
             
         finally:
             # Restore original PhysTwin configuration
-            cfg.num_substeps = original_substeps
-            cfg.FPS = original_fps
+            pass
 
 
 class GNNPlannerWrapper(PlannerWrapper): 
@@ -220,9 +220,6 @@ class GNNPlannerWrapper(PlannerWrapper):
         # Initialize GNN model
         self._initialize_model(model_path)
         
-        # Initialize PhysTwin simulator for actual deformation calculation
-        self.phystwin_simulator = PhysTwinSimulator(case_name, self.downsample_rate)
-        
         print(f"Loaded GNN model from: {model_path}")
         print(f"History length: {self.n_history}")
 
@@ -236,8 +233,6 @@ class GNNPlannerWrapper(PlannerWrapper):
         self.downsample_rate = self.train_config['dataset']['downsample_rate']
         self.n_history = self.train_config['train']['n_history'] # mpc and model n_history must agree
 
-
-
     def _prepare_initial_state(self, first_states, robot_mask):
         """Prepare initial state for GNN model."""
         state_cur = first_states.clone().unsqueeze(0).repeat(self.n_history, 1, 1) # [n_history, n_particles, 3]
@@ -248,30 +243,7 @@ class GNNPlannerWrapper(PlannerWrapper):
         """Create GNN model rollout function."""
         topological_edges = kwargs.get('topological_edges')
         first_states = kwargs.get('first_states')
-        return ModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
-
-    def compute_phystwin_deformation(self, action_seq, phystwin_states, phystwin_robot_mask, target_pcd=None):
-        """
-        Compute actual object deformation using PhysTwin simulation.
-        Delegates to PhysTwinSimulator for the actual computation.
-        
-        Args:
-            action_seq: [n_look_ahead, action_dim] - action sequence
-            phystwin_states: [n_particles, 3] - initial particle states
-            phystwin_robot_mask: [n_particles] - robot mask
-            target_pcd: torch.Tensor - target for reward calculation (optional)
-            
-        Returns:
-            actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory
-        """
-        return self.phystwin_simulator.compute_deformation(
-            action_seq=action_seq,
-            phystwin_states=phystwin_states,
-            phystwin_robot_mask=phystwin_robot_mask,
-            action_weight=self.action_weight,
-            fsp_weight=self.fsp_weight,
-            target_pcd=target_pcd
-        )
+        return GNNModelRolloutFn(self.model, self.train_config, robot_mask, topological_edges, first_states)
 
 
 def visualize_action_gnn(save_dir, file_name):
@@ -330,7 +302,7 @@ def visualize_action_gnn(save_dir, file_name):
     
     # Initialize PhysTwin simulator for actual deformation calculation
     downsample_rate = 3
-    phystwin_simulator = PhysTwinSimulator(
+    phystwin_simulator = PhysTwinInGNN(
         case_name="single_push_rope",
         downsample_rate=downsample_rate
     )

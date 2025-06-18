@@ -71,17 +71,17 @@ class PhysTwinModelRolloutFn:
         # Sequential rollout for each action sequence sample
         state_seqs = torch.zeros(n_sample, n_look_ahead, state_cur.shape[1], device=self.device)
         
-        for sample_idx in range(n_sample):
-            predicted_states = self._rollout_single_sequence(
+        for i in range(n_sample):
+            predicted_states = self.rollout_single_sequence(
                 initial_object_state,
                 initial_robot_state, 
-                action_seqs[sample_idx]  # [n_look_ahead, 2]
+                action_seqs[i]  # [n_look_ahead, 2]
             )
-            state_seqs[sample_idx] = predicted_states.flatten(start_dim=1)  # [n_look_ahead, n_particles * 3]
+            state_seqs[i] = predicted_states.flatten(start_dim=1)  # [n_look_ahead, n_particles * 3]
             
         return {'state_seqs': state_seqs}
     
-    def _rollout_single_sequence(self, initial_object_state, initial_robot_state, action_seq):
+    def rollout_single_sequence(self, initial_object_state, initial_robot_state, action_seq):
         """
         Run PhysTwin simulation for single action sequence.
         
@@ -94,7 +94,9 @@ class PhysTwinModelRolloutFn:
             predicted_states: [n_look_ahead, n_particles, 3] - combined object + robot states
         """
         # Set z velocity to 0
+        n_look_ahead = action_seq.shape[0]
         action_seq = torch.cat([action_seq, torch.zeros(action_seq.shape[0], 1, device=self.device)], dim=1)
+
 
         # Reset simulator to initial object state
         initial_state_warp = wp.from_torch(initial_object_state.contiguous(), dtype=wp.vec3)
@@ -104,13 +106,13 @@ class PhysTwinModelRolloutFn:
         )
         
         # Reset robot to initial position (reconstruct from initial_robot_state)
-        self._reset_robot_to_state(initial_robot_state)
+        self.reset_robot_to_state(initial_robot_state)
         
-        predicted_states = []
+        predicted_states = torch.zeros(n_look_ahead, self.n_particles, 3, device=self.device)
         
-        for step_idx in range(len(action_seq)):
+        for i in range(n_look_ahead):
             # Apply robot translation using controller
-            robot_translation = action_seq[step_idx].cpu().numpy()
+            robot_translation = action_seq[i].cpu().numpy()
             
             # Update robot movement using the controller
             movement_result = self.robot_controller.update_robot_movement(
@@ -138,7 +140,7 @@ class PhysTwinModelRolloutFn:
             
             # Combine object and robot states (use final robot position)
             combined_state = torch.cat([object_state, movement_result['current_trans_dynamic_points']], dim=0)
-            predicted_states.append(combined_state)
+            predicted_states[i] = combined_state
             
             # Update simulator state for next step
             self.trainer.simulator.set_init_state(
@@ -146,31 +148,28 @@ class PhysTwinModelRolloutFn:
                 self.trainer.simulator.wp_states[-1].wp_v,
             )
         
-        return torch.stack(predicted_states)  # [n_look_ahead, n_particles, 3]
+        return predicted_states  # [n_look_ahead, n_particles, 3]
     
-    def _reset_robot_to_state(self, robot_state):
+    def reset_robot_to_state(self, robot_state):
         """Reset robot to match the given robot state."""
-        # Calculate translation from default robot position to target position from data file
-        start_position = np.mean(robot_state.cpu().numpy(), axis=0)
+        # Get target robot points from data
+        target_robot_points = robot_state.cpu().numpy()  # [n_robot_particles, 3]
         
-        # Get default robot position (after reset)
-        self.robot_controller.reset()
-        default_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
+        # Don't reset the controller - this preserves the current gripper state
+        # Instead, calculate translation from current position to target position
+        current_position = np.mean(self.robot_controller.current_trans_dynamic_points.cpu().numpy(), axis=0)
+        target_position = np.mean(target_robot_points, axis=0)
         
         # Calculate required translation
-        translation = start_position - default_position
+        translation = target_position - current_position
         
-        # Set the accumulate_trans to the calculated translation so controller knows its position
-        self.robot_controller.accumulate_trans[0] = translation
+        # Update the accumulate_trans to reflect the new position
+        self.robot_controller.accumulate_trans[0] += translation
         
-        # Update current_trans_dynamic_points to reflect the translated position
-        finger_meshes = self.trainer.robot.get_finger_mesh(self.robot_controller.current_finger)
-        dynamic_vertices = torch.tensor(
-            [np.asarray(finger_mesh.vertices) + translation for finger_mesh in finger_meshes],
-            device=self.device,
-            dtype=torch.float32
+        # Update current_trans_dynamic_points to match target robot state exactly
+        self.robot_controller.current_trans_dynamic_points = torch.tensor(
+            target_robot_points, device=self.device, dtype=torch.float32
         )
-        self.robot_controller.current_trans_dynamic_points = torch.reshape(dynamic_vertices, (-1, 3))
 
 
 class PhysTwinPlannerWrapper(PlannerWrapper):
