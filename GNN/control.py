@@ -329,9 +329,9 @@ def visualize_action_gnn(save_dir, file_name):
     full_trajectory = torch.cat([initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
     
     # Initialize PhysTwin simulator for actual deformation calculation
-    downsample_rate = config_data['downsample_rate']
+    downsample_rate = 3
     phystwin_simulator = PhysTwinSimulator(
-        case_name=config_data['case_name'],
+        case_name="single_push_rope",
         downsample_rate=downsample_rate
     )
     
@@ -358,7 +358,6 @@ def visualize_action_gnn(save_dir, file_name):
     
     # Initialize visualizer with camera calibration
     camera_calib_path = "PhysTwin/data/different_types/single_push_rope"
-    downsample_rate = config_data.get('downsample_rate', 1)  # Default if not in config
     visualizer = Visualizer(camera_calib_path, downsample_rate)
     
     # Create target trajectory (static target repeated for all timesteps)

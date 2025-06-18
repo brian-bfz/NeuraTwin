@@ -43,12 +43,17 @@ def video_from_data(cfg, data_file_path, episode_id, robot, output_dir=None):
         n_frames = episode_group.attrs['n_frames']
         n_obj_particles = episode_group.attrs['n_obj_particles']
         n_bot_particles = episode_group.attrs['n_bot_particles']
-        object_type = episode_group.attrs['object_type']
-        motion_type = episode_group.attrs['motion_type']
             
         print(f"Episode {episode_id}: {n_frames} frames")
         print(f"Object particles: {n_obj_particles}, Robot particles: {n_bot_particles}")
-        print(f"Object type: {object_type}, Motion type: {motion_type}")
+
+        try:
+            object_type = episode_group.attrs['object_type']
+            motion_type = episode_group.attrs['motion_type']
+            print(f"Object type: {object_type}, Motion type: {motion_type}")
+        except:
+            pass
+
 
         # Initialize with first frame
         x = object_data[0]
