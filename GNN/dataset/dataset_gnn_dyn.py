@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import h5py
+import math
 
 import torch
 from torch.utils.data import Dataset
@@ -227,6 +228,9 @@ class ParticleDataset(Dataset):
         # Combine sampled particles: [object_particles, robot_particles]
         states = torch.cat([object_data, robot_data], dim=1)  # [n_frames, particle_num, 3]
         
+        # Apply random 2D rotation to states before calculating deltas
+        states = self._apply_random_rotation(states)
+        
         # Apply data augmentation noise to history frames only
         if self.add_randomness:
             noise = torch.randn_like(states[:self.n_his]) * self.state_noise
@@ -258,6 +262,33 @@ class ParticleDataset(Dataset):
             topological_edges[:n_object, :n_object] = object_edges
         
         return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float(), first_states.float()
+
+    def _apply_random_rotation(self, states):
+        """
+        Apply random 2D rotation (about z-axis) to particle positions only.
+        
+        Args:
+            states: [time, particles, 3] - particle positions
+            
+        Returns:
+            states_rotated: [time, particles, 3] - rotated particle positions
+        """
+        # Generate random rotation angle between 0 and 2π
+        angle = torch.rand(1).item() * 2 * math.pi
+        cos_angle = math.cos(angle)
+        sin_angle = math.sin(angle)
+        
+        # Create 2D rotation matrix (for x-y plane)
+        rotation_matrix = torch.tensor([
+            [cos_angle, -sin_angle, 0],
+            [sin_angle,  cos_angle, 0],
+            [0,          0,         1]
+        ], dtype=states.dtype)
+        
+        # Apply rotation to states: [time, particles, 3] @ [3, 3] -> [time, particles, 3]
+        states_rotated = torch.matmul(states, rotation_matrix)
+        
+        return states_rotated
 
 # ============================================================================
 # LEGACY TESTING AND CALIBRATION FUNCTIONS

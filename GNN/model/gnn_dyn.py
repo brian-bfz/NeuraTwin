@@ -192,9 +192,9 @@ class PropModuleDiffDen(nn.Module):
         self.dropout_rate = config['train']['dropout_rate']
 
         # Particle encoder:
-        # Input: displacement (3 * n_history) + attributes (1)
+        # Input: displacement (3 * n_history) + attributes (1) + z coordinate (1)
         self.particle_encoder = ParticleEncoder(
-            3 * self.n_history + 1, nf_effect, nf_effect, self.dropout_rate)
+            3 * self.n_history + 2, nf_effect, nf_effect, self.dropout_rate)
 
         # Separate encoders for collision and topological edges
         self.collision_encoder = RelationEncoder(5, nf_effect, nf_effect, self.dropout_rate)
@@ -239,7 +239,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Encode particle features (history-aware)
         particle_encode = self.particle_encoder(
-            torch.cat([s_delta_flat, a_cur[..., None]], 2))  # B x particle_num x nf_effect
+            torch.cat([s_delta_flat, a_cur[..., None], s_cur[..., 2:3]], 2))  # B x particle_num x nf_effect
         particle_effect = particle_encode
 
         # =====================================
