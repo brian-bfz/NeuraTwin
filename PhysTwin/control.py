@@ -14,7 +14,6 @@ import time
 
 from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
-from .qqtt.engine.robot_movement_controller import RobotMovementController
 from .config_manager import PhysTwinConfig, create_common_parser
 from .paths import get_case_paths, URDF_XARM7
 from scripts.planner import PlannerWrapper

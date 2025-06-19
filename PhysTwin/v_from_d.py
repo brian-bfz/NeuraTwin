@@ -9,7 +9,7 @@ from .config_manager import PhysTwinConfig, create_common_parser
 from .paths import *
 from scripts.utils import parse_episodes
 
-def video_from_data(cfg, f, episode_id, robot_loader, robot_pose, output_dir=None):
+def video_from_data(cfg, f, episode_id, robot_controller, output_dir=None):
         logger.info(f"Starting video generation for episode {episode_id}")
 
         vis_cam_idx = 0
@@ -17,7 +17,7 @@ def video_from_data(cfg, f, episode_id, robot_loader, robot_pose, output_dir=Non
         intrinsic = cfg.intrinsics[vis_cam_idx]
         w2c = cfg.w2cs[vis_cam_idx]
 
-        dynamic_meshes = robot_loader.get_finger_mesh(gripper_openness=0.0, transform=robot_pose)
+        dynamic_meshes = robot_controller.get_finger_meshes()
         finger_vertex_counts = [len(mesh.vertices) for mesh in dynamic_meshes]
 
         vis = o3d.visualization.Visualizer()
@@ -146,4 +146,4 @@ if __name__ == "__main__":
     # Generate videos for specified episodes
     with h5py.File(args.data_file, 'r') as f:
         for episode_id in episode_list:
-            video_from_data(cfg, f, episode_id, robot_loader, video_pose, args.output_dir)
+            video_from_data(cfg, f, episode_id, robot_controller, args.output_dir)

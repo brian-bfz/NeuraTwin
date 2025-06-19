@@ -142,6 +142,9 @@ class RobotController:
         
         # Translate to final position
         self.current_trans_dynamic_points = rotated_vertices + current_gripper_center
+
+        # Update force judge direction
+        self.current_force_judge = self.origin_force_judge.clone() @ self.accumulate_rot
         
         return self.current_trans_dynamic_points
         

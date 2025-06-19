@@ -16,8 +16,6 @@ from PhysTwin.qqtt import InvPhyTrainerWarp
 from PhysTwin.qqtt.utils import cfg
 from PhysTwin.config_manager import PhysTwinConfig
 from PhysTwin.control import PhysTwinModelRolloutFn
-from PhysTwin.paths import URDF_XARM7
-from PhysTwin.robot import RobotLoader
 
 
 class GNNModelRolloutFn:
