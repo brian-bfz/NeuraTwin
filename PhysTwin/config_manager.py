@@ -45,13 +45,6 @@ class PhysTwinConfig:
         self._load_calibration_data()
         if inference: 
             self.setup_logging("inference_log")
-            
-        # Create robot loader
-        urdf_path = str(URDF_XARM7)
-        self.robot_loader = RobotLoader(
-            urdf_path, 
-            link_names=["left_finger", "right_finger"]
-        )
 
     def _setup_config(self) -> None:
         """Load case-specific configuration (cloth vs real)"""
@@ -149,14 +142,16 @@ class PhysTwinConfig:
         else:
             init_pose[:3, 3] = [0.0, 0.0, 0.0]
         
-        # Get finger meshes with initial pose
-        finger_meshes = self.robot_loader.get_finger_mesh(
-            gripper_openness=0.0,
+        # Create robot loader with transform
+        urdf_path = str(URDF_XARM7)
+        robot_loader = RobotLoader(
+            urdf_path, 
+            link_names=["left_finger", "right_finger"],
             transform=init_pose
         )
         
-        # Create robot controller
-        return RobotController(finger_meshes, n_ctrl_parts, device)
+        # Create robot controller with robot loader
+        return RobotController(robot_loader, n_ctrl_parts, device)
     
     def get_paths(self) -> Dict[str, Path]:
         """Get all relevant paths for the case"""

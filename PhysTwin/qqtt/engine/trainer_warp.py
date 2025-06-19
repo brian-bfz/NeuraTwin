@@ -142,7 +142,7 @@ class InvPhyTrainerWarp:
                 # Use provided robot controller
                 self.robot_controller = robot_controller
                 # Create protected copies of robot data
-                self.dynamic_meshes = self.robot_controller.get_finger_meshes()
+                self.dynamic_meshes = self.robot_controller.robot_loader.get_finger_mesh(self.robot_controller.current_finger)
                 self.dynamic_points = self.robot_controller.current_trans_dynamic_points.clone()
                 self.num_dynamic = len(self.dynamic_points)
             else:
@@ -1263,6 +1263,7 @@ class InvPhyTrainerWarp:
             prev_x = None
 
         frame_count = 0
+        close_flag = True
 
         # Initialize storage for all frames
         object_frames = []
@@ -1275,6 +1276,16 @@ class InvPhyTrainerWarp:
                 self.simulator.update_collision_graph()
             wp.capture_launch(self.simulator.forward_graph)
             x = wp.to_torch(self.simulator.wp_states[-1].wp_x, requires_grad=False)
+            collision_forces = wp.to_torch(
+                self.simulator.collision_forces, requires_grad=False
+            )[: self.num_dynamic]
+            filter_forces = torch.einsum(
+                "ij,ij->i", collision_forces, self.robot_controller.get_current_force_judge()
+            )
+            if torch.all(filter_forces > 3e4):
+                close_flag = False
+            else:
+                close_flag = True
 
             # Set the intial state for the next step
             self.simulator.set_init_state(
@@ -1334,6 +1345,7 @@ class InvPhyTrainerWarp:
             # Update robot movement using the controller
             movement_result = self.robot_controller.fine_robot_movement(
                 target_change=torch.tensor(target_changes[i], dtype=torch.float32, device=self.robot_controller.device),
+                close_flag=close_flag,
                 finger_change=finger_changes[i],
                 rot_change=torch.tensor(rot_changes[i], dtype=torch.float32, device=self.robot_controller.device)
             )
@@ -1600,7 +1612,6 @@ class InvPhyTrainerWarp:
             # cv2.waitKey(0)
 
         close_flag = False
-        is_closing = True
 
         # Initialize GNN rollout if provided
         gnn_rollout = None
@@ -1900,23 +1911,10 @@ class InvPhyTrainerWarp:
             finger_change = self.get_finger_change()
             rot_change = self.get_rot_change()
 
-            # Calculate the substep vertices
-            if finger_change > 0:
-                is_closing = False
-            elif finger_change < 0:
-                is_closing = True
-                
-            if is_closing:
-                if close_flag == True:
-                    finger_change = -0.05
-                else:
-                    finger_change = 0.0
-            else:
-                finger_change = 0.05
-
             # Update robot movement using the controller
             movement_result = self.robot_controller.fine_robot_movement(
                 target_change=torch.tensor(target_change, dtype=torch.float32, device=self.robot_controller.device),
+                close_flag=close_flag,
                 finger_change=finger_change,
                 rot_change=torch.tensor(rot_change, dtype=torch.float32, device=self.robot_controller.device)
             )
@@ -2686,10 +2684,15 @@ class InvPhyTrainerWarp:
 
     def _update_robot_visualization(self):
         """Update protected copies of robot data for visualization and simulation."""
+        start_idx = 0
         if self.robot_controller is not None:
             # Update dynamic points (for simulator)
             self.dynamic_points = self.robot_controller.current_trans_dynamic_points.clone()
-            self.dynamic_meshes = self.robot_controller.get_finger_meshes()
+            for mesh in self.dynamic_meshes:
+                end_idx = start_idx + len(mesh.vertices)
+                mesh.vertices = o3d.utility.Vector3dVector(self.dynamic_points[start_idx:end_idx].cpu().numpy())
+                start_idx = end_idx
+            assert end_idx == self.dynamic_points.shape[0], "Dynamic points shape mismatch"
 
 
 def get_simple_shadow(

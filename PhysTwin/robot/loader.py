@@ -30,16 +30,18 @@ class RobotLoader:
     It is stateless - all methods take pose/transform as parameters.
     """
     
-    def __init__(self, urdf_path, link_names):
+    def __init__(self, urdf_path, link_names, transform=None):
         """
         Initialize robot loader.
         
         Args:
             urdf_path: Path to URDF file
             link_names: List of link names to load meshes for
+            transform: np.ndarray [4,4] - transformation matrix to apply (optional)
         """
         self.urdf_path = urdf_path
         self.link_names = link_names
+        self.transform = transform
         
         # Initialize SAPIEN and URDF
         self.engine = sapien.Engine()
@@ -121,13 +123,12 @@ class RobotLoader:
             all_mats.append(mat)
         return np.stack(all_mats)
 
-    def get_finger_mesh(self, gripper_openness=0.0, transform=None):
+    def get_finger_mesh(self, gripper_openness=0.0):
         """
-        Get finger meshes for given gripper opening and transform.
+        Get finger meshes for given gripper opening.
         
         Args:
             gripper_openness: float [0,1] - gripper opening amount
-            transform: np.ndarray [4,4] - transformation matrix to apply (optional)
             
         Returns:
             List of finger meshes
@@ -169,8 +170,8 @@ class RobotLoader:
             vertices = vertices @ poses[i][:3, :3].T + poses[i][:3, 3]
             
             # Apply additional transform if provided
-            if transform is not None:
-                vertices = vertices @ transform[:3, :3].T + transform[:3, 3]
+            if self.transform is not None:
+                vertices = vertices @ self.transform[:3, :3].T + self.transform[:3, 3]
             
             # Update mesh vertices
             mesh_copy = o3d.geometry.TriangleMesh(self.finger_meshes[i])
@@ -179,7 +180,7 @@ class RobotLoader:
 
         return result_meshes
 
-    def get_finger_vertices(self, gripper_openness=0.0, transform=None):
+    def get_finger_vertices(self, gripper_openness=0.0):
         """
         Get finger vertices as numpy array.
         
@@ -190,6 +191,6 @@ class RobotLoader:
         Returns:
             np.ndarray [n_vertices, 3] - concatenated finger vertices
         """
-        finger_meshes = self.get_finger_mesh(gripper_openness, transform)
+        finger_meshes = self.get_finger_mesh(gripper_openness)
         vertices_list = [np.asarray(mesh.vertices) for mesh in finger_meshes]
         return np.concatenate(vertices_list, axis=0) 
