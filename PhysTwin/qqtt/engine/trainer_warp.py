@@ -70,6 +70,9 @@ class InvPhyTrainerWarp:
         cfg.device = device
         cfg.run_name = base_dir.split("/")[-1]
         cfg.train_frame = train_frame
+        
+        # Set warp device for multiprocessing compatibility
+        wp.set_device(device)
 
         self.init_masks = None
         self.init_velocities = None

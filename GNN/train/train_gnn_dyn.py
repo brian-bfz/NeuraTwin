@@ -484,14 +484,14 @@ def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
                     rollback_needed = False
                 
                 # Synchronize rollback decision across all processes
-                if rank is not None:
+                if config['train']['rollback']['enabled'] and rank is not None:
                     import torch.distributed as dist
                     rollback_tensor = torch.tensor([1 if rollback_needed else 0], dtype=torch.int, device='cuda')
                     dist.broadcast(rollback_tensor, src=0)
                     rollback_needed = bool(rollback_tensor.item())
                 
                 # Execute rollback on all processes if needed
-                if rollback_needed:
+                if config['train']['rollback']['enabled'] and rollback_needed:
                     # Load the best checkpoint (all processes)
                     model_state = torch.load('%s/net_best.pth' % (TRAIN_DIR), weights_only=True)
                     if rank is None:

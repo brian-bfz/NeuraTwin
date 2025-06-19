@@ -106,17 +106,21 @@ class PhysTwinInGNN:
     Compute ground truth deformation using PhysTwin.
     """
     
-    def __init__(self, case_name, downsample_rate):
+    def __init__(self, case_name, downsample_rate, device=None):
         """
         Initialize PhysTwin simulator.
         
         Args:
             case_name: str - case name for PhysTwin configuration
             downsample_rate: int - downsampling rate for configuration adjustment
+            device: torch.device - device to use for computation (optional)
         """
         self.case_name = case_name
         self.downsample_rate = downsample_rate
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = device
                 
         # Create PhysTwin configuration
         phystwin_config = PhysTwinConfig(case_name=self.case_name)
@@ -131,6 +135,7 @@ class PhysTwinInGNN:
             pure_inference_mode=True,
             static_meshes=[],
             robot_controller=phystwin_config.get_robot_controller("default"),
+            device=str(self.device),
         )
         
         # Initialize simulator with trained model
@@ -166,8 +171,7 @@ class PhysTwinInGNN:
         Compute actual object deformation using PhysTwin simulation.
         
         This method interpolates the GNN action sequence to match PhysTwin's native frame rate,
-        runs the simulation at full temporal resolution, then downsamples the results back to
-        GNN frame rate. This allows both systems to operate at their optimal frame rates.
+        runs the simulation at full temporal resolution, then downsamples the results back to GNN frame rate.
         
         Args:
             action_seq: [n_look_ahead, action_dim] - action sequence at GNN frame rate

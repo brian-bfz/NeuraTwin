@@ -112,13 +112,13 @@ class CuriosityPlanner(GNNPlannerWrapper):
         # Store PhysTwin data
         self.phystwin_states = phystwin_states.to(self.device)
         self.phystwin_robot_mask = phystwin_robot_mask.to(self.device)
-        self.phystwin = PhysTwinInGNN(case_name, self.downsample_rate)
+        self.phystwin = PhysTwinInGNN(case_name, self.downsample_rate, device=self.device)
         
         # Convert PhysTwin data to GNN format
         self._convert_phystwin_to_gnn()
         
         print(f"Curiosity planner initialized with n_ensemble={self.n_ensemble}")
-        print(f"Converted {len(self.phystwin_states)} PhysTwin particles to {len(self.first_states)} GNN particles")
+        print(f"Converted {len(self.phystwin_states)} PhysTwin particles to {len(self.object_indices) + len(self.robot_indices)} GNN particles")
 
     def _initialize_model(self, model_path):
         """Override to keep model in training mode for MC dropout."""
@@ -140,11 +140,11 @@ class CuriosityPlanner(GNNPlannerWrapper):
         robot_states = self.phystwin_states[self.phystwin_robot_mask]  # [n_robot, 3]
         
         # Downsample using FPS
-        object_indices = fps_rad_tensor(object_states, fps_radius)
-        sampled_object_states = object_states[object_indices]  # [n_obj_sampled, 3]
+        self.object_indices = fps_rad_tensor(object_states, fps_radius)
+        sampled_object_states = object_states[self.object_indices]  # [n_obj_sampled, 3]
             
-        robot_indices = fps_rad_tensor(robot_states, fps_radius)
-        sampled_robot_states = robot_states[robot_indices]  # [n_robot_sampled, 3]
+        self.robot_indices = fps_rad_tensor(robot_states, fps_radius)
+        # sampled_robot_states = robot_states[robot_indices]  # [n_robot_sampled, 3]
         
         # Construct topological edges for objects only
         object_edges = construct_edges_from_tensor(
@@ -152,9 +152,9 @@ class CuriosityPlanner(GNNPlannerWrapper):
         )
         
         # Concatenate object and robot states
-        self.first_states = torch.cat([sampled_object_states, sampled_robot_states], dim=0)  # [n_particles, 3]
-        n_obj_sampled = len(sampled_object_states)
-        n_robot_sampled = len(sampled_robot_states)
+        # self.first_states = torch.cat([sampled_object_states, sampled_robot_states], dim=0)  # [n_particles, 3]
+        n_obj_sampled = len(self.object_indices)
+        n_robot_sampled = len(self.robot_indices)
         n_particles = n_obj_sampled + n_robot_sampled
         
         # Create robot mask for concatenated states
@@ -171,7 +171,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         base_rollout_fn = super()._create_model_rollout_fn(robot_mask, **kwargs)
         return EnsembleModelRolloutFn(base_rollout_fn, self.n_ensemble)
 
-    def explore(self, data_file):
+    def explore(self, data_file, phystwin_states = None):
         """
         Find action sequence with highest prediction uncertainty using curiosity-driven exploration.
         Use PhysTwin to simulate the action sequence and save the results to the data_file.
@@ -182,8 +182,13 @@ class CuriosityPlanner(GNNPlannerWrapper):
         Returns:
             next_states: [n_particles, 3] - states of object and robot after the action sequence
         """
+        if phystwin_states is not None: # allow high-level code to provide final states from previous exploration
+            assert phystwin_states.shape == self.phystwin_states.shape, "New PhysTwin states must have the same shape as the initial PhysTwin states"
+            self.phystwin_states = phystwin_states.to(self.device)
+        first_states = torch.cat([self.phystwin_states[self.object_indices], self.phystwin_states[self.robot_indices]], dim=0)
+
         # Get action sequence with highest uncertainty
-        result = self.plan_action()
+        result = self.plan_action(first_states)
         act_seq = result['act_seq']
         
         # Append 5 frames with 0 robot movement, so the object comes to rest
@@ -202,11 +207,11 @@ class CuriosityPlanner(GNNPlannerWrapper):
         )
 
         # Split into object and robot states (full_trajectory now includes both)
-        object_states = full_trajectory[:, ~self.phystwin_robot_mask, :].cpu().numpy()
-        robot_states = full_trajectory[:, self.phystwin_robot_mask, :].cpu().numpy()
+        object_states = full_trajectory[:, self.object_indices, :].cpu().numpy()
+        robot_states = full_trajectory[:, self.robot_indices, :].cpu().numpy()
         
         # Get object edges from downsampled data
-        n_obj_sampled = len(self.first_states) - self.robot_mask.sum().item()
+        n_obj_sampled = len(self.object_indices)
         object_edges = self.topological_edges[:n_obj_sampled, :n_obj_sampled].cpu().numpy()
         
         # Save the results to the data_file
@@ -285,7 +290,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         print(f"  Robot particles: {n_robot_particles}")
 
 
-    def plan_action(self):
+    def plan_action(self, first_states):
         """
         Override plan_action to use variance-based reward function instead of target-based reward.
                     
@@ -293,10 +298,10 @@ class CuriosityPlanner(GNNPlannerWrapper):
             dict containing planning results with highest uncertainty action sequence
         """
         # Prepare initial state for model
-        state_cur = self._prepare_initial_state(self.first_states, self.robot_mask)
+        state_cur = self._prepare_initial_state(first_states, self.robot_mask)
         
         # Set up ensemble model rollout function
-        model_rollout_fn = self._create_model_rollout_fn(self.robot_mask, first_states=self.first_states, topological_edges=self.topological_edges)
+        model_rollout_fn = self._create_model_rollout_fn(self.robot_mask, first_states=first_states, topological_edges=self.topological_edges)
         initial_action_seq = torch.zeros(self.n_look_ahead, self.action_dim, device=self.device)
         
         # Use variance-based reward function instead of target-based reward

@@ -33,5 +33,6 @@ PhysTwin/gaussian_splatting/submodules/
 __pycache__/
 .DS_Store
 *.pth
-temp_experiments/single_push_rope/inference_log.log
+temp_experiments/
 GNN/test_curiosity_output.h5
+test_data_generator_multiprocessing.py

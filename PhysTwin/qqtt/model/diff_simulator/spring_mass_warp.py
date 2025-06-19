@@ -4,7 +4,7 @@ import warp as wp
 import numpy as np
 
 wp.init()
-wp.set_device("cuda:0")
+# Device will be set by the trainer based on cfg.device
 
 # Suppress all Warp warnings to preserve my sanity
 wp.config.mode = "release"  # Use release mode instead of debug to reduce warnings
