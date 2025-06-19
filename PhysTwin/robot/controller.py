@@ -73,12 +73,6 @@ class RobotController:
             [[-1, 0, 0], [1, 0, 0]], dtype=torch.float32, device=device
         )
         
-        self.finger_meshes = self.robot_loader.get_finger_mesh(0.0)
-        finger_vertices = [np.asarray(mesh.vertices) for mesh in self.finger_meshes]
-        base_finger_vertices_np = np.concatenate(finger_vertices, axis=0)
-        self.base_finger_vertices = torch.tensor(base_finger_vertices_np, dtype=torch.float32, device=self.device)
-        self.initial_gripper_center = torch.mean(self.base_finger_vertices, dim=0)
-
         # Initialize to default state
         self.reset()
                
@@ -86,12 +80,16 @@ class RobotController:
         """Reset all state variables to initial values."""
         self.accumulate_trans.zero_()  # Reset to zero without changing type
         self.accumulate_rot = torch.eye(3, dtype=torch.float32, device=self.device)
-        self.current_finger = 0.0
+        self.current_finger = 1.0
         self.is_closing = True
         self.current_force_judge = self.origin_force_judge.clone()
 
         # Update finger meshes and vertices for current finger position
         self.finger_meshes = self.robot_loader.get_finger_mesh(self.current_finger)
+        finger_vertices = [np.asarray(mesh.vertices) for mesh in self.finger_meshes]
+        base_finger_vertices_np = np.concatenate(finger_vertices, axis=0)
+        self.base_finger_vertices = torch.tensor(base_finger_vertices_np, dtype=torch.float32, device=self.device)
+        self.initial_gripper_center = torch.mean(self.base_finger_vertices, dim=0)
         self.relative_finger_vertices = self.base_finger_vertices - self.initial_gripper_center # base_finger_vertices and intiial_gripper_center are never changed
 
         # Set initial mesh vertices (already a tensor)
@@ -120,7 +118,7 @@ class RobotController:
         
         # Update internal states
         self.accumulate_trans += target_change
-        self.current_finger = max(0.0, min(1.0, self.current_finger))
+        self.current_finger = max(0.0, min(1.0, current_finger))
         self.is_closing = True if self.current_finger == 0.0 else False
         
         # Get updated finger meshes and vertices
@@ -161,7 +159,6 @@ class RobotController:
                 current_trans_dynamic_points: [n_robot_vertices, 3] - final robot mesh points
         """
         # Store previous state
-        prev_gripper_center = self.initial_gripper_center + self.accumulate_trans[0]
         prev_accumulate_rot = self.accumulate_rot.clone()
         prev_trans_dynamic_points = self.current_trans_dynamic_points.clone()
 
@@ -284,3 +281,6 @@ class RobotController:
         """Get current finger opening value."""
         return self.current_finger
         
+    def get_current_center(self):
+        """Get current center of the robot."""
+        return self.initial_gripper_center + self.accumulate_trans[0]

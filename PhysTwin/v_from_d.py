@@ -17,7 +17,7 @@ def video_from_data(cfg, f, episode_id, robot_controller, output_dir=None):
         intrinsic = cfg.intrinsics[vis_cam_idx]
         w2c = cfg.w2cs[vis_cam_idx]
 
-        dynamic_meshes = robot_controller.get_finger_meshes()
+        dynamic_meshes = robot_controller.robot_loader.get_finger_mesh(0.0)
         finger_vertex_counts = [len(mesh.vertices) for mesh in dynamic_meshes]
 
         vis = o3d.visualization.Visualizer()

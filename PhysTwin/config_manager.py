@@ -125,7 +125,7 @@ class PhysTwinConfig:
         Args:
             robot_type: Type of robot configuration ("default", "interactive", "video")
             n_ctrl_parts: Number of control parts (default: 1)
-            device: PyTorch device
+            device: PyTorch device (e.g., 'cuda', 'cuda:0', 'cuda:1')
             
         Returns:
             RobotController: Configured robot controller instance
@@ -150,7 +150,7 @@ class PhysTwinConfig:
             transform=init_pose
         )
         
-        # Create robot controller with robot loader
+        # Create robot controller with robot loader and specified device
         return RobotController(robot_loader, n_ctrl_parts, device)
     
     def get_paths(self) -> Dict[str, Path]:

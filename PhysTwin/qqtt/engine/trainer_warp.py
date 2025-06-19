@@ -72,7 +72,12 @@ class InvPhyTrainerWarp:
         cfg.train_frame = train_frame
         
         # Set warp device for multiprocessing compatibility
-        wp.set_device(device)
+        # Extract device index for warp (e.g., "cuda:0" -> 0)
+        if ":" in device:
+            device_idx = int(device.split(":")[-1])
+        else:
+            device_idx = 0
+        wp.set_device(f"cuda:{device_idx}")
 
         self.init_masks = None
         self.init_velocities = None
@@ -1133,6 +1138,37 @@ class InvPhyTrainerWarp:
                 
         return translation.astype(np.float32), target_changes.astype(np.float32)
     
+    def lift_rope(self, height, speed):
+        """
+        Lift the rope to a given height. 
+        """
+        # Pick a random point on the rope
+        random_idx = torch.randint(0, len(self.init_vertices), (1,)).item()
+        selected_point = self.init_vertices[random_idx]
+
+        # Calculate the initial translation to send the robot center to the selected point
+        current_robot_center = self.robot_controller.get_current_center()
+        initial_translation = selected_point - current_robot_center
+  
+        # Calculate the number of frames needed. 3 is needed for the robot to grab the rope
+        # uniform distribution of 2-11
+        wait_before = np.random.randint(2, 12)
+        wait_after = 11 - wait_before
+        n_frames = int(height // speed)
+        # print(f"wait_before: {wait_before}, wait_after: {wait_after}, n_frames: {n_frames}")
+        total_frames = wait_before + n_frames + wait_after
+        
+        # Divide the movement into n_frames steps
+        target_changes = torch.zeros((total_frames, self.n_ctrl_parts, 3))
+        step_movement = torch.ones(n_frames) * -height / n_frames
+        target_changes[wait_before:wait_before + n_frames, 0, 2] = step_movement
+        
+        # finger is fully open but closing initially
+        initial_finger = 1.0 
+        finger_changes = torch.ones(total_frames, dtype=torch.float32, device=self.robot_controller.device) * -0.05
+
+        return initial_translation, target_changes, initial_finger, finger_changes
+    
     def save_episode_data(self, data_file_path, episode_id, object_data, robot_data, gaussians_data=None):
         """Save episode data to a shared HDF5 file with each episode as a group"""
         
@@ -1220,7 +1256,16 @@ class InvPhyTrainerWarp:
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
-        translation, target_changes = self.push_once(offset_dist=0.1, keep_off=0.025, travel_dist=0.3, speed=0.005)
+        initial_translation, target_changes, initial_finger, finger_changes = self.lift_rope(height=0.2, speed=0.005)
+
+        # Update robot position using the new controller system
+        self.robot_controller.quick_robot_movement(
+            target_change=initial_translation,
+            current_finger=initial_finger,
+            rot_change=None
+        )
+        # Update protected copies after robot movement
+        self._update_robot_visualization()
 
         # Initialize simulator if not done
         if self.simulator is None:
@@ -1235,16 +1280,6 @@ class InvPhyTrainerWarp:
         # set robot position and movement parameters
         n_frames = target_changes.shape[0]
         rot_changes = np.zeros((n_frames, 3), dtype=np.float32)
-        finger_changes = np.zeros((n_frames), dtype=np.float32)
-
-        # Update robot position using the new controller system
-        self.robot_controller.quick_robot_movement(
-            target_change=torch.tensor(translation, dtype=torch.float32, device=self.robot_controller.device),
-            finger_change=0.0,
-            rot_change=None
-        )
-        # Update protected copies after robot movement
-        self._update_robot_visualization()
         
         logger.info("Starting data generation")
 
