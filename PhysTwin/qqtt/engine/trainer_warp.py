@@ -62,8 +62,7 @@ class InvPhyTrainerWarp:
         pure_inference_mode=False,
         device="cuda:0",
         static_meshes=None,
-        robot_loader=None,
-        robot_initial_pose=None,
+        robot_controller=None,
         include_gaussian=False,
     ):
         cfg.data_path = data_path
@@ -136,21 +135,17 @@ class InvPhyTrainerWarp:
 
         self.static_meshes = static_meshes
         if static_meshes is not None:
-            if robot_loader is not None:
-                # Create robot controller with loader and initial pose
-                self.robot_loader = robot_loader
-                self.robot_controller = RobotController(robot_loader, device=device)
-                
-                # Set initial pose if provided
-                if robot_initial_pose is not None:
-                    position = robot_initial_pose[:3, 3]
-                    rotation = robot_initial_pose[:3, :3]
-                    self.robot_controller.set_pose(position, rotation, finger_opening=0.0)
-                
-                self.reset_robot()
+            if robot_controller is not None:
+                # Use provided robot controller
+                self.robot_controller = robot_controller
+                # Create protected copies of robot data
+                self.dynamic_meshes = self.robot_controller.get_finger_meshes()
+                self.dynamic_points = self.robot_controller.current_trans_dynamic_points.clone()
+                self.num_dynamic = len(self.dynamic_points)
             else:
                 self.dynamic_meshes = []
                 self.dynamic_points = None
+                self.num_dynamic = 0
 
         self.simulator = None  # Will be initialized in initialize_simulator
 
@@ -241,25 +236,6 @@ class InvPhyTrainerWarp:
         self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
         self.simulator.set_collide(collide_elas.detach().clone(), collide_fric.detach().clone())
         self.simulator.set_collide_object(collide_object_elas.detach().clone(), collide_object_fric.detach().clone())
-
-    def reset_robot(self):
-        finger_meshes = self.robot_controller.robot_loader.get_finger_mesh(
-            gripper_openness=self.robot_controller.current_finger,
-            transform=self.robot_controller.get_pose()
-        )
-        self.dynamic_meshes = finger_meshes
-        self.num_dynamic = len(self.dynamic_meshes)
-        dynamic_vertices = [
-            np.asarray(finger_mesh.vertices) for finger_mesh in finger_meshes
-        ]
-        new_vertices = np.concatenate(dynamic_vertices, axis=0)
-        new_vertices = torch.tensor(
-            new_vertices, dtype=torch.float32, device=cfg.device
-        )
-        self.dynamic_points = new_vertices
-        self.dynamic_vertices = [
-            np.asarray(finger_mesh.vertices) for finger_mesh in self.dynamic_meshes
-        ]
 
     def _init_start(
         self,
@@ -1081,7 +1057,7 @@ class InvPhyTrainerWarp:
             raise RuntimeError("Could not find valid robot position after maximum attempts")
         
         # 5. Find robot's current position and calculate translation
-        robot_vertices = self.robot_controller.current_trans_dynamic_points.cpu().numpy()
+        robot_vertices = self.dynamic_points.cpu().numpy()
         robot_position = np.mean(robot_vertices, axis=0)
         translation = start_position.cpu().numpy() - robot_position
         translation = translation.reshape(self.n_ctrl_parts, 3)
@@ -1133,7 +1109,7 @@ class InvPhyTrainerWarp:
             raise RuntimeError("Could not find valid robot position after maximum attempts")
         
         # 4. Find robot's current position and calculate translation
-        robot_vertices = self.robot_controller.current_trans_dynamic_points.cpu().numpy()
+        robot_vertices = self.dynamic_points.cpu().numpy()
         robot_position = np.mean(robot_vertices, axis=0)
         translation = start_position.cpu().numpy() - robot_position
         translation = translation.reshape(self.n_ctrl_parts, 3)
@@ -1259,17 +1235,13 @@ class InvPhyTrainerWarp:
         finger_changes = np.zeros((n_frames), dtype=np.float32)
 
         # Update robot position using the new controller system
-        current_pose = self.robot_controller.get_pose()
-        current_pose[:3, 3] += translation.flatten()
-        self.robot_controller.set_pose(
-            current_pose[:3, 3], 
-            current_pose[:3, :3], 
-            self.robot_controller.current_finger
+        self.robot_controller.quick_robot_movement(
+            target_change=translation,
+            finger_change=0.0,
+            rot_change=None
         )
-        self.reset_robot()
-        
-        # Use the existing robot controller
-        robot_controller = self.robot_controller
+        # Update protected copies after robot movement
+        self._update_robot_visualization()
         
         logger.info("Starting data generation")
 
@@ -1310,7 +1282,7 @@ class InvPhyTrainerWarp:
             # Store first frame data
             if frame_count == 0:
                 object_frames.append(x.detach().cpu())
-                robot_frames.append(robot_controller.current_trans_dynamic_points.detach().cpu())
+                robot_frames.append(self.dynamic_points.detach().cpu())
                 if self.include_gaussian:
                     gaussians_frames.append({
                         'xyz': gaussians._xyz,
@@ -1357,11 +1329,14 @@ class InvPhyTrainerWarp:
 
             # =====================robot stuff=====================
             # Update robot movement using the controller
-            movement_result = robot_controller.update_robot_movement(
+            movement_result = self.robot_controller.fine_robot_movement(
                 target_change=target_changes[i],
                 finger_change=finger_changes[i],
                 rot_change=rot_changes[i]
             )
+            
+            # Update protected copies after robot movement
+            self._update_robot_visualization()
             
             # Update the simulator with the gripper changes
             self.simulator.set_mesh_interactive(
@@ -1374,7 +1349,7 @@ class InvPhyTrainerWarp:
 
             # Store frame data
             object_frames.append(x.detach().cpu())
-            robot_frames.append(movement_result['current_trans_dynamic_points'].detach().cpu())
+            robot_frames.append(self.dynamic_points.detach().cpu())
             if self.include_gaussian:
                 gaussians_frames.append({
                     'xyz': gaussians._xyz,
@@ -1621,13 +1596,6 @@ class InvPhyTrainerWarp:
             # cv2.imshow("test", vis_image)
             # cv2.waitKey(0)
 
-        # Use the existing robot controller for interactive mode
-        robot_controller = self.robot_controller
-
-        # Note: self.dynamic_vertices and self.dynamic_meshes are already set correctly 
-        # by reset_robot() in __init__, which accounts for the robot's initial pose.
-        # Don't overwrite them here with raw mesh vertices.
-
         close_flag = False
         is_closing = True
 
@@ -1645,7 +1613,7 @@ class InvPhyTrainerWarp:
             # Get initial positions
             initial_x = wp.to_torch(self.simulator.wp_states[0].wp_x, requires_grad=False).clone()
             object_indices = fps_rad_tensor(initial_x[:self.num_all_points], gnn_config['train']['particle']['fps_radius'])
-            robot_indices = fps_rad_tensor(robot_controller.current_trans_dynamic_points, gnn_config['train']['particle']['fps_radius']) 
+            robot_indices = fps_rad_tensor(self.dynamic_points, gnn_config['train']['particle']['fps_radius']) 
 
             n_history = gnn_config['train']['n_history']
             
@@ -1655,7 +1623,7 @@ class InvPhyTrainerWarp:
             total_particles = n_object_particles + n_robot_particles
             
             # Create initial state by concatenating object and robot positions
-            initial_positions = torch.cat([initial_x[object_indices], robot_controller.current_trans_dynamic_points[robot_indices]], dim=0)
+            initial_positions = torch.cat([initial_x[object_indices], self.dynamic_points[robot_indices]], dim=0)
             
             initial_states = initial_positions.unsqueeze(0) # [1, particles, 3]
 
@@ -1743,7 +1711,7 @@ class InvPhyTrainerWarp:
                 self.simulator.collision_forces, requires_grad=False
             )[: self.num_dynamic]
             filter_forces = torch.einsum(
-                "ij,ij->i", collision_forces, robot_controller.get_current_force_judge()
+                "ij,ij->i", collision_forces, self.robot_controller.get_current_force_judge()
             )
             if torch.all(filter_forces > 3e4):
                 close_flag = False
@@ -1841,10 +1809,7 @@ class InvPhyTrainerWarp:
                         if line_set is not None:
                             vis.add_geometry(line_set, reset_bounding_box=False)
                     
-                for i, dynamic_mesh in enumerate(self.dynamic_meshes):
-                    dynamic_mesh.vertices = o3d.utility.Vector3dVector(
-                        self.dynamic_vertices[i]
-                    )
+                for dynamic_mesh in self.dynamic_meshes:
                     vis.update_geometry(dynamic_mesh)
                 vis.poll_events()
                 vis.update_renderer()
@@ -1947,24 +1912,19 @@ class InvPhyTrainerWarp:
                 finger_change = 0.05
 
             # Update robot movement using the controller
-            movement_result = robot_controller.update_robot_movement(
+            movement_result = self.robot_controller.fine_robot_movement(
                 target_change=target_change,
                 finger_change=finger_change,
                 rot_change=rot_change
             )
-            
-            # Update dynamic vertices for visualization
-            self.dynamic_vertices = (
-                movement_result['interpolated_dynamic_points'][-1]
-                .reshape([-1] + list(self.dynamic_vertices[0].shape))
-                .cpu()
-                .numpy()
-            )
+
+            # Update protected copies after robot movement
+            self._update_robot_visualization()
 
             # GNN prediction logic
             if gnn_rollout is not None:
                 # Store current robot positions for delta calculation
-                robot_positions_history.append(movement_result['current_trans_dynamic_points'][robot_indices].clone())
+                robot_positions_history.append(self.dynamic_points[robot_indices].clone())
                 
                 # Keep only the last downsample_rate+1 frames for delta calculation
                 if len(robot_positions_history) > downsample_rate + 1:
@@ -2720,6 +2680,13 @@ class InvPhyTrainerWarp:
             cv2.waitKey(1)
         vis.destroy_window()
         video_writer.release()
+
+    def _update_robot_visualization(self):
+        """Update protected copies of robot data for visualization and simulation."""
+        if self.robot_controller is not None:
+            # Update dynamic points (for simulator)
+            self.dynamic_points = self.robot_controller.current_trans_dynamic_points.clone()
+            self.dynamic_meshes = self.robot_controller.get_finger_meshes()
 
 
 def get_simple_shadow(

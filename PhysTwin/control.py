@@ -102,7 +102,7 @@ class PhysTwinModelRolloutFn:
         )
         
         # Reset robot to initial position (reconstruct from initial_robot_state)
-        self.robot_controller.set_from_mesh_vertices(initial_robot_state)
+        self.robot_controller.set_to_match_vertices(initial_robot_state)
         
         predicted_states = torch.zeros(n_look_ahead, self.n_particles, 3, device=self.device)
         
@@ -111,7 +111,7 @@ class PhysTwinModelRolloutFn:
             robot_translation = action_seq[i].cpu().numpy()
             
             # Update robot movement using the controller
-            movement_result = self.robot_controller.update_robot_movement(
+            movement_result = self.robot_controller.fine_robot_movement(
                 target_change=np.array([robot_translation]),  # Shape: [1, 3] for n_ctrl_parts=1
                 finger_change=0.0,  # Fixed gripper opening
                 rot_change=None
@@ -184,8 +184,7 @@ class PhysTwinPlannerWrapper(PlannerWrapper):
             base_dir=str(self.config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
-            robot_loader=self.config.create_robot_loader(),
-            robot_initial_pose=self.config.get_robot_initial_pose("default"),
+            robot_controller=self.config.get_robot_controller("default"),
         )
         
         # Initialize simulator with trained model

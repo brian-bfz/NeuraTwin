@@ -133,8 +133,7 @@ class PhysTwinInGNN:
             base_dir=str(phystwin_config.case_paths['base_dir']),
             pure_inference_mode=True,
             static_meshes=[],
-            robot_loader=phystwin_config.create_robot_loader(),
-            robot_initial_pose=phystwin_config.get_robot_initial_pose("default"),
+            robot_controller=phystwin_config.get_robot_controller("default"),
         )
         
         # Initialize simulator with trained model

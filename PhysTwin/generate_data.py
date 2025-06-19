@@ -96,8 +96,7 @@ if __name__ == "__main__":
         base_dir=str(config.case_paths['base_dir']),
         pure_inference_mode=True,
         static_meshes=[],
-        robot_loader=config.create_robot_loader(),
-        robot_initial_pose=config.get_robot_initial_pose("default"),
+        robot_controller=config.get_robot_controller("default"),
         include_gaussian=args.include_gaussian,
     )
 

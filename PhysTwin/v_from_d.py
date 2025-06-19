@@ -138,8 +138,7 @@ if __name__ == "__main__":
     )
 
     # Create robot loader and pose for video generation
-    robot_loader = config.create_robot_loader()
-    video_pose = config.get_robot_initial_pose("video")
+    robot_controller = config.get_robot_controller("video")
 
     # Parse episode specification
     episode_list = parse_episodes(args.episodes)

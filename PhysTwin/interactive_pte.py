@@ -112,8 +112,7 @@ if __name__ == "__main__":
         base_dir=config.get_temp_base_dir(),
         pure_inference_mode=True,
         static_meshes=static_meshes,
-        robot_loader=config.create_robot_loader(),
-        robot_initial_pose=config.get_robot_initial_pose("interactive"),
+        robot_controller=config.get_robot_controller("interactive"),
     )
 
     # Run interactive session

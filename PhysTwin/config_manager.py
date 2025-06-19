@@ -16,7 +16,7 @@ from .paths import (
     get_case_paths, URDF_XARM7, GAUSSIAN_OUTPUT_DIR,
     DATA_BG_IMG, TEMP_EXPERIMENTS_DIR
 )
-from .robot import RobotLoader
+from .robot import RobotLoader, RobotController
 
 
 class PhysTwinConfig:
@@ -45,6 +45,13 @@ class PhysTwinConfig:
         self._load_calibration_data()
         if inference: 
             self.setup_logging("inference_log")
+            
+        # Create robot loader
+        urdf_path = str(URDF_XARM7)
+        self.robot_loader = RobotLoader(
+            urdf_path, 
+            link_names=["left_finger", "right_finger"]
+        )
 
     def _setup_config(self) -> None:
         """Load case-specific configuration (cloth vs real)"""
@@ -118,29 +125,20 @@ class PhysTwinConfig:
         """Get temporary base directory for experiments"""
         return str(TEMP_EXPERIMENTS_DIR / self.case_name)
     
-    def create_robot_loader(self) -> RobotLoader:
+    def get_robot_controller(self, robot_type: str = "default", n_ctrl_parts: int = 1, device: str = 'cuda'):
         """
-        Create a robot loader for URDF parsing and mesh generation.
-        
-        Returns:
-            RobotLoader: Stateless robot loader instance
-        """
-        urdf_path = str(URDF_XARM7)
-        return RobotLoader(
-            urdf_path, 
-            link_names=["left_finger", "right_finger"]
-        )
-    
-    def get_robot_initial_pose(self, robot_type: str = "default") -> np.ndarray:
-        """
-        Get initial pose for robot type.
+        Create a robot controller with the correct initial pose.
         
         Args:
             robot_type: Type of robot configuration ("default", "interactive", "video")
+            n_ctrl_parts: Number of control parts (default: 1)
+            device: PyTorch device
             
         Returns:
-            np.ndarray [4,4]: Initial transformation matrix
+            RobotController: Configured robot controller instance
         """
+        
+        # Get initial pose
         R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
         
         init_pose = np.eye(4)
@@ -151,7 +149,14 @@ class PhysTwinConfig:
         else:
             init_pose[:3, 3] = [0.0, 0.0, 0.0]
         
-        return init_pose
+        # Get finger meshes with initial pose
+        finger_meshes = self.robot_loader.get_finger_mesh(
+            gripper_openness=0.0,
+            transform=init_pose
+        )
+        
+        # Create robot controller
+        return RobotController(finger_meshes, n_ctrl_parts, device)
     
     def get_paths(self) -> Dict[str, Path]:
         """Get all relevant paths for the case"""
