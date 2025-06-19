@@ -1,6 +1,6 @@
 import torch
 from .utils import fps_rad_tensor, construct_edges_from_tensor
-from .control import GNNPlannerWrapper, PhysTwinInGNN, GNNModelRolloutFn
+from .control import GNNPlannerWrapper, PhysTwinInGNN
 from scripts.planner import Planner
 import h5py
 import os
@@ -105,8 +105,9 @@ class CuriosityPlanner(GNNPlannerWrapper):
         # Initialize GNNPlannerWrapper with case_name
         super().__init__(model_path, train_config_path, mpc_config_path, case_name)
         
-        # Store ensemble parameter
+        # Store exploration parameters
         self.n_ensemble = self.mpc_config['n_ensemble']
+        self.padding = self.mpc_config['padding']
         
         # Store PhysTwin data
         self.phystwin_states = phystwin_states.to(self.device)
@@ -186,7 +187,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         act_seq = result['act_seq']
         
         # Append 5 frames with 0 robot movement, so the object comes to rest
-        act_seq = torch.cat([act_seq, torch.zeros(5, self.action_dim, device=self.device)], dim=0)
+        act_seq = torch.cat([act_seq, torch.zeros(self.padding, self.action_dim, device=self.device)], dim=0)
         print(act_seq)
         
         print(f"Exploring with action sequence shape: {act_seq.shape}")
@@ -194,7 +195,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         
         # Use PhysTwin to simulate the action sequence
         print("Running PhysTwin simulation...")
-        full_trajectory = self.phystwin.compute_deformation(
+        full_trajectory, _ = self.phystwin.compute_deformation(
             action_seq=act_seq,
             phystwin_states=self.phystwin_states,
             phystwin_robot_mask=self.phystwin_robot_mask

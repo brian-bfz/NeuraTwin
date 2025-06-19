@@ -121,10 +121,9 @@ class PhysTwinInGNN:
         # Create PhysTwin configuration
         phystwin_config = PhysTwinConfig(case_name=self.case_name)
         
-        # Adjust PhysTwin configuration for GNN downsampling
-        cfg.num_substeps = int(cfg.num_substeps * self.downsample_rate)
-        cfg.FPS = int(cfg.FPS / self.downsample_rate)
-        print(f"Adjusted PhysTwin config: substeps={cfg.num_substeps}, FPS={cfg.FPS}")
+        # Keep PhysTwin at original frame rate - no adjustments needed
+        print(f"PhysTwin config: substeps={cfg.num_substeps}, FPS={cfg.FPS}")
+        print(f"GNN downsample_rate: {self.downsample_rate}")
         
         self.trainer = InvPhyTrainerWarp(
             data_path=phystwin_config.get_data_path(),
@@ -140,14 +139,38 @@ class PhysTwinInGNN:
         
         print("PhysTwin initialization completed!")
         
+    def _interpolate_actions(self, action_seq):
+        """
+        Interpolate action sequence to match PhysTwin's native frame rate.
+        Assumes uniform motion between consecutive GNN frames.
+        
+        Args:
+            action_seq: [n_look_ahead, 2] - action sequence at GNN frame rate
+            
+        Returns:
+            interpolated_actions: [n_look_ahead * downsample_rate, 2] - interpolated actions at PhysTwin frame rate
+        """
+        n_look_ahead, action_dim = action_seq.shape
+        interpolated_actions = torch.zeros(n_look_ahead * self.downsample_rate, action_dim, device=action_seq.device)
+
+        for i in range(n_look_ahead):
+            for j in range(self.downsample_rate - 1):
+                interpolated_actions[i * self.downsample_rate + j] = action_seq[i] / self.downsample_rate
+            interpolated_actions[(i + 1) * self.downsample_rate - 1] = action_seq[i] - interpolated_actions[i * self.downsample_rate] * (self.downsample_rate - 1)
+
+        return interpolated_actions
+    
     def compute_deformation(self, action_seq, phystwin_states, phystwin_robot_mask, 
                           action_weight=None, fsp_weight=None, target_pcd=None):
         """
         Compute actual object deformation using PhysTwin simulation.
-        Compute reward if target_pcd is provided.
+        
+        This method interpolates the GNN action sequence to match PhysTwin's native frame rate,
+        runs the simulation at full temporal resolution, then downsamples the results back to
+        GNN frame rate. This allows both systems to operate at their optimal frame rates.
         
         Args:
-            action_seq: [n_look_ahead, action_dim] - action sequence
+            action_seq: [n_look_ahead, action_dim] - action sequence at GNN frame rate
             phystwin_states: [n_particles, 3] - initial particle states
             phystwin_robot_mask: [n_particles] - robot mask
             action_weight: float - action penalty weight (for reward calculation) (optional)
@@ -155,7 +178,7 @@ class PhysTwinInGNN:
             target_pcd: torch.Tensor - target for reward calculation (optional)
             
         Returns:
-            actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory
+            actual_trajectory: [n_look_ahead+1, n_particles, 3] - actual deformation trajectory at GNN frame rate
         """
         # Create PhysTwin model rollout function with PhysTwin robot mask
         phystwin_rollout_fn = PhysTwinModelRolloutFn(self.trainer, phystwin_robot_mask, self.device)
@@ -166,26 +189,35 @@ class PhysTwinInGNN:
             
         # Convert action sequence: [n_look_ahead, action_dim] -> [n_look_ahead, 2] (only x,y)
         action_seq_2d = action_seq[:, :2]  # [n_look_ahead, 2]
+        
+        # Interpolate action sequence to match PhysTwin's native frame rate
+        # GNN operates at downsampled rate, PhysTwin at original rate
+        interpolated_actions = self._interpolate_actions(action_seq_2d)  # [n_look_ahead * downsample_rate, 2]
             
         # Get actual deformation from PhysTwin using rollout_single_sequence
         print("Computing actual deformation with PhysTwin...")
+        print(f"GNN actions shape: {action_seq_2d.shape}, Interpolated actions shape: {interpolated_actions.shape}")
         predicted_states = phystwin_rollout_fn.rollout_single_sequence(
-            initial_object_state, initial_robot_state, action_seq_2d
-        )  # [n_look_ahead, n_particles, 3]
+            initial_object_state, initial_robot_state, interpolated_actions
+        )  # [n_look_ahead * downsample_rate, n_particles, 3]
             
+        # Downsample predicted states back to GNN frame rate
         actual_initial_state = torch.cat([initial_object_state, initial_robot_state], dim=0).unsqueeze(0)  # [1, n_particles, 3]
-        actual_trajectory = torch.cat([actual_initial_state, predicted_states], dim=0)  # [n_look_ahead+1, n_particles, 3]
+        actual_trajectory = torch.cat([actual_initial_state, predicted_states], dim=0)  # [n_look_ahead*downsample_rate+1, n_particles, 3]
+        downsampled_indices = torch.arange(0, actual_trajectory.shape[0], self.downsample_rate, device=self.device)
+        print(f"Downsampled indices: {downsampled_indices}")
                         
         # Calculate reward with actual trajectory (optional)
         if target_pcd is not None and action_weight is not None and fsp_weight is not None:
             reward_fn = RewardFn(action_weight, fsp_weight, phystwin_robot_mask, target_pcd)
-            # Convert predicted_states to format expected by reward function: [1, n_look_ahead, n_particles*3]
-            reward_states = predicted_states.flatten(start_dim=1).unsqueeze(0)  # [1, n_look_ahead, n_particles*3]
+            # Convert downsampled_predicted_states to format expected by reward function: [1, n_look_ahead, n_particles*3]
+            downsampled_trajectory = actual_trajectory[downsampled_indices][1:]
+            reward_states = downsampled_trajectory.flatten(start_dim=1).unsqueeze(0)  # [1, n_look_ahead, n_particles*3]
             action_seqs = action_seq_2d.unsqueeze(0)  # [1, n_look_ahead, 2]
             actual_reward = reward_fn(reward_states, action_seqs)['reward_seqs'][0].item()
             print(f"Actual reward (PhysTwin deformation): {actual_reward:.6f}")
 
-        return actual_trajectory
+        return actual_trajectory, downsampled_indices
             
 
 class GNNPlannerWrapper(PlannerWrapper): 
@@ -300,7 +332,7 @@ def visualize_action_gnn(save_dir, file_name):
     phystwin_first_states, phystwin_robot_mask, _ = load_mpc_data(episode_idx, phystwin_data_file, device)
         
     # Compute actual deformation
-    actual_trajectory = phystwin_simulator.compute_deformation(
+    actual_trajectory, downsampled_indices = phystwin_simulator.compute_deformation(
         action_seq=action_seq,
         phystwin_states=phystwin_first_states,
         phystwin_robot_mask=phystwin_robot_mask,
@@ -328,7 +360,7 @@ def visualize_action_gnn(save_dir, file_name):
     video_path = visualizer.visualize_object_motion(
         predicted_states=full_trajectory,
         tool_mask=robot_mask,
-        actual_objects=actual_trajectory,
+        actual_objects=actual_trajectory[downsampled_indices],
         save_path=save_path,
         topological_edges=topological_edges,
         target=target_pcd.cpu().numpy()

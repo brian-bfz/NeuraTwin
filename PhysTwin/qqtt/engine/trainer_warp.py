@@ -1236,7 +1236,7 @@ class InvPhyTrainerWarp:
 
         # Update robot position using the new controller system
         self.robot_controller.quick_robot_movement(
-            target_change=translation,
+            target_change=torch.tensor(translation, dtype=torch.float32, device=self.robot_controller.device),
             finger_change=0.0,
             rot_change=None
         )
@@ -1330,9 +1330,9 @@ class InvPhyTrainerWarp:
             # =====================robot stuff=====================
             # Update robot movement using the controller
             movement_result = self.robot_controller.fine_robot_movement(
-                target_change=target_changes[i],
+                target_change=torch.tensor(target_changes[i], dtype=torch.float32, device=self.robot_controller.device),
                 finger_change=finger_changes[i],
-                rot_change=rot_changes[i]
+                rot_change=torch.tensor(rot_changes[i], dtype=torch.float32, device=self.robot_controller.device)
             )
             
             # Update protected copies after robot movement
@@ -1913,9 +1913,9 @@ class InvPhyTrainerWarp:
 
             # Update robot movement using the controller
             movement_result = self.robot_controller.fine_robot_movement(
-                target_change=target_change,
+                target_change=torch.tensor(target_change, dtype=torch.float32, device=self.robot_controller.device),
                 finger_change=finger_change,
-                rot_change=rot_change
+                rot_change=torch.tensor(rot_change, dtype=torch.float32, device=self.robot_controller.device)
             )
 
             # Update protected copies after robot movement

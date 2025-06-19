@@ -2,8 +2,8 @@ data_file: "PhysTwin/generated_data/sampled_with_12_edges.h5"
 phystwin_data_file: "PhysTwin/generated_data/mixed_push_rope.h5"
 action_dim: 2
 planner_type: "MPPI"           # Options: "MPPI", "GD", "MPPI_GD"
-n_sample: 10                  # Number of action trajectories to sample
-n_look_ahead: 50              # Number of steps to look ahead
+n_sample: 33                  # Number of action trajectories to sample
+n_look_ahead: 33              # Number of GNN steps to look ahead
 n_update_iter: 3            # Number of optimization iterations
 reward_weight: 100.0            # Temperature parameter for MPPI softmax
 noise_level: 0.01              # Standard deviation for action noise
@@ -21,4 +21,5 @@ action_weight: 1000              # Weight for action penalty in reward function
 fsp_weight: 100              # Weight for final speed penalty in reward function
 
 # Curiosity Planner Configuration
-n_ensemble: 5
+n_ensemble: 3
+padding: 3

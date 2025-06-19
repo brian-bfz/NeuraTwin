@@ -34,3 +34,4 @@ __pycache__/
 .DS_Store
 *.pth
 temp_experiments/single_push_rope/inference_log.log
+GNN/test_curiosity_output.h5

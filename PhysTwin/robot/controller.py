@@ -105,34 +105,46 @@ class RobotController:
         # Set initial mesh vertices (already a tensor)
         self.current_trans_dynamic_points = self.base_finger_vertices.clone()
         
+    def _robot_movement_base(self, target_change, finger_change, rot_change):
+        """
+        Base method containing shared logic for robot movement.
+        
+        Args:
+            target_change: torch.Tensor [n_ctrl_parts, 3] - translation change
+            finger_change: float - change in finger opening
+            rot_change: torch.Tensor [3] - rotation change as axis-angle
+        """
+        # Update internal states
+        self.accumulate_trans += target_change
+        self.current_finger += finger_change
+        self.current_finger = max(0.0, min(1.0, self.current_finger))
+        
+        # Update force judge direction
+        self.current_force_judge = self.origin_force_judge.clone() @ self.accumulate_rot
+        
     def quick_robot_movement(self, target_change, finger_change=0.0, rot_change=None):
         """
         Quickly teleport robot to desired pose (for initialization).
         
         Args:
-            target_change: [n_ctrl_parts, 3] numpy array - translation change
+            target_change: torch.Tensor [n_ctrl_parts, 3] - translation change
             finger_change: float - change in finger opening (default: 0.0)
-            rot_change: [3] numpy array - rotation change as axis-angle (default: None)
+            rot_change: torch.Tensor [3] - rotation change as axis-angle (default: None)
             
         Returns:
             torch.Tensor: current_trans_dynamic_points [n_vertices, 3]
         """
-        # Convert inputs to tensors once
-        target_change_tensor = torch.as_tensor(target_change, dtype=torch.float32, device=self.device)
+        # Handle default rotation
         if rot_change is None:
-            rot_change_tensor = torch.zeros(3, dtype=torch.float32, device=self.device)
-        else:
-            rot_change_tensor = torch.as_tensor(rot_change, dtype=torch.float32, device=self.device)
+            rot_change = torch.zeros(3, dtype=torch.float32, device=self.device)
             
-        # Update internal states (all tensor operations)
-        self.accumulate_trans += target_change_tensor
-        self.current_finger += finger_change
-        self.current_finger = max(0.0, min(1.0, self.current_finger))
-        
         # Update rotation
-        if torch.norm(rot_change_tensor) > 0:
-            rot_mat = axis_angle_to_matrix(rot_change_tensor.unsqueeze(0))[0]
+        if torch.norm(rot_change) > 0:
+            rot_mat = axis_angle_to_matrix(rot_change.unsqueeze(0))[0]
             self.accumulate_rot = torch.matmul(self.accumulate_rot, rot_mat)
+        
+        # Apply shared movement logic
+        self._robot_movement_base(target_change, finger_change, rot_change)
         
         # Apply transformations about gripper center
         current_gripper_center = self.initial_gripper_center + self.accumulate_trans[0]
@@ -142,9 +154,6 @@ class RobotController:
         
         # Translate to final position
         self.current_trans_dynamic_points = rotated_vertices + current_gripper_center
-
-        # Update force judge direction
-        self.current_force_judge = self.origin_force_judge.clone() @ self.accumulate_rot
         
         return self.current_trans_dynamic_points
         
@@ -153,9 +162,9 @@ class RobotController:
         Smoothly move robot with interpolated motion (for simulation).
         
         Args:
-            target_change: [n_ctrl_parts, 3] numpy array - translation change for this step
+            target_change: torch.Tensor [n_ctrl_parts, 3] - translation change for this step
             finger_change: float - change in finger opening (default: 0.0)
-            rot_change: [3] numpy array - rotation change as axis-angle (default: None)
+            rot_change: torch.Tensor [3] - rotation change as axis-angle (default: None)
             
         Returns:
             dict containing:
@@ -165,27 +174,20 @@ class RobotController:
                 dynamic_omega: [3] - robot angular velocity
                 current_trans_dynamic_points: [n_robot_vertices, 3] - final robot mesh points
         """
-        # Import cfg here to avoid circular imports
-        from ..qqtt.utils import cfg
-        
-        # Convert inputs to tensors once
-        target_change_tensor = torch.as_tensor(target_change, dtype=torch.float32, device=self.device)
-        if rot_change is None:
-            rot_change_tensor = torch.zeros(3, dtype=torch.float32, device=self.device)
-        else:
-            rot_change_tensor = torch.as_tensor(rot_change, dtype=torch.float32, device=self.device)
-            
         # Store previous state
         prev_gripper_center = self.initial_gripper_center + self.accumulate_trans[0]
         prev_accumulate_rot = self.accumulate_rot.clone()
         relative_finger_vertices = self.relative_finger_vertices.clone().unsqueeze(0)
+
+        # Import cfg here to avoid circular imports
+        from ..qqtt.utils import cfg
         
-        # Update finger position
-        self.current_finger += finger_change
-        self.current_finger = max(0.0, min(1.0, self.current_finger))
-        
-        # Update accumulated translation
-        self.accumulate_trans += target_change_tensor
+        # Handle default rotation
+        if rot_change is None:
+            rot_change = torch.zeros(3, dtype=torch.float32, device=self.device)
+            
+        # Apply shared movement logic
+        self._robot_movement_base(target_change, finger_change, rot_change)
         
         # Calculate interpolated points considering finger and translation first
         ratios = (
@@ -193,11 +195,11 @@ class RobotController:
             / cfg.num_substeps
         )
         
-        # Interpolate translation by moving gripper center (all tensor operations)
-        interpolated_centers = prev_gripper_center.unsqueeze(0) + (target_change_tensor[0].unsqueeze(0) * ratios.squeeze(-1))
+        # Interpolate translation by moving gripper center
+        interpolated_centers = prev_gripper_center.unsqueeze(0) + (target_change[0].unsqueeze(0) * ratios.squeeze(-1))
         
         # Do the rotation on the interpolated points (following example logic)
-        interpolated_rot_angle = rot_change_tensor.unsqueeze(0) * ratios.reshape(-1, 1)
+        interpolated_rot_angle = rot_change.unsqueeze(0) * ratios.reshape(-1, 1)
         interpolated_rot_temp = axis_angle_to_matrix(interpolated_rot_angle)
         # Apply incremental rotation to previous accumulated rotation
         interpolated_rot_mat = prev_accumulate_rot.unsqueeze(0) @ interpolated_rot_temp
@@ -209,12 +211,9 @@ class RobotController:
         # Update final mesh vertices
         self.current_trans_dynamic_points = interpolated_dynamic_points[-1]
         
-        # Calculate velocity and omega (all tensor operations)
-        dynamic_velocity = target_change_tensor[0] / (2 * cfg.dt * cfg.num_substeps)
-        dynamic_omega = rot_change_tensor / (2 * cfg.dt * cfg.num_substeps)
-        
-        # Update force judge direction
-        self.current_force_judge = self.origin_force_judge.clone() @ self.accumulate_rot
+        # Calculate velocity and omega
+        dynamic_velocity = target_change[0] / (2 * cfg.dt * cfg.num_substeps)
+        dynamic_omega = rot_change / (2 * cfg.dt * cfg.num_substeps)
         
         return {
             'interpolated_dynamic_points': interpolated_dynamic_points,
@@ -231,16 +230,14 @@ class RobotController:
         Args:
             target_vertices: torch.Tensor [n_vertices, 3] - target mesh vertices
         """
-        # Keep everything as tensors until we need to call quick_robot_movement
         current_mesh_center = self.initial_gripper_center + self.accumulate_trans[0]
         target_mesh_center = torch.mean(target_vertices, dim=0)
         
-        # Calculate translation from current to target (tensor operation)
-        translation = target_mesh_center - current_mesh_center
+        # Calculate translation from current to target
+        translation = (target_mesh_center - current_mesh_center).unsqueeze(0)  # Shape: [1, 3] for n_ctrl_parts=1
         
-        # Convert to numpy only for interface compatibility
         self.quick_robot_movement(
-            target_change=translation.unsqueeze(0).cpu().numpy(),  # Shape: [1, 3] for n_ctrl_parts=1
+            target_change=translation,
             finger_change=0.0,
             rot_change=None
         )
@@ -248,7 +245,7 @@ class RobotController:
     def get_current_state(self):
         """Get current robot state for serialization/debugging."""
         return {
-            'accumulate_trans': self.accumulate_trans.clone(),  # Keep as tensor
+            'accumulate_trans': self.accumulate_trans.clone(),
             'accumulate_rot': self.accumulate_rot.clone(),
             'current_finger': self.current_finger,
             'current_trans_dynamic_points': self.current_trans_dynamic_points.clone(),

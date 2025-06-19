@@ -107,11 +107,11 @@ class PhysTwinModelRolloutFn:
         
         for i in range(n_look_ahead):
             # Apply robot translation using controller
-            robot_translation = action_seq[i].cpu().numpy()
+            robot_translation = action_seq[i]
             
             # Update robot movement using the controller
             movement_result = self.robot_controller.fine_robot_movement(
-                target_change=np.array([robot_translation]),  # Shape: [1, 3] for n_ctrl_parts=1
+                target_change=robot_translation.unsqueeze(0),  # Shape: [1, 3] for n_ctrl_parts=1
                 finger_change=0.0,  # Fixed gripper opening
                 rot_change=None
             )
