@@ -36,3 +36,4 @@ __pycache__/
 temp_experiments/
 GNN/test_curiosity_output.h5
 test_data_generator_multiprocessing.py
+visualize_curiosity_data.py

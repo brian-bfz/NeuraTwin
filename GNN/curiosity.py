@@ -144,6 +144,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         sampled_object_states = object_states[self.object_indices]  # [n_obj_sampled, 3]
             
         self.robot_indices = fps_rad_tensor(robot_states, fps_radius)
+        self.robot_indices = self.robot_indices + object_states.shape[0]
         # sampled_robot_states = robot_states[robot_indices]  # [n_robot_sampled, 3]
         
         # Construct topological edges for objects only

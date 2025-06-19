@@ -355,34 +355,34 @@ class Visualizer:
             topological_edges = topological_edges.cpu()
         
         # Split predicted states into objects and robots using tool_mask. Convert to numpy for o3d. Keep predicted_states as tensor. 
-        actual_objects = actual_objects.cpu().numpy()
         pred_objects = predicted_states[:, ~tool_mask, :].numpy()
         pred_robots = predicted_states[:, tool_mask, :].numpy()
-        
-        # Create point clouds            
-        actual_pcd = o3d.geometry.PointCloud()
-        actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0])
-        actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
+
+        if actual_objects is not None:
+            actual_objects = actual_objects.cpu().numpy()
+            actual_pcd = o3d.geometry.PointCloud()
+            actual_pcd.points = o3d.utility.Vector3dVector(actual_objects[0])
+            actual_pcd.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for actual
+            vis.add_geometry(actual_pcd)
             
         robot_pcd = o3d.geometry.PointCloud()
         robot_pcd.points = o3d.utility.Vector3dVector(pred_robots[0])
         robot_pcd.paint_uniform_color([1.0, 0.0, 0.0])  # Red for robot
+        vis.add_geometry(robot_pcd)
         
         pred_pcd = o3d.geometry.PointCloud()
         pred_pcd.points = o3d.utility.Vector3dVector(pred_objects[0])
         pred_pcd.paint_uniform_color([0.0, 1.0, 0.0])  # Green for predicted
-
-        target_pcd = o3d.geometry.PointCloud()
-        target_pcd.points = o3d.utility.Vector3dVector(target)
-        target_pcd.paint_uniform_color([1.0, 0.6, 0.2])  # Orange for target
-
-        # Add geometries to visualizer
-        vis.add_geometry(actual_pcd)
-        vis.add_geometry(robot_pcd)
         vis.add_geometry(pred_pcd)
-        vis.add_geometry(target_pcd)
 
-        n_frames = min(len(predicted_states), len(actual_objects))
+        if target is not None:
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = o3d.utility.Vector3dVector(target)
+            target_pcd.paint_uniform_color([1.0, 0.6, 0.2])  # Orange for target
+            vis.add_geometry(target_pcd)
+
+
+        n_frames = len(predicted_states)
         print(f"Rendering {n_frames} frames...")
         
         # Set up camera parameters if available
@@ -405,7 +405,6 @@ class Visualizer:
         for frame_idx in range(n_frames):
             # Update particle positions
             pred_obj_pos = pred_objects[frame_idx]
-            actual_obj_pos = actual_objects[frame_idx]
             robot_pos = pred_robots[frame_idx]
             
             if frame_idx == 0:
@@ -415,11 +414,14 @@ class Visualizer:
             # Update point cloud positions
             pred_pcd.points = o3d.utility.Vector3dVector(pred_obj_pos)
             robot_pcd.points = o3d.utility.Vector3dVector(robot_pos)
-            actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
 
             vis.update_geometry(pred_pcd)
-            vis.update_geometry(actual_pcd)
             vis.update_geometry(robot_pcd)
+
+            if actual_objects is not None:
+                actual_obj_pos = actual_objects[frame_idx]
+                actual_pcd.points = o3d.utility.Vector3dVector(actual_obj_pos)
+                vis.update_geometry(actual_pcd)
 
             # Remove old edges
             for line_set in pred_line_sets:

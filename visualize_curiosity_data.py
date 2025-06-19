@@ -197,10 +197,10 @@ def visualize_episode(data_file, episode_idx, output_dir, case_name="single_push
     saved_path = visualizer.visualize_object_motion(
         predicted_states=combined_states,
         tool_mask=tool_mask,
-        actual_objects=object_states,  # Use object states as "ground truth"
+        actual_objects=None,  # Use object states as "ground truth"
         save_path=output_video,
         topological_edges=topological_edges,
-        target=target_pcd
+        target=None
     )
     
     return saved_path

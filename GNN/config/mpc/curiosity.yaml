@@ -23,5 +23,5 @@ fsp_weight: 100              # Weight for final speed penalty in reward function
 # Curiosity Planner Configuration
 n_ensemble: 3
 padding: 3
-n_episodes: 30
-n_explore_iter: 10
+n_episodes: 15
+n_explore_iter: 5
