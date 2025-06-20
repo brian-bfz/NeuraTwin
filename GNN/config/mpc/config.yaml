@@ -4,7 +4,7 @@ action_dim: 2
 planner_type: "MPPI"           # Options: "MPPI", "GD", "MPPI_GD"
 n_sample: 100                  # Number of action trajectories to sample
 n_look_ahead: 50              # Number of steps to look ahead
-n_update_iter: 10            # Number of optimization iterations
+n_update_iter: 40            # Number of optimization iterations
 reward_weight: 100.0            # Temperature parameter for MPPI softmax
 noise_level: 0.005              # Standard deviation for action noise
   
@@ -13,6 +13,7 @@ action_lower_bound: -0.02       # Lower bound for robot actions (m)
 action_upper_bound: 0.02        # Upper bound for robot actions (m)
   
 # Optimization Parameters
+beta: 0.3                      # Lower = less change between actions
 lr: 0.001                      # Learning rate for gradient descent (if using GD)
 verbose: true                 # Enable detailed logging during optimization
 

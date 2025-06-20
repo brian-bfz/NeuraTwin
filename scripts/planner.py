@@ -221,6 +221,7 @@ class Planner(object):
         self.model_rollout = config['model_rollout_fn']
         self.evaluate_traj = config['evaluate_traj_fn']
         self.n_sample = config['n_sample']
+        self.beta = config['beta']
         self.n_look_ahead = config['n_look_ahead']
         self.n_update_iter = config['n_update_iter']
         self.reward_weight = config['reward_weight']
@@ -284,7 +285,7 @@ class Planner(object):
             act_seqs = act_seqs.unsqueeze(1).repeat(1, self.n_look_ahead, 1)
             return act_seqs
 
-        beta_filter = 0.7
+        beta_filter = self.beta
 
         # [n_sample, n_look_ahead, action_dim]
         act_seqs = torch.stack([act_seq.clone()] * self.n_sample)

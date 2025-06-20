@@ -239,7 +239,7 @@ class PropModuleDiffDen(nn.Module):
 
         # Encode particle features (history-aware)
         particle_encode = self.particle_encoder(
-            torch.cat([s_delta_flat, a_cur[..., None], s_cur[..., 2:3]], 2))  # B x particle_num x nf_effect
+            torch.cat([s_delta_flat, a_cur[..., None], s_cur[..., 2:3]], 2))  # B x particle_num x (3D velocity + attribute + z coordinate) -> B x particle_num x nf_effect
         particle_effect = particle_encode
 
         # =====================================

@@ -228,10 +228,10 @@ class ParticleDataset(Dataset):
         # Combine sampled particles: [object_particles, robot_particles]
         states = torch.cat([object_data, robot_data], dim=1)  # [n_frames, particle_num, 3]
         
-        # Apply random 2D rotation to states before calculating deltas
-        states = self._apply_random_rotation(states)
-        
-        # Apply data augmentation noise to history frames only
+        # Data augmentation: 
+        # Apply random 2D rotation
+        states = self._apply_random_rotation(states)        
+        # Apply noise
         if self.add_randomness:
             noise = torch.randn_like(states[:self.n_his]) * self.state_noise
             noise = torch.clamp(noise, -0.015, 0.015)

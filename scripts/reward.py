@@ -69,23 +69,25 @@ class RewardFn:
         target = self.target.unsqueeze(0).repeat(n_sample, 1, 1) # [n_sample, n_particles, 3]
         
         # Compute Chamfer distance penalty in batch (only between objects and target)
-        chamfer_penalties = torch.zeros(n_sample, device=self.device)
-        for i in range(n_look_ahead):
-            chamfer_penalties += chamfer_distance(states_seqs[:, i, ~self.robot_mask, :], target) * i * i
+        # chamfer_penalties = torch.zeros(n_sample, device=self.device)
+        # for i in range(n_look_ahead):
+        #     chamfer_penalties += chamfer_distance(states_seqs[:, i, ~self.robot_mask, :], target) * i * i
+        chamfer_penalties = chamfer_distance(states_seqs[:, -1, ~self.robot_mask, :], target)
 
-        final_delta = states_seqs[:, -1, ~self.robot_mask, :] - states_seqs[:, -2, ~self.robot_mask, :]
-        final_speed = torch.norm(final_delta, dim=2) # [n_sample, n_particles] 
-        final_speed_penalty = torch.mean(final_speed, dim=1) * n_look_ahead * self.fsp_weight # [n_sample]
+        # final_delta = states_seqs[:, -1, ~self.robot_mask, :] - states_seqs[:, -2, ~self.robot_mask, :]
+        # final_speed = torch.norm(final_delta, dim=2) # [n_sample, n_particles] 
+        # final_speed_penalty = torch.mean(final_speed, dim=1) * n_look_ahead * self.fsp_weight # [n_sample]
         
         # Energy = \int v \cdot dv
-        acceleration = action_seqs[:, 1:] - action_seqs[:, :-1]
-        energy = torch.sum(acceleration * action_seqs[:, :-1], dim=2)  # [n_sample, n_look_ahead]
-        energy = torch.sum(torch.abs(energy), dim=1)
-        action_penalties = energy * self.ap_weight  # [n_sample]
+        # acceleration = action_seqs[:, 1:] - action_seqs[:, :-1]
+        # energy = torch.sum(acceleration * action_seqs[:, :-1], dim=2)  # [n_sample, n_look_ahead]
+        # energy = torch.sum(torch.abs(energy), dim=1)
+        # action_penalties = energy * self.ap_weight  # [n_sample]
 
         # print(f"chamfer_penalties: {chamfer_penalties}")
         # print(f"final_speed_penalty: {final_speed_penalty}")
         # print(f"action_penalties: {action_penalties}")
         return {
-            'reward_seqs': -(chamfer_penalties + final_speed_penalty + action_penalties)
+            # 'reward_seqs': -(chamfer_penalties + final_speed_penalty + action_penalties)
+            'reward_seqs': -chamfer_penalties
         }
