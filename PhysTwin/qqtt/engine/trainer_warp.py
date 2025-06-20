@@ -1025,10 +1025,16 @@ class InvPhyTrainerWarp:
         min_idx = min_indices[torch.argmin(min_dist_per_ctrl_pts)]
         return self.structure_points[min_idx].unsqueeze(0)
     
-    def push_rope_once(self):
+    def push_rope_once(self, offset_dist, keep_off, multiplier, speed):
         """
         Select a point on the rope and move pusher towards it.
         
+        Args:
+            offset_dist: Distance to offset from the selected object point
+            keep_off: Minimum distance to keep from all object points
+            multiplier: Multiplier for the target movement distance
+            speed: Speed of the robot movement
+            
         Returns:
             tuple: (current_pose, target_changes)
                 - current_pose: numpy array [4,4] for robot transformation matrix
@@ -1080,9 +1086,22 @@ class InvPhyTrainerWarp:
     
     def push_once(self):
         """
-        Select a point on the rope, offset it by offset_dist, and move the pusher in a random direction.
+        Select a point on the rope, offset it by offset_dist, and move the pusher towards it (75% chance), or in a random direction (25% chance)
         
+        Returns:
+            tuple: (current_pose, target_changes)
+                - current_pose: numpy array [4,4] for robot transformation matrix
+                - target_changes: numpy array for target movement
         """
+        offset_dist = 0.05
+        keep_off = 0.03
+        n_frames = 61
+        min_speed = 0.004
+
+        # finger is always closed
+        initial_finger = 0.0
+        finger_changes = torch.zeros(n_frames, dtype=torch.float32, device=self.robot_controller.device)
+        
         # Get object points from the simulator
         max_attempts = 100
         for _ in range(max_attempts):
@@ -1106,32 +1125,39 @@ class InvPhyTrainerWarp:
             # If we couldn't find a valid position after max attempts
             raise RuntimeError("Could not find valid robot position after maximum attempts")
         
-        # 4. Find robot's current position and calculate translation
-        robot_vertices = self.dynamic_points.cpu().numpy()
-        robot_position = np.mean(robot_vertices, axis=0)
-        translation = start_position.cpu().numpy() - robot_position
-        translation = translation.reshape(self.n_ctrl_parts, 3)
+        # Calculate the initial translation to send the robot center to the selected point
+        current_robot_center = self.robot_controller.get_current_center()
+        initial_translation = selected_point - current_robot_center
 
-        # 5. Select a new random direction
-        rd = random_direction(self.init_vertices.device)
-
-        # 6. Move in the random direction for travel_dist
-        movement_vector = rd.cpu().numpy() * travel_dist
-        total_distance = np.linalg.norm(movement_vector)
-        n_frames = max(1, int(np.ceil(total_distance / speed)))
+        # 5. Select a new random direction (25% chance)
+        if torch.rand(1).item() < 0.25:
+            rd = random_direction(self.init_vertices.device)
+        else:
+            rd = -rd
         
-        # 7. Divide the movement into n_frames steps
-        step_movement = movement_vector / n_frames
-        target_changes = np.zeros((n_frames, self.n_ctrl_parts, 3))
-        for i in range(n_frames):
-            target_changes[i, 0] = step_movement
-                
-        return translation.astype(np.float32), target_changes.astype(np.float32)
+        # Execute pushing motion
+        current_frame = 0
+        target_changes = torch.zeros((n_frames, self.n_ctrl_parts, 3), dtype=torch.float32, device=self.robot_controller.device)
+        
+        while current_frame < n_frames:
+            move_duration = torch.randint(5, 16, (1,)).item()
+            move_duration = min(move_duration, n_frames - current_frame)
+
+            speed = torch.rand(1).item() * (min_speed) + min_speed
+            
+            target_changes[current_frame:current_frame + move_duration, 0] = speed * rd
+            
+            current_frame += move_duration
+            
+            pause_duration = torch.randint(0, 5, (1,)).item()
+            current_frame += pause_duration
+
+        return initial_translation, target_changes, initial_finger, finger_changes
     
     def lift_rope(self):
         """
         Grab the rope and go through a random sequence of ups, downs, and pauses
-        Miss the rope ~1/10 of the time (if the robot moves up before waiting for the fingers to close)
+        Miss the rope 10% of the time (if the robot moves up before waiting for the fingers to close)
         Make sure the total displacement is never negative
 
         Return: 
@@ -1250,7 +1276,6 @@ class InvPhyTrainerWarp:
         
         # Execute lifting motion
         current_frame = wait_frames
-        total_displacement = 0.0
         
         while current_frame < n_frames:
             move_duration = torch.randint(5, 16, (1,)).item()
@@ -1263,7 +1288,6 @@ class InvPhyTrainerWarp:
                 speed = torch.rand(1).item() * (min_speed) + min_speed
             
             target_changes[current_frame:current_frame + move_duration, 0, 2] = -speed
-            total_displacement += speed * move_duration
             
             current_frame += move_duration
             

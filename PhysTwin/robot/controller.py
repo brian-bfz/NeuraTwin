@@ -74,9 +74,9 @@ class RobotController:
         )
         
         # Initialize to default state
-        self.reset()
+        self._reset()
                
-    def reset(self):
+    def _reset(self):
         """Reset all state variables to initial values."""
         self.accumulate_trans.zero_()  # Reset to zero without changing type
         self.accumulate_rot = torch.eye(3, dtype=torch.float32, device=self.device)
