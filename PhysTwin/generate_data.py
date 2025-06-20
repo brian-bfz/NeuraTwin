@@ -130,7 +130,7 @@ def generate_episodes_distributed(rank=None, world_size=None, case_name=None, ba
         print(f"GPU {rank} processing episodes {start_idx}-{end_idx-1}: {local_episode_list}")
         
         # Create separate data file for each GPU
-        data_file_path = str(save_dir / f"lift_data_gpu{rank}.h5")
+        data_file_path = str(save_dir / f"lift_data_{rank}.h5")
     else:
         local_episode_list = episode_list
         print(f"Single GPU processing all episodes: {local_episode_list}")
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     if world_size > 1:
         print(f"Using {world_size} GPUs for distributed episode generation")
         print(f"Total episodes to generate: {len(episode_list)}")
-        print(f"Each GPU will write to separate data files: lift_data_gpu0.h5, lift_data_gpu1.h5, etc.")
+        print(f"Each GPU will write to separate data files: lift_data_0.h5, lift_data_1.h5, etc.")
         
         # Use multiprocessing to spawn processes for each GPU
         mp.spawn(
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     if world_size > 1:
         print("\nGenerated data files:")
         for rank in range(world_size):
-            data_file = save_dir / f"lift_data_gpu{rank}.h5"
+            data_file = save_dir / f"lift_data_{rank}.h5"
             if data_file.exists():
                 print(f"  GPU {rank}: {data_file}")
     else:
