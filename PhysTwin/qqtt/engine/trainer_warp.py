@@ -1130,7 +1130,7 @@ class InvPhyTrainerWarp:
         initial_translation = start_position - current_robot_center
 
         # 5. Select a new random direction (30% chance)
-        if torch.rand(1).item() < 0.3:
+        if torch.rand(1).item() < 0.5:
             rd = random_direction(self.init_vertices.device)
         else:
             rd = -rd
@@ -1140,7 +1140,7 @@ class InvPhyTrainerWarp:
         target_changes = torch.zeros((n_frames, self.n_ctrl_parts, 3), dtype=torch.float32, device=self.robot_controller.device)
         
         while current_frame < n_frames:
-            move_duration = torch.randint(5, 16, (1,)).item()
+            move_duration = torch.randint(30, 50, (1,)).item()
             move_duration = min(move_duration, n_frames - current_frame)
 
             speed = torch.rand(1).item() * (min_speed) + min_speed
@@ -1149,7 +1149,7 @@ class InvPhyTrainerWarp:
             
             current_frame += move_duration
             
-            pause_duration = torch.randint(0, 5, (1,)).item()
+            pause_duration = torch.randint(0, 10, (1,)).item()
             current_frame += pause_duration
 
         return initial_translation, target_changes, initial_finger, finger_changes
@@ -1385,7 +1385,7 @@ class InvPhyTrainerWarp:
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
-        initial_translation, target_changes, initial_finger, finger_changes = self.lift_air()
+        initial_translation, target_changes, initial_finger, finger_changes = self.push_once()
 
         # Update robot position using the new controller system
         self.robot_controller.quick_robot_movement(

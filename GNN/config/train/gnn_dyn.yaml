@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/sampled_with_12_edges.h5"
+  file: "PhysTwin/generated_data/push_sampled_12_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile

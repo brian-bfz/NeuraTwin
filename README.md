@@ -12,6 +12,8 @@ If error pops up for urdfpy, click on the problematic file, and change ```np.flo
 
 ```python -m PhysTwin.generate_data --case_name single_push_rope --episodes```
 
+```CUDA_VISIBLE_DEVICES=0 python -m PhysTwin.generate_data --case_name single_push_rope --episodes --video```
+
 ```python -m PhysTwin.v_from_d --case_name single_push_rope --episodes```
 
 ```python -m PhysTwin.html_video```
@@ -31,6 +33,6 @@ If error pops up for urdfpy, click on the problematic file, and change ```np.flo
 
 ```python -m GNN.plot_training_loss --model --save_plots```
 
-```python -m GNN.control --model --dir_name --episode```
-
 ```python -m GNN.test_curiosity.py```
+
+```python -m GNN.control --model --dir_name --episode```

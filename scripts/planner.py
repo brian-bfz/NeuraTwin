@@ -41,6 +41,7 @@ class PlannerWrapper(ABC):
         self.action_upper_bound = torch.full((self.action_dim,), self.mpc_config['action_upper_bound'], device=self.device)
         self.planner_type = self.mpc_config['planner_type']
         self.noise_level = self.mpc_config['noise_level']
+        self.beta = self.mpc_config['beta']
         self.verbose = self.mpc_config.get('verbose', False)
         
         self.action_weight = self.mpc_config['action_weight']
@@ -98,6 +99,7 @@ class PlannerWrapper(ABC):
             'reward_weight': self.reward_weight,
             'action_lower_lim': self.action_lower_bound,
             'action_upper_lim': self.action_upper_bound,
+            'beta': self.beta,
             'planner_type': self.planner_type,
             'noise_level': self.noise_level,
             'verbose': self.verbose,

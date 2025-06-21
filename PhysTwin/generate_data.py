@@ -5,6 +5,7 @@ from .qqtt import InvPhyTrainerWarp
 from .qqtt.utils import logger, cfg
 from .paths import *
 from .config_manager import PhysTwinConfig, create_common_parser
+from .v_from_d import video_from_data
 from datetime import datetime
 import random
 import os
@@ -87,7 +88,7 @@ def initialize_data_file(data_file_path, rank=None):
 
 def generate_episodes_distributed(rank, world_size, case_name, base_path, 
                                 bg_img_path, gaussian_path, n_ctrl_parts, 
-                                episode_list, include_gaussian, save_dir, output_file):
+                                episode_list, include_gaussian, save_dir, output_file, generate_video=False):
     """
     Distributed episode generation function.
     
@@ -102,6 +103,8 @@ def generate_episodes_distributed(rank, world_size, case_name, base_path,
         episode_list: List of episodes to generate
         include_gaussian: Whether to include gaussian data
         save_dir: Directory to save data files
+        output_file: Name of the output file
+        generate_video: Whether to generate videos (only in single GPU mode)
     """
     
     # ========================================================================
@@ -173,6 +176,13 @@ def generate_episodes_distributed(rank, world_size, case_name, base_path,
     best_model_path = config.get_best_model_path()
     gaussians_path = config.get_gaussian_path()
     
+    # Setup video generation (only for single GPU mode)
+    video_output_dir = None
+    if generate_video and rank is None:
+        video_output_dir = str(GENERATED_VIDEOS_DIR)
+        os.makedirs(video_output_dir, exist_ok=True)
+        print(f"Video generation enabled. Videos will be saved to: {video_output_dir}")
+    
     for i in local_episode_list:
         if rank is not None:
             print(f"GPU {rank} generating episode {i}")
@@ -186,6 +196,17 @@ def generate_episodes_distributed(rank, world_size, case_name, base_path,
             data_file_path,
             i,
         )
+        
+        # Generate video for this episode (only in single GPU mode)
+        if generate_video and rank is None:
+            print(f"Generating video for episode {i}")
+            try:
+                with h5py.File(data_file_path, 'r') as f:
+                    video_from_data(cfg, f, i, trainer.robot_controller, video_output_dir)
+                print(f"Video generated for episode {i}")
+            except Exception as e:
+                print(f"Warning: Failed to generate video for episode {i}: {e}")
+                # Continue with next episode even if video generation fails
 
     # ========================================================================
     # CLEANUP
@@ -205,6 +226,7 @@ if __name__ == "__main__":
                        help="Episodes to generate. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--include_gaussian", action="store_true")
     parser.add_argument("--output_file", type=str, default="lift_data", help="Name of the output H5 file. No extension.")
+    parser.add_argument("--video", action="store_true", help="Generate videos after each episode (single GPU mode only)")
     args = parser.parse_args()
 
     episode_list = parse_episodes(args.episodes)
@@ -223,6 +245,9 @@ if __name__ == "__main__":
         print(f"Total episodes to generate: {len(episode_list)}")
         print(f"Each GPU will write to separate data files: {args.output_file}_0.h5, {args.output_file}_1.h5, etc.")
         
+        if args.video:
+            print("Warning: Video generation is not supported in multi-GPU mode. Skipping video generation.")
+        
         # Use multiprocessing to spawn processes for each GPU
         mp.spawn(
             generate_episodes_distributed, 
@@ -237,7 +262,8 @@ if __name__ == "__main__":
                 episode_list,
                 args.include_gaussian,
                 save_dir,
-                args.output_file
+                args.output_file,
+                False  # Video generation disabled in multi-GPU mode
             )
         )
     else:
@@ -253,7 +279,8 @@ if __name__ == "__main__":
             episode_list=episode_list,
             include_gaussian=args.include_gaussian,
             save_dir=save_dir,
-            output_file=args.output_file
+            output_file=args.output_file,
+            generate_video=args.video
         )
 
     print("All episode generation completed!")

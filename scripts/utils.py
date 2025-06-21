@@ -2,6 +2,9 @@ import torch
 import h5py
 import os
 import numpy as np
+import random
+import math
+from GNN.utils import fps_rad_tensor
 
 def parse_episodes(episodes_arg):
     """
@@ -79,9 +82,88 @@ def load_mpc_data(episode_idx, data_file, device):
             topological_edges[:n_object, :n_object] = torch.tensor(object_edges, dtype=torch.float32, device=device)
 
         return first_states, robot_mask, topological_edges
+        
+def load_mpc_data2(data_file, device):
+    """
+    Load a random episode from the specified data file using load_mpc_data
+    Produce a target point cloud by downsampling the object point cloud with fps_rad_tensor
+    Apply a random rotation to the target point cloud
+    translate the target point cloud so that it's on the other side of the object from the robot
 
-def generate_mpc_data():
-    """load """
+    Args:
+        data_file: str - path to data file
+        device: torch.device - device to load tensors to
+        
+    Returns:
+        tuple: (first_states, robot_mask, target) where
+            first_states: [n_particles, 3] - first frame particle positions
+            robot_mask: [n_particles] - boolean tensor for robot particles
+            target: [n_downsampled, 3] - target point cloud
+    """
+    # Determine the number of episodes available
+    with h5py.File(data_file, 'r') as f:
+        episode_keys = [k for k in f.keys() if k.startswith('episode_')]
+        n_episodes = len(episode_keys)
+    
+    if n_episodes == 0:
+        raise ValueError(f"No episodes found in {data_file}")
+    
+    # Select a random episode
+    random_episode_idx = random.randint(0, n_episodes - 1)
+    
+    # Load the episode data using load_mpc_data
+    first_states, robot_mask, topological_edges = load_mpc_data(random_episode_idx, data_file, device)
+    
+    # Separate object and robot particles
+    object_particles = first_states[~robot_mask]  # [n_object, 3]
+    robot_particles = first_states[robot_mask]    # [n_robot, 3]
+    
+    # Downsample the object point cloud using fps_rad_tensor
+    # Use a reasonable radius for downsampling (0.03 is used in other parts of the codebase)
+    downsampled_indices = fps_rad_tensor(object_particles, radius=0.03)
+    target = object_particles[downsampled_indices]  # [n_downsampled, 3]
+    
+    # Apply random rotation to the target point cloud
+    # Generate random rotation angle around z-axis (similar to dataset augmentation)
+    angle = random.random() * 2 * math.pi
+    cos_angle = math.cos(angle)
+    sin_angle = math.sin(angle)
+    
+    # Create 3D rotation matrix for rotation around z-axis
+    rotation_matrix = torch.tensor([
+        [cos_angle, -sin_angle, 0],
+        [sin_angle,  cos_angle, 0],
+        [0,          0,         1]
+    ], dtype=torch.float32, device=device)
+    
+    # Apply rotation: [n_downsampled, 3] @ [3, 3] -> [n_downsampled, 3]
+    target = torch.matmul(target, rotation_matrix.T)
+    
+    # Position target on the opposite side of the object from the robot
+    # Calculate centroids
+    object_centroid = object_particles.mean(dim=0)  # [3]
+    robot_centroid = robot_particles.mean(dim=0)    # [3]
+    
+    # Calculate vector from object centroid to robot centroid
+    object_to_robot_vector = robot_centroid - object_centroid  # [3]
+    
+    # Calculate target centroid
+    target_centroid = target.mean(dim=0)  # [3]
+    
+    # Position target on the opposite side by placing it at:
+    # object_centroid - object_to_robot_vector (opposite direction from robot)
+    # Add some additional distance to ensure separation
+    separation_factor = 1.5  # Increase distance for better separation
+    desired_target_centroid = object_centroid - object_to_robot_vector * separation_factor
+    
+    # Translate target to desired position
+    translation = desired_target_centroid - target_centroid
+    # Add noise
+    translation = translation + torch.randn_like(translation)
+    target = target + translation
+    
+    return first_states, robot_mask, target
+
 
 def setup_task_directory(dir_name, mpc_config_path, device, model_type):
     """
@@ -111,7 +193,7 @@ def setup_task_directory(dir_name, mpc_config_path, device, model_type):
     else:
         print(f"Creating new target for: {dir_name}")
         # target_pcd = create_default_target(np.array([-0.1, 0.0, 0.0]))
-        target_pcd = np.load("targets/0.npz")['points']
+        target_pcd = np.load("targets/2.npz")['points']
         np.savez(target_path, target=target_pcd)
         target_pcd = torch.tensor(target_pcd, dtype=torch.float32, device=device)
         print(f"Target saved to: {target_path}")

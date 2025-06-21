@@ -1,6 +1,7 @@
 import torch
 from .utils import fps_rad_tensor, construct_edges_from_tensor
 from .control import GNNPlannerWrapper, PhysTwinInGNN
+from scripts.reward import RewardFn
 from scripts.planner import Planner
 import h5py
 import os
@@ -90,7 +91,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
     Uses variance across ensemble predictions as the exploration signal.
     """
     
-    def __init__(self, model_path, train_config_path, mpc_config_path, phystwin_states, phystwin_robot_mask, case_name):
+    def __init__(self, model_path, train_config_path, mpc_config_path, case_name, mode = "curiosity"):
         """
         Initialize the curiosity planner.
         
@@ -104,20 +105,25 @@ class CuriosityPlanner(GNNPlannerWrapper):
         """
         # Initialize GNNPlannerWrapper with case_name
         super().__init__(model_path, train_config_path, mpc_config_path, case_name)
-        
-        # Store exploration parameters
-        self.n_ensemble = self.mpc_config['n_ensemble']
+
+        # adding mpc mode because Yixuan made a great point that uncertainty is hard to measure
+        self.mode = mode
         self.padding = self.mpc_config['padding']
+        assert self.mode in ["curiosity", "mpc"], f"Invalid mode: {self.mode}"
+        if self.mode == "curiosity":
+            # Store exploration parameters
+            self.n_ensemble = self.mpc_config['n_ensemble']
+            print(f"Curiosity planner initialized with n_ensemble={self.n_ensemble}")
+
+        self.phystwin = PhysTwinInGNN(case_name, self.downsample_rate, device=self.device)        
         
-        # Store PhysTwin data
+    def load_phystwin_data(self, phystwin_states, phystwin_robot_mask):
         self.phystwin_states = phystwin_states.to(self.device)
         self.phystwin_robot_mask = phystwin_robot_mask.to(self.device)
-        self.phystwin = PhysTwinInGNN(case_name, self.downsample_rate, device=self.device)
         
         # Convert PhysTwin data to GNN format
         self._convert_phystwin_to_gnn()
         
-        print(f"Curiosity planner initialized with n_ensemble={self.n_ensemble}")
         print(f"Converted {len(self.phystwin_states)} PhysTwin particles to {len(self.object_indices) + len(self.robot_indices)} GNN particles")
 
     def _initialize_model(self, model_path):
@@ -167,12 +173,12 @@ class CuriosityPlanner(GNNPlannerWrapper):
         if n_obj_sampled > 0:
             self.topological_edges[:n_obj_sampled, :n_obj_sampled] = object_edges
 
-    def _create_model_rollout_fn(self, robot_mask, **kwargs):
+    def _create_ensemble_model_rollout_fn(self, robot_mask, **kwargs):
         """Create ensemble model rollout function wrapped around base GNNModelRolloutFn."""
         base_rollout_fn = super()._create_model_rollout_fn(robot_mask, **kwargs)
         return EnsembleModelRolloutFn(base_rollout_fn, self.n_ensemble)
 
-    def explore(self, data_file, phystwin_states = None):
+    def explore(self, data_file, phystwin_states = None, target = None):
         """
         Find action sequence with highest prediction uncertainty using curiosity-driven exploration.
         Use PhysTwin to simulate the action sequence and save the results to the data_file.
@@ -188,8 +194,12 @@ class CuriosityPlanner(GNNPlannerWrapper):
             self.phystwin_states = phystwin_states.to(self.device)
         first_states = torch.cat([self.phystwin_states[self.object_indices], self.phystwin_states[self.robot_indices]], dim=0)
 
-        # Get action sequence with highest uncertainty
-        result = self.plan_action(first_states)
+        # Get action sequence with highest uncertainty (curiosity) / highest reward (mpc)
+        if self.mode == "curiosity":
+            result = self.plan_action(first_states)
+        elif self.mode == "mpc":
+            assert target is not None, "Target must be provided for MPC mode"
+            result = self.plan_action(first_states, target)
         act_seq = result['act_seq']
         
         # Append 5 frames with 0 robot movement, so the object comes to rest
@@ -291,7 +301,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
         print(f"  Robot particles: {n_robot_particles}")
 
 
-    def plan_action(self, first_states):
+    def plan_action(self, first_states, target = None):
         """
         Override plan_action to use variance-based reward function instead of target-based reward.
                     
@@ -301,14 +311,20 @@ class CuriosityPlanner(GNNPlannerWrapper):
         # Prepare initial state for model
         state_cur = self._prepare_initial_state(first_states, self.robot_mask)
         
-        # Set up ensemble model rollout function
-        model_rollout_fn = self._create_model_rollout_fn(self.robot_mask, first_states=first_states, topological_edges=self.topological_edges)
+        # Set up model rollout function
+        if self.mode == "curiosity":
+            model_rollout_fn = self._create_ensemble_model_rollout_fn(self.robot_mask, first_states=first_states, topological_edges=self.topological_edges)
+        elif self.mode == "mpc":
+            model_rollout_fn = self._create_model_rollout_fn(self.robot_mask, first_states=first_states, topological_edges=self.topological_edges)
+        
         initial_action_seq = torch.zeros(self.n_look_ahead, self.action_dim, device=self.device)
         
-        # Use variance-based reward function instead of target-based reward
-        reward_fn = VarianceRewardFn()
+        if self.mode == "curiosity":
+            reward_fn = VarianceRewardFn()
+        elif self.mode == "mpc":
+            reward_fn = RewardFn(self.action_weight, self.fsp_weight, self.robot_mask, target)
         
-        # Set up planner with variance reward
+        # Set up planner
         planner = Planner({
             'action_dim': self.action_dim,
             'model_rollout_fn': model_rollout_fn,
@@ -321,6 +337,7 @@ class CuriosityPlanner(GNNPlannerWrapper):
             'action_upper_lim': self.action_upper_bound,
             'planner_type': self.planner_type,
             'noise_level': self.noise_level,
+            'beta': self.beta,
             'verbose': self.verbose,
             'device': self.device
         })

@@ -30,6 +30,7 @@ PhysTwin/gaussian_splatting/submodules/
 *.mp4
 *.h5
 *.zip
+*.npz
 __pycache__/
 .DS_Store
 *.pth
