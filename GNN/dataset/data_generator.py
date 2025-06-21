@@ -3,10 +3,11 @@ import h5py
 import random
 import torch
 from GNN.curiosity import CuriosityPlanner
+from GNN.control import GNNPlannerWrapper
 from GNN.utils import load_yaml
 from scripts.utils import load_mpc_data
 
-def generate_data(model_path, train_config_path, input_file, output_file):
+def generate_data(model_path, train_config_path, input_file, output_file, mode="curiosity"):
     mpc_config_path = "GNN/config/mpc/curiosity.yaml"
     config = load_yaml(mpc_config_path)
     n_episodes = config['n_episodes']
@@ -26,7 +27,15 @@ def generate_data(model_path, train_config_path, input_file, output_file):
         # Extract phystwin_states and phystwin_robot_mask.
         # Just use the first episode for now, since all episodes start with the same initial states.
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        phystwin_states, phystwin_robot_mask, _ = load_mpc_data(0, input_file, device)        
-        curiosity_planner = CuriosityPlanner(model_path, train_config_path, mpc_config_path, phystwin_states, phystwin_robot_mask, "single_push_rope")
-        for j in range(n_explore_iter):
-            phystwin_states = curiosity_planner.explore(output_file, phystwin_states) # pass final states from previous exploration as initial states for next exploration
+        phystwin_states, phystwin_robot_mask, _ = load_mpc_data(0, input_file, device)    
+
+        if mode == "curiosity":    
+            curiosity_planner = CuriosityPlanner(model_path, train_config_path, mpc_config_path, phystwin_states, phystwin_robot_mask, "single_push_rope")
+            for j in range(n_explore_iter):
+                phystwin_states = curiosity_planner.explore(output_file, phystwin_states) # pass final states from previous exploration as initial states for next exploration
+        elif mode == "mpc":
+            mpc_planner = GNNPlannerWrapper(model_path, train_config_path, mpc_config_path, phystwin_states, phystwin_robot_mask, "single_push_rope")
+            for j in range(n_explore_iter):
+                phystwin_states = mpc_planner.explore(output_file, phystwin_states) # pass final states from previous exploration as initial states for next exploration
+        else:
+            raise ValueError(f"Invalid mode: {mode}")

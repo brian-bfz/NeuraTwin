@@ -388,7 +388,7 @@ if __name__ == "__main__":
         print("="*60)
     
         # Plan action sequence for the specified episode
-        planning_result = planner_wrapper.plan_action(args.episode, target_pcd, save_dir, first_states, robot_mask, topological_edges)
+        planning_result = planner_wrapper.plan_action(target_pcd, first_states, robot_mask, topological_edges, args.episode, save_dir)
         optimal_actions = planning_result['act_seq']
         print(f"Planned action sequence shape: {optimal_actions.shape}")
         print("Planning demonstration complete!")

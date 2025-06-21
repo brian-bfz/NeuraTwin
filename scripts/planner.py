@@ -59,13 +59,16 @@ class PlannerWrapper(ABC):
         """Create model rollout function specific to the implementation."""
         pass
     
-    def plan_action(self, episode_idx, target_pcd, save_dir, first_states, robot_mask, topological_edges=None):
+    def plan_action(self, target_pcd, first_states, robot_mask, topological_edges=None, episode_idx=None, save_dir=None):
         """
         Plan action sequence to go from the initial state to the goal state.
         
         Args:
-            episode_idx: int - episode containing the initial state
             target_pcd: torch.Tensor - target point cloud for reward function
+            first_states: torch.Tensor - initial states
+            robot_mask: torch.Tensor - robot mask
+            topological_edges: torch.Tensor - topological edges (GNN only)
+            episode_idx: int - episode containing the initial state (optional)
             save_dir: str - directory to save results (optional)
             
         Returns:

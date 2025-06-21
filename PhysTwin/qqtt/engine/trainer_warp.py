@@ -47,7 +47,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 from GNN.model.rollout import Rollout
-from GNN.utils import visualize_edges, fps_rad_tensor, construct_edges_from_tensor, construct_edges_with_attrs
+from GNN.utils import visualize_edges, fps_rad_tensor, construct_edges_from_tensor
 from ...robot import RobotController
 import h5py
 
@@ -1385,7 +1385,7 @@ class InvPhyTrainerWarp:
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
-        initial_translation, target_changes, initial_finger, finger_changes = self.lift_rope()
+        initial_translation, target_changes, initial_finger, finger_changes = self.lift_air()
 
         # Update robot position using the new controller system
         self.robot_controller.quick_robot_movement(
@@ -1641,6 +1641,7 @@ class InvPhyTrainerWarp:
         print("UI Controls:")
         print("- Set 1: WASD (XY movement), QE (Z movement)")
         print("- Set 2: IJKL (XY movement), UO (Z movement)")
+        print("- 6: Save current object point cloud as target")
         self.inv_ctrl = -1.0 if inv_ctrl else 1.0
         self.key_mappings = {
             # Set 1 controls
@@ -1665,6 +1666,8 @@ class InvPhyTrainerWarp:
             "x": [0, 0, -2.0 / 180 * np.pi],
             "c": [2.0 / 180 * np.pi, 0, 0],
             "v": [-2.0 / 180 * np.pi, 0, 0],
+            # Save target snapshot
+            # "6": "save_target_snapshot",
         }
         self.pressed_keys = set()
         self.w2c = w2c
@@ -1674,6 +1677,9 @@ class InvPhyTrainerWarp:
         listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
         listener.start()
         self.target_change = np.zeros((n_ctrl_parts, 3))
+        
+        # Initialize snapshot cooldown counter
+        self.snapshot_cooldown = 0
 
         ############## Temporary timer ##############
         import time
@@ -2074,6 +2080,17 @@ class InvPhyTrainerWarp:
             target_change = self.get_target_change()
             finger_change = self.get_finger_change()
             rot_change = self.get_rot_change()
+
+            # Handle "6" key press for saving target snapshot with cooldown
+            if "6" in self.pressed_keys:
+                self.pressed_keys.remove("6")  # Remove to prevent multiple saves
+                if self.snapshot_cooldown <= 0:
+                    self.save_snapshot_as_target(x)  # x is already object data
+                    self.snapshot_cooldown = 10  # Set 10-frame cooldown
+            
+            # Decrement cooldown counter
+            if self.snapshot_cooldown > 0:
+                self.snapshot_cooldown -= 1
 
             # Update robot movement using the controller
             movement_result = self.robot_controller.fine_robot_movement(
@@ -2857,6 +2874,32 @@ class InvPhyTrainerWarp:
                 mesh.vertices = o3d.utility.Vector3dVector(self.dynamic_points[start_idx:end_idx].cpu().numpy())
                 start_idx = end_idx
             assert end_idx == self.dynamic_points.shape[0], "Dynamic points shape mismatch"
+
+    def save_snapshot_as_target(self, point_cloud):
+        """
+        Save a point cloud as a target after downsampling with fps_rad_tensor.
+        
+        Args:
+            point_cloud: torch.Tensor of shape (N, 3) - the input point cloud
+        """
+        # Downsample using fps_rad_tensor with radius 0.05 (more efficient for tensors)
+        sampled_indices = fps_rad_tensor(point_cloud, radius=0.03)
+        downsampled_pcd = point_cloud[sampled_indices].cpu().numpy()
+        
+        # Find the lowest unused index
+        targets_dir = "targets"
+        os.makedirs(targets_dir, exist_ok=True)
+        
+        index = 0
+        while os.path.exists(os.path.join(targets_dir, f"{index}.npz")):
+            index += 1
+        
+        # Save the downsampled point cloud
+        save_path = os.path.join(targets_dir, f"{index}.npz")
+        np.savez_compressed(save_path, points=downsampled_pcd)
+        
+        logger.info(f"Saved target snapshot with {len(downsampled_pcd)} points to {save_path}")
+        return save_path
 
 
 def get_simple_shadow(

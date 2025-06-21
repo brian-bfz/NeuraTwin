@@ -80,6 +80,8 @@ def load_mpc_data(episode_idx, data_file, device):
 
         return first_states, robot_mask, topological_edges
 
+def generate_mpc_data():
+    """load """
 
 def setup_task_directory(dir_name, mpc_config_path, device, model_type):
     """
@@ -108,7 +110,8 @@ def setup_task_directory(dir_name, mpc_config_path, device, model_type):
         target_pcd = torch.tensor(target_data['target'], dtype=torch.float32, device=device)
     else:
         print(f"Creating new target for: {dir_name}")
-        target_pcd = create_default_target(np.array([-0.1, 0.0, 0.0]))
+        # target_pcd = create_default_target(np.array([-0.1, 0.0, 0.0]))
+        target_pcd = np.load("targets/0.npz")['points']
         np.savez(target_path, target=target_pcd)
         target_pcd = torch.tensor(target_pcd, dtype=torch.float32, device=device)
         print(f"Target saved to: {target_path}")
