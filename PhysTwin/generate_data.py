@@ -85,9 +85,9 @@ def initialize_data_file(data_file_path, rank=None):
     else:
         print(f"Using existing data file: {data_file_path}" + (f" for GPU {rank}" if rank is not None else ""))
 
-def generate_episodes_distributed(rank=None, world_size=None, case_name=None, base_path=None, 
-                                bg_img_path=None, gaussian_path=None, n_ctrl_parts=1, 
-                                episode_list=None, include_gaussian=False, save_dir=None):
+def generate_episodes_distributed(rank, world_size, case_name, base_path, 
+                                bg_img_path, gaussian_path, n_ctrl_parts, 
+                                episode_list, include_gaussian, save_dir, output_file):
     """
     Distributed episode generation function.
     
@@ -130,13 +130,13 @@ def generate_episodes_distributed(rank=None, world_size=None, case_name=None, ba
         print(f"GPU {rank} processing episodes {start_idx}-{end_idx-1}: {local_episode_list}")
         
         # Create separate data file for each GPU
-        data_file_path = str(save_dir / f"lift_data_{rank}.h5")
+        data_file_path = str(save_dir / f"{output_file}_{rank}.h5")
     else:
         local_episode_list = episode_list
         print(f"Single GPU processing all episodes: {local_episode_list}")
         
         # Single GPU uses original filename
-        data_file_path = str(save_dir / "lift_data.h5")
+        data_file_path = str(save_dir / f"{output_file}.h5")
 
     # Initialize data file for this process/GPU
     initialize_data_file(data_file_path, rank)
@@ -204,6 +204,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", nargs='+', type=str, required=True,
                        help="Episodes to generate. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--include_gaussian", action="store_true")
+    parser.add_argument("--output_file", type=str, default="lift_data", help="Name of the output H5 file. No extension.")
     args = parser.parse_args()
 
     episode_list = parse_episodes(args.episodes)
@@ -220,7 +221,7 @@ if __name__ == "__main__":
     if world_size > 1:
         print(f"Using {world_size} GPUs for distributed episode generation")
         print(f"Total episodes to generate: {len(episode_list)}")
-        print(f"Each GPU will write to separate data files: lift_data_0.h5, lift_data_1.h5, etc.")
+        print(f"Each GPU will write to separate data files: {args.output_file}_0.h5, {args.output_file}_1.h5, etc.")
         
         # Use multiprocessing to spawn processes for each GPU
         mp.spawn(
@@ -235,7 +236,8 @@ if __name__ == "__main__":
                 args.n_ctrl_parts,
                 episode_list,
                 args.include_gaussian,
-                save_dir
+                save_dir,
+                args.output_file
             )
         )
     else:
@@ -250,7 +252,8 @@ if __name__ == "__main__":
             n_ctrl_parts=args.n_ctrl_parts,
             episode_list=episode_list,
             include_gaussian=args.include_gaussian,
-            save_dir=save_dir
+            save_dir=save_dir,
+            output_file=args.output_file
         )
 
     print("All episode generation completed!")
@@ -259,11 +262,11 @@ if __name__ == "__main__":
     if world_size > 1:
         print("\nGenerated data files:")
         for rank in range(world_size):
-            data_file = save_dir / f"lift_data_{rank}.h5"
+            data_file = save_dir / f"{args.output_file}_{rank}.h5"
             if data_file.exists():
                 print(f"  GPU {rank}: {data_file}")
     else:
-        data_file = save_dir / "lift_data.h5"
+        data_file = save_dir / f"{args.output_file}.h5"
         if data_file.exists():
             print(f"\nGenerated data file: {data_file}")
 

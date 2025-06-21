@@ -1093,7 +1093,7 @@ class InvPhyTrainerWarp:
                 - current_pose: numpy array [4,4] for robot transformation matrix
                 - target_changes: numpy array for target movement
         """
-        offset_dist = 0.05
+        offset_dist = 0.08
         keep_off = 0.03
         n_frames = 61
         min_speed = 0.004
@@ -1127,10 +1127,10 @@ class InvPhyTrainerWarp:
         
         # Calculate the initial translation to send the robot center to the selected point
         current_robot_center = self.robot_controller.get_current_center()
-        initial_translation = selected_point - current_robot_center
+        initial_translation = start_position - current_robot_center
 
-        # 5. Select a new random direction (25% chance)
-        if torch.rand(1).item() < 0.25:
+        # 5. Select a new random direction (30% chance)
+        if torch.rand(1).item() < 0.3:
             rd = random_direction(self.init_vertices.device)
         else:
             rd = -rd
@@ -1184,13 +1184,13 @@ class InvPhyTrainerWarp:
         # Generate random movement sequence
         target_changes = torch.zeros((n_frames, self.n_ctrl_parts, 3), dtype=torch.float32, device=self.robot_controller.device)
         
-        # Wait 4-10 frames at start to let fingers close
-        wait_frames = torch.randint(4, 10, (1,)).item()
+        # Wait 9-11 frames at start to let fingers close
+        wait_frames = torch.randint(9, 12, (1,)).item()
         
         # 10% chance to miss by moving up too early
         miss = torch.rand(1).item() < 0.1
         if miss:
-            wait_frames = torch.randint(0, 4, (1,)).item()
+            wait_frames = torch.randint(0, 2, (1,)).item()
             
         # After waiting, alternate between up movements and pauses
         current_frame = wait_frames
@@ -1201,14 +1201,15 @@ class InvPhyTrainerWarp:
             move_duration = torch.randint(5, 16, (1,)).item()
             move_duration = min(move_duration, n_frames - current_frame)
             
-            if total_displacement > 0.08 * move_duration: 
-                move_down = torch.rand(1).item() < 0.5
-                if move_down:
-                    speed = torch.rand(1).item() * (min_speed) - 2 * min_speed
-                else:
-                    speed = torch.rand(1).item() * (min_speed) + min_speed
-            else: # can't move below the table
-                speed = torch.rand(1).item() * (min_speed) + min_speed
+            # if total_displacement > 0.08 * move_duration: 
+            #     move_down = torch.rand(1).item() < 0.5
+            #     if move_down:
+            #         speed = torch.rand(1).item() * (min_speed) - 2 * min_speed
+            #     else:
+            #         speed = torch.rand(1).item() * (min_speed) + min_speed
+            # else: # can't move below the table
+            #     speed = torch.rand(1).item() * (min_speed) + min_speed
+            speed = 0.008
             
             # Apply movement to first control part (index 0)
             target_changes[current_frame:current_frame + move_duration, 0, 2] = -speed
@@ -1234,8 +1235,8 @@ class InvPhyTrainerWarp:
         """
         n_frames = 61
         min_speed = 0.004
-        offset_dist = 0.05  # 5cm offset
-        keep_off = 0.03    # Minimum 3cm from any rope point
+        offset_dist = 0.1  # 10cm offset
+        keep_off = 0.07    # Center must be at least 7cm from any rope point
 
         # Find valid starting position away from rope
         max_attempts = 100
@@ -1272,7 +1273,7 @@ class InvPhyTrainerWarp:
         target_changes = torch.zeros((n_frames, self.n_ctrl_parts, 3), dtype=torch.float32, device=self.robot_controller.device)
         
         # Short wait at start
-        wait_frames = torch.randint(2, 6, (1,)).item()
+        wait_frames = torch.randint(0, 5, (1,)).item()
         
         # Execute lifting motion
         current_frame = wait_frames
