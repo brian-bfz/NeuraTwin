@@ -1,6 +1,5 @@
 import h5py
 from ..utils import fps_rad, load_yaml, construct_edges_from_numpy
-import numpy as np
 import argparse
 import os
 from ..paths import CONFIG_TRAIN_GNN_DYN

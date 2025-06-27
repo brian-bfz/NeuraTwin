@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/lift_sampled_12_edges.h5"
+  file: "PhysTwin/generated_data/push_sampled_12_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -7,7 +7,7 @@ dataset:
   # - 'rand_spread': random spreaded object pile
   # - 'rand_sparse_spread': random sparse spreaded object pile
   global_scale: 24
-  n_episode: 3000
+  n_episode: 6000
   n_timestep: 60
   obj: "carrots"
   particle_r: 0.125
@@ -37,7 +37,7 @@ train:
   n_history: 4
   n_rollout: 4
   rollout_decay: 1.0
-  dropout_rate: 0.2
+  dropout_rate: 0.0
   lr_scheduler:
     type: "ReduceLROnPlateau"
     enabled: true

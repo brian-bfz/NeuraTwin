@@ -18,6 +18,7 @@ class RelationEncoder(nn.Module):
             input_size: int - dimension of input relation features
             hidden_size: int - dimension of hidden layers
             output_size: int - dimension of output relation embeddings
+            dropout_rate: float - percentage of dense layer neurons to drop
         """
         super(RelationEncoder, self).__init__()
 
