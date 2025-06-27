@@ -225,7 +225,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", nargs='+', type=str, required=True,
                        help="Episodes to generate. Format: space-separated list (0 1 2 3 4) or range (0-4)")
     parser.add_argument("--include_gaussian", action="store_true")
-    parser.add_argument("--output_file", type=str, default="lift_data", help="Name of the output H5 file. No extension.")
+    parser.add_argument("--output_file", type=str, required=True, help="Name of the output H5 file. No extension.")
     parser.add_argument("--video", action="store_true", help="Generate videos after each episode (single GPU mode only)")
     args = parser.parse_args()
 

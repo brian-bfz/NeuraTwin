@@ -1201,15 +1201,14 @@ class InvPhyTrainerWarp:
             move_duration = torch.randint(5, 16, (1,)).item()
             move_duration = min(move_duration, n_frames - current_frame)
             
-            # if total_displacement > 0.08 * move_duration: 
-            #     move_down = torch.rand(1).item() < 0.5
-            #     if move_down:
-            #         speed = torch.rand(1).item() * (min_speed) - 2 * min_speed
-            #     else:
-            #         speed = torch.rand(1).item() * (min_speed) + min_speed
-            # else: # can't move below the table
-            #     speed = torch.rand(1).item() * (min_speed) + min_speed
-            speed = 0.008
+            if total_displacement > 0.08 * move_duration: 
+                move_down = torch.rand(1).item() < 0.5
+                if move_down:
+                    speed = torch.rand(1).item() * (min_speed) - 2 * min_speed
+                else:
+                    speed = torch.rand(1).item() * (min_speed) + min_speed
+            else: # can't move below the table
+                speed = torch.rand(1).item() * (min_speed) + min_speed
             
             # Apply movement to first control part (index 0)
             target_changes[current_frame:current_frame + move_duration, 0, 2] = -speed

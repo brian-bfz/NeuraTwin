@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/push_sampled_12_edges.h5"
+  file: "PhysTwin/generated_data/lift_sampled_12_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -25,7 +25,7 @@ dataset:
 
 train:
   random_seed: 42
-  n_epoch: 300
+  n_epoch: 100
   lr: 0.001
   adam_beta1: 0.9
   batch_size: 128
