@@ -99,32 +99,25 @@ class InferenceEngine:
         
         return torch.stack(predicted_states_list, dim=1)
 
-    def calculate_batch_prediction_error(self, predicted_states, actual_states, attrs):
+    def calculate_prediction_error(self, predicted_states, actual_states):
         """
-        Calculate MSE errors between predicted and ground truth trajectories for a batch.
+        Calculate MSE errors between predicted and ground truth trajectories.
         
         Args:
-            predicted_states: [B, T, P, 3] - predicted trajectories
-            actual_states: [B, T, P, 3] - ground truth trajectories
-            attrs: [B, T, P] - particle attributes
+            predicted_states: [timesteps, particles, 3] - predicted trajectory
+            actual_states: [timesteps, particles, 3] - ground truth trajectory
             
         Returns:
-            errors: list[float] - MSE error for each timestep, averaged over the batch
+            errors: list[float] - MSE error for each timestep
         """
-        object_mask = (attrs == 0).unsqueeze(-1)  # [B, T, P, 1]
+        errors = []
+        n_timesteps = min(len(predicted_states), len(actual_states))
         
-        squared_error = (predicted_states - actual_states)**2
-        masked_squared_error = squared_error * object_mask
-        
-        sum_sq_err_per_ts_sample = torch.sum(masked_squared_error, dim=(2, 3))
-        
-        elements_per_ts_sample = object_mask.sum(dim=(2, 3))
-        
-        mse_per_ts_sample = sum_sq_err_per_ts_sample / (elements_per_ts_sample + 1e-9)
-        
-        avg_mse_per_ts = torch.mean(mse_per_ts_sample, dim=0)
-        
-        return avg_mse_per_ts.cpu().numpy().tolist()
+        for t in range(n_timesteps):
+            error = torch.nn.functional.mse_loss(predicted_states[t], actual_states[t]).item()
+            errors.append(error)
+            
+        return errors
 
 
 def main():
@@ -186,17 +179,17 @@ def main():
         with torch.no_grad():
             predicted_states = inference_engine.predict_batch_rollout(states, states_delta, attrs, particle_nums, topological_edges, first_states)
             
-            errors = inference_engine.calculate_batch_prediction_error(predicted_states, states, attrs)
-            all_errors.extend(errors)
-            
-            if args.video:
-                batch_size = states.shape[0]
-                for i in range(batch_size):
+            batch_size = states.shape[0]
+            for i in range(batch_size):
+                p_num = particle_nums[i].item()
+                errors = inference_engine.calculate_prediction_error(predicted_states[i][:, :p_num, :], states[i][:, :p_num, :])
+                all_errors.extend(errors)
+                if args.video:
+
                     global_idx = batch_idx * args.batch_size + i
                     if global_idx >= len(test_episodes): continue
                     
                     episode_num = test_episodes[global_idx]
-                    p_num = particle_nums[i].item()
 
                     ep_predicted = predicted_states[i, :, :p_num, :].cpu()
                     ep_actual = states[i, :, :p_num, :].cpu()
@@ -211,7 +204,7 @@ def main():
                     visualizer.visualize_object_motion(
                         ep_predicted, tool_mask, actual_objects, video_path, ep_topo_edges
                     )
-                
+    
     if all_errors:
         print(f"\n{'='*60}")
         print("OVERALL RESULTS")
@@ -221,6 +214,7 @@ def main():
         print(f"Total timesteps: {len(all_errors)}")
         print(f"Average MSE: {np.mean(all_errors):.6f}")
         print(f"RMSE: {rmse:.6f}")
+        print(f"Std Dev: {np.std(all_errors):.6f}")
         
         if rmse < 0.003: print("🎉 Excellent prediction accuracy!")
         elif rmse < 0.01: print("✅ Good prediction accuracy!")

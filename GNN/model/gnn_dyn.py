@@ -415,4 +415,7 @@ class PropNetDiffDenModel(nn.Module):
         if epoch_timer is not None:
             epoch_timer.end_timer('gnn_forward')
 
+        # Mask out predictions for padded particles
+        s_pred[~mask] = 0.
+
         return s_pred
