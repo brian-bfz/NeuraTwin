@@ -57,9 +57,9 @@ train:
     fps_radius: 0.02
   resume:
     active: false
-    epoch: 8
+    epoch: 5
     iter: 0
-    folder: "lift_no_dropout"
+    folder: "lift_push_1"
   edges:
     topological: 
       enabled: true
