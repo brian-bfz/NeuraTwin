@@ -1198,10 +1198,10 @@ class InvPhyTrainerWarp:
         
         while current_frame < n_frames:
             # Random up movement duration
-            move_duration = torch.randint(5, 16, (1,)).item()
+            move_duration = torch.randint(5, 50, (1,)).item()
             move_duration = min(move_duration, n_frames - current_frame)
-            
-            if total_displacement > 0.08 * move_duration: 
+
+            if total_displacement > 0.008 * move_duration: 
                 move_down = torch.rand(1).item() < 0.5
                 if move_down:
                     speed = torch.rand(1).item() * (min_speed) - 2 * min_speed
@@ -1216,7 +1216,7 @@ class InvPhyTrainerWarp:
             
             current_frame += move_duration
             
-            pause_duration = torch.randint(0, 5, (1,)).item()
+            pause_duration = torch.randint(0, 10, (1,)).item()
             current_frame += pause_duration
 
         return initial_translation, target_changes, initial_finger, finger_changes
@@ -1384,7 +1384,7 @@ class InvPhyTrainerWarp:
     ):
         # Initialize control parts
         self.n_ctrl_parts = n_ctrl_parts
-        initial_translation, target_changes, initial_finger, finger_changes = self.push_once()
+        initial_translation, target_changes, initial_finger, finger_changes = self.lift_rope()
 
         # Update robot position using the new controller system
         self.robot_controller.quick_robot_movement(

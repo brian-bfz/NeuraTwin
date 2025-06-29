@@ -28,11 +28,11 @@ class RelationEncoder(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
             nn.Dropout(dropout_rate),
+            nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
             nn.Dropout(dropout_rate),
+            nn.ReLU(),
             nn.Linear(hidden_size, output_size),
             nn.ReLU()
         )
@@ -70,8 +70,8 @@ class ParticleEncoder(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
             nn.Dropout(dropout_rate),
+            nn.ReLU(),
             nn.Linear(hidden_size, output_size),
             nn.ReLU()
         )
@@ -161,7 +161,7 @@ class ParticlePredictor(nn.Module):
         """
         B, N, D = x.size()
         x = x.view(B * N, D)
-        x = self.linear_1(self.dropout(self.relu(self.linear_0(x))))
+        x = self.linear_1(self.relu(self.dropout(self.linear_0(x))))
         return x.view(B, N, self.output_size)
 
 

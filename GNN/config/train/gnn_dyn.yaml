@@ -1,5 +1,5 @@
 dataset:
-  file: "PhysTwin/generated_data/push_sampled_12_edges.h5"
+  file: "PhysTwin/generated_data/lift_push_sampled_12_edges.h5"
   init_pos: 'spread'
   # initialization options:
   # - 'spread': deterministic spreaded object pile
@@ -17,7 +17,7 @@ dataset:
   cont_motion: False
   robot_type: 'franka' # kinova; franka
   randomness: 
-    use: False
+    use: True
     state_noise:
       train: 0.002
       valid: 0.0
@@ -25,10 +25,10 @@ dataset:
 
 train:
   random_seed: 42
-  n_epoch: 100
+  n_epoch: 150
   lr: 0.001
   adam_beta1: 0.9
-  batch_size: 128
+  batch_size: 512
   nf_hidden: 80
   num_workers: 10
   train_valid_ratio: 0.9
@@ -57,9 +57,9 @@ train:
     fps_radius: 0.02
   resume:
     active: false
-    epoch: 59
+    epoch: 8
     iter: 0
-    folder: "dropout_0.2"
+    folder: "lift_no_dropout"
   edges:
     topological: 
       enabled: true
