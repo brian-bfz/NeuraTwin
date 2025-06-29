@@ -312,6 +312,7 @@ def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
                     states_delta = states_delta.cuda()
                     topological_edges = topological_edges.cuda()
                     first_states = first_states.cuda()
+                    particle_nums = particle_nums.to(states.device)
 
                 # End data loading timing
                 if epoch_timer and phase == 'train':
@@ -358,12 +359,28 @@ def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
                         if epoch_timer and phase == 'train':
                             epoch_timer.end_timer('rollout')
 
-                        # Calculate loss only for valid particles
-                        for j in range(B):
-                            loss += F.mse_loss(
-                                s_pred[j, :particle_nums[j]], 
-                                s_nxt[j, :particle_nums[j]]
-                            )
+                        # Vectorized loss calculation for efficiency.
+                        # The original code computes the mean loss per sample and sums them up.
+                        # This implementation replicates that logic without a loop.
+                        
+                        # Create a mask to select only the valid particles for each sample.
+                        max_particles = s_pred.shape[1]
+                        arange = torch.arange(max_particles, device=s_pred.device)
+                        # Unsqueeze to enable broadcasting over feature dimension.
+                        mask = (arange[None, :] < particle_nums[:, None]).unsqueeze(-1)
+
+                        # Compute MSE loss without reduction to get per-element squared errors.
+                        loss_matrix = F.mse_loss(s_pred, s_nxt, reduction='none')
+                        
+                        # Apply mask and sum the squared errors for each sample.
+                        sum_sq_err_per_sample = torch.sum(loss_matrix * mask, dim=(1, 2))
+                        
+                        # Normalize by the number of valid elements to get the mean for each sample.
+                        elements_per_sample = particle_nums * s_pred.shape[2]
+                        mse_per_sample = sum_sq_err_per_sample / (elements_per_sample + 1e-9)
+                        
+                        # Accumulate the sum of per-sample MSEs, matching the original loop's behavior.
+                        loss += torch.sum(mse_per_sample)
 
                     # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)

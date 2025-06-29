@@ -56,8 +56,8 @@ train:
     nf_effect: 80
     fps_radius: 0.02
   resume:
-    active: false
-    epoch: 5
+    active: true
+    epoch: 123
     iter: 0
     folder: "lift_push_1"
   edges:

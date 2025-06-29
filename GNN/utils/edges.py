@@ -145,7 +145,7 @@ def construct_collision_edges(states, adj_thresh, mask, tool_mask, topk, connect
     adj_matrix[topological_mask] = 0
 
     # Convert adjacency matrix to sparse edge representation
-    n_rels = adj_matrix.sum(dim=(1,2))  # [B] - Number of edges per batch
+    n_rels = adj_matrix.sum(dim=(1,2)).long()  # [B] - Number of edges per batch
     n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
     rels = adj_matrix.nonzero()  # [E_c, 3] - each row is [batch_idx, receiver_idx, sender_idx]
 
@@ -182,7 +182,7 @@ def construct_topological_edges(adj_matrix, first_states):
     B, N, _ = first_states.shape
     
     # Convert adjacency matrix to sparse edge representation
-    n_rels = adj_matrix.sum(dim=(1,2))  # [B] - Number of edges per batch
+    n_rels = adj_matrix.sum(dim=(1,2)).long()  # [B] - Number of edges per batch
     n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
     rels = adj_matrix.nonzero()  # [E_c, 3] - each row is [batch_idx, receiver_idx, sender_idx]
 
