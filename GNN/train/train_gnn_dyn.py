@@ -17,7 +17,7 @@ from ..dataset.dataset_gnn_dyn import ParticleDataset
 from ..model.gnn_dyn import PropNetDiffDenModel
 from ..model.rollout import Rollout
 from ..utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms, ddp_setup
-from ..utils.training import collate_fn, compute_per_sample_mse_sum
+from ..utils.training import collate_fn, compute_mse_sum
 from ..paths import *
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -315,7 +315,7 @@ def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
                         if epoch_timer and phase == 'train':
                             epoch_timer.end_timer('rollout')
 
-                        loss += compute_per_sample_mse_sum(s_pred, s_nxt, particle_nums)
+                        loss += compute_mse_sum(s_pred, s_nxt, particle_nums)
 
                     # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)

@@ -181,8 +181,8 @@ class ParticleDataset(Dataset):
             # Create full topological edges matrix for all particles
             topological_edges[:n_object, :n_object] = object_edges
 
-        print(f"Episode {episode_idx}: {len(frame_indices)} timesteps (+ {self.n_his-1} history frames padding), "
-              f"Objects: {n_object} sampled, Robots: {n_robot} sampled")
+        # print(f"Episode {episode_idx}: {len(frame_indices)} timesteps (+ {self.n_his-1} history frames padding), "
+        #       f"Objects: {n_object} sampled, Robots: {n_robot} sampled")
         
         return states.float(), states_delta.float(), attrs.float(), particle_num, topological_edges.float(), first_states.float()
 

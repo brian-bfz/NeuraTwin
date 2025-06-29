@@ -56,10 +56,10 @@ train:
     nf_effect: 80
     fps_radius: 0.02
   resume:
-    active: true
-    epoch: 123
+    active: false
+    epoch: 35
     iter: 0
-    folder: "lift_push_1"
+    folder: "lift_push_2"
   edges:
     topological: 
       enabled: true

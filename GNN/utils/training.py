@@ -42,11 +42,19 @@ def collate_fn(data):
     return states_tensor, states_delta_tensor, attr, particle_num_tensor, topological_edges_tensor, first_states_tensor
 
 
-def compute_per_sample_mse_sum(s_pred, s_nxt, particle_nums):
+def compute_mse_sum(s_pred, s_nxt, particle_nums):
     """
     Computes the sum of mean squared errors for each sample in a batch.
     This function is designed to replicate the behavior of a looped MSE calculation
     in a vectorized and efficient manner.
+
+    Args:
+        s_pred: [B, P, 3] - predicted states
+        s_nxt: [B, P, 3] - actual states
+        particle_nums: [B] - number of particles per sample
+
+    Returns:
+        [B] - sum of mean squared errors for each sample
     """
     # Create a mask to select only the valid particles for each sample.
     max_particles = s_pred.shape[1]
