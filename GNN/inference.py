@@ -1,12 +1,30 @@
 import numpy as np
 import torch
+from torch.utils.data import Dataset, DataLoader
 from .dataset.dataset_gnn_dyn import ParticleDataset
 from .model.gnn_dyn import PropNetDiffDenModel
 from .model.rollout import Rollout
 from .utils import load_yaml, Visualizer
+from .utils.training import collate_fn
 from .paths import *
 import argparse
 from scripts.utils import parse_episodes
+
+
+class InferenceDataset(Dataset):
+    """
+    Dataset wrapper for inference that loads full episodes.
+    """
+    def __init__(self, original_dataset, episode_indices):
+        self.original_dataset = original_dataset
+        self.episode_indices = episode_indices
+
+    def __len__(self):
+        return len(self.episode_indices)
+
+    def __getitem__(self, idx):
+        episode_num = self.episode_indices[idx]
+        return self.original_dataset.load_full_episode(episode_num)
 
 
 class InferenceEngine:
@@ -24,120 +42,92 @@ class InferenceEngine:
             config_path: str - path to training configuration file
             data_file: str - path to HDF5 dataset file
         """
-        # Load configuration and setup device
         self.config = load_yaml(config_path)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Initialize dataset for consistent data loading
         if data_file is None:
             data_file = self.config['dataset']['file']
-        self.dataset = ParticleDataset(data_file, self.config, 'train')  # Use train to access all episodes
+        self.dataset = ParticleDataset(data_file, self.config, 'train')
         
-        # Extract model parameters
         self.n_history = self.config['train']['n_history']
-        self.fps_radius = self.config['train']['particle']['fps_radius']
-        self.adj_thresh = self.config['train']['edges']['collision']['adj_thresh']
-        self.topk = self.config['train']['edges']['collision']['topk']
         
-        # Load trained model
         self.model = PropNetDiffDenModel(self.config, torch.cuda.is_available())
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
 
-        # For visualization
         self.downsample_rate = self.config['dataset']['downsample_rate']
         
         print(f"Loaded model from: {model_path}")
         print(f"Using device: {self.device}")
-        print(f"Dataset initialized with {self.dataset.n_episode} episodes")
-        print(f"History length: {self.n_history}")
 
-    def predict_episode_rollout(self, states, states_delta, attrs, particle_num, topological_edges, first_states):
+    def predict_batch_rollout(self, states, states_delta, attrs, particle_nums, topological_edges, first_states):
         """
-        Predict object motion for entire episode using autoregressive rollout.
+        Predict object motion for a batch of episodes using autoregressive rollout.
         
         Args:
-            states: [timesteps, particles, 3] - full episode states with history padding
-            states_delta: [timesteps-1, particles, 3] - particle displacements
-                For t < n_history-1: consecutive frame differences
-                For t = n_history-1: 0 for objects, actual motion for robots
-            attrs: [timesteps, particles] - particle attributes (0=object, 1=robot)
-            particle_num: int - total number of particles
-            topological_edges: [particles, particles] - adjacency matrix for topological edges
-            first_states: [particles, 3] - first frame states for topological edge computations
+            states: [B, T, P, 3] - batched episode states with history padding
+            states_delta: [B, T-1, P, 3] - batched particle displacements
+            attrs: [B, T, P] - batched particle attributes
+            particle_nums: [B] - particle counts per sample
+            topological_edges: [B, P, P] - batched adjacency matrices
+            first_states: [B, P, 3] - batched first frame states
             
         Returns:
-            predicted_states: [timesteps, particles, 3] - complete predicted trajectory
+            predicted_states: [B, T, P, 3] - complete predicted trajectories for the batch
         """
-        # Rollout to end of episode
-        n_rollout = states.shape[0] - self.n_history
+        n_rollout = states.shape[1] - self.n_history
         
-        print(f"Running rollout prediction:")
-        print(f"  Total timesteps: {states.shape[0]}")
-        print(f"  History length: {self.n_history}")
-        print(f"  Rollout steps: {n_rollout}")
-        print(f"  Particles: {particle_num}")
-        
-        # Initialize rollout with history data (add batch dimension)
         predictor = Rollout(
             self.model, 
             self.config,
-            states[self.n_history - 1].unsqueeze(0),      # [1, particles, 3]
-            states_delta[:self.n_history - 1].unsqueeze(0), # [1, n_history - 1, particles, 3] 
-            attrs[self.n_history - 1].unsqueeze(0),       # [1, particles]
-            torch.tensor([particle_num], device=self.device),  # [1]
-            topological_edges.unsqueeze(0),  # [1, particles, particles]
-            first_states.unsqueeze(0)  # [1, particles, 3]
+            states[:, self.n_history - 1, :, :],
+            states_delta[:, :self.n_history - 1, :, :],
+            attrs[:, self.n_history - 1, :],
+            particle_nums,
+            topological_edges,
+            first_states
         )
         
-        # Initialize prediction storage with history
-        predicted_states = [states[i].clone() for i in range(self.n_history)]
+        predicted_states_list = [states[:, i, :, :].clone() for i in range(self.n_history)]
         
-        # Run autoregressive rollout
         for i in range(n_rollout):
             step_idx = i + self.n_history
-            
-            # Get next frame data and add batch dimension
-            next_delta = states_delta[step_idx - 1].unsqueeze(0)     # [1, particles, 3]
-            
-            # Predict next state and remove batch dimension
-            predicted_state = predictor.forward(next_delta)[0]  # [particles, 3]
-            predicted_states.append(predicted_state)
+            next_delta = states_delta[:, step_idx - 1, :, :]
+            predicted_state = predictor.forward(next_delta)
+            predicted_states_list.append(predicted_state)
         
-        # Stack predictions and return [timesteps, particles, 3]
-        return torch.stack(predicted_states)
+        return torch.stack(predicted_states_list, dim=1)
 
-    def calculate_prediction_error(self, predicted_states, actual_states):
+    def calculate_batch_prediction_error(self, predicted_states, actual_states, attrs):
         """
-        Calculate MSE errors between predicted and ground truth trajectories.
+        Calculate MSE errors between predicted and ground truth trajectories for a batch.
         
         Args:
-            predicted_states: [timesteps, particles, 3] - predicted trajectory
-            actual_states: [timesteps, particles, 3] - ground truth trajectory
+            predicted_states: [B, T, P, 3] - predicted trajectories
+            actual_states: [B, T, P, 3] - ground truth trajectories
+            attrs: [B, T, P] - particle attributes
             
         Returns:
-            errors: list[float] - MSE error for each timestep
+            errors: list[float] - MSE error for each timestep, averaged over the batch
         """
-        errors = []
-        n_timesteps = min(len(predicted_states), len(actual_states))
+        object_mask = (attrs == 0).unsqueeze(-1)  # [B, T, P, 1]
         
-        for t in range(n_timesteps):
-            error = torch.nn.functional.mse_loss(predicted_states[t], actual_states[t]).item()
-            errors.append(error)
-            
-        return errors
+        squared_error = (predicted_states - actual_states)**2
+        masked_squared_error = squared_error * object_mask
+        
+        sum_sq_err_per_ts_sample = torch.sum(masked_squared_error, dim=(2, 3))
+        
+        elements_per_ts_sample = object_mask.sum(dim=(2, 3))
+        
+        mse_per_ts_sample = sum_sq_err_per_ts_sample / (elements_per_ts_sample + 1e-9)
+        
+        avg_mse_per_ts = torch.mean(mse_per_ts_sample, dim=0)
+        
+        return avg_mse_per_ts.cpu().numpy().tolist()
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
 
 def main():
-    """
-    Main function to test object motion prediction on specified episodes.
-    Loads trained model, runs rollout predictions, and optionally generates visualizations.
-    """
-    # Parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True,
                        help="Model name (e.g., 2025-05-31-21-01-09-427982 or custom_model_name)")
@@ -148,36 +138,32 @@ def main():
     parser.add_argument("--video", action='store_true',
                        help="Generate visualization videos (optional)")
     parser.add_argument("--config_path", type=str, default=None)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--num_workers", type=int, default=4)
     args = parser.parse_args()
     
-    # Parse episode specification
     try:
         test_episodes = parse_episodes(args.episodes)
     except ValueError as e:
         print(f"Error parsing episodes: {e}")
-        print("Examples:")
-        print("  Space-separated: --episodes 0 1 2 3 4")
-        print("  Range format: --episodes 0-4")
         return
     
-    # Setup file paths
     model_paths = get_model_paths(args.model)
     model_path = str(model_paths['net_best'])
-    if args.config_path is None:
-        config_path = str(model_paths['config'])
-    else:
-        config_path = args.config_path
-        
-    data_file = args.data_file 
-    camera_calib_path = args.camera_calib_path
+    config_path = str(model_paths['config']) if args.config_path is None else args.config_path
     
-    # Initialize inference engine
-    inference_engine = InferenceEngine(model_path, config_path, data_file)
+    inference_engine = InferenceEngine(model_path, config_path, args.data_file)
     
-    # Initialize visualizer if video generation is requested
-    visualizer = None
-    if args.video:
-        visualizer = Visualizer(camera_calib_path, inference_engine.downsample_rate)
+    inference_dataset = InferenceDataset(inference_engine.dataset, test_episodes)
+    dataloader = DataLoader(
+        inference_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=collate_fn
+    )
+    
+    visualizer = Visualizer(args.camera_calib_path, inference_engine.downsample_rate) if args.video else None
     
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")
@@ -187,76 +173,62 @@ def main():
     
     all_errors = []
     
-    # Test each episode
-    for episode_num in test_episodes:
-        print(f"\n{'='*40}")
-        print(f"TESTING EPISODE {episode_num}")
-        print(f"{'='*40}")
+    for batch_idx, data in enumerate(dataloader):
+        states, states_delta, attrs, particle_nums, topological_edges, first_states = data
         
-        with torch.no_grad():
-            # Load episode data
-            states, states_delta, attrs, particle_num, topological_edges, first_states = inference_engine.dataset.load_full_episode(episode_num)
-            states = states.to(inference_engine.device)
-            states_delta = states_delta.to(inference_engine.device)
-            attrs = attrs.to(inference_engine.device)
-            topological_edges = topological_edges.to(inference_engine.device)
-            first_states = first_states.to(inference_engine.device)
+        states = states.to(inference_engine.device)
+        states_delta = states_delta.to(inference_engine.device)
+        attrs = attrs.to(inference_engine.device)
+        particle_nums = particle_nums.to(inference_engine.device)
+        topological_edges = topological_edges.to(inference_engine.device)
+        first_states = first_states.to(inference_engine.device)
 
-            # Determine particle counts from attributes (0=object, 1=robot)
-            n_obj = (attrs[0] == 0).sum().item()
-            n_robot = (attrs[0] == 1).sum().item()
+        with torch.no_grad():
+            predicted_states = inference_engine.predict_batch_rollout(states, states_delta, attrs, particle_nums, topological_edges, first_states)
             
-            print(f"Loaded episode with {n_obj} object particles, {n_robot} robot particles")
-            print(f"Topological edges loaded: {topological_edges.sum():.0f} edges")
-                        
-            # Run autoregressive rollout prediction
-            predicted_states = inference_engine.predict_episode_rollout(states, states_delta, attrs, particle_num, topological_edges, first_states)
-            
-            # Split into object and robot components for evaluation
-            predicted_objects = predicted_states[:, :n_obj, :]
-            actual_objects = states[:, :n_obj, :]
-            
-            # Calculate prediction errors (evaluate object motion only)
-            errors = inference_engine.calculate_prediction_error(predicted_objects, actual_objects)
+            errors = inference_engine.calculate_batch_prediction_error(predicted_states, states, attrs)
             all_errors.extend(errors)
             
-            avg_error = np.mean(errors)
-            print(f"RMSE: {np.sqrt(avg_error):.6f} | Timesteps predicted: {len(errors)}")
-            
-            # Generate video only if --video flag is provided
             if args.video:
-                tool_mask = (attrs[0] > 0.5).bool()  # attrs is 0 for objects, 1 for robots; use first timestep only
-                video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
-                visualizer.visualize_object_motion(
-                    predicted_states, tool_mask, actual_objects, video_path, topological_edges
-                )
+                batch_size = states.shape[0]
+                for i in range(batch_size):
+                    global_idx = batch_idx * args.batch_size + i
+                    if global_idx >= len(test_episodes): continue
+                    
+                    episode_num = test_episodes[global_idx]
+                    p_num = particle_nums[i].item()
+
+                    ep_predicted = predicted_states[i, :, :p_num, :].cpu()
+                    ep_actual = states[i, :, :p_num, :].cpu()
+                    ep_attrs = attrs[i, :, :p_num].cpu()
+                    ep_topo_edges = topological_edges[i, :p_num, :p_num].cpu()
+                    
+                    n_obj = (ep_attrs[0] == 0).sum().item()
+                    actual_objects = ep_actual[:, :n_obj, :]
+                    tool_mask = (ep_attrs[0] > 0.5).bool()
+                    
+                    video_path = str(model_paths['video_dir'] / f"prediction_{episode_num}.mp4")
+                    visualizer.visualize_object_motion(
+                        ep_predicted, tool_mask, actual_objects, video_path, ep_topo_edges
+                    )
                 
-    # Overall results
     if all_errors:
         print(f"\n{'='*60}")
         print("OVERALL RESULTS")
         print(f"{'='*60}")
+        rmse = np.sqrt(np.mean(all_errors))
         print(f"Episodes tested: {len(test_episodes)}")
         print(f"Total timesteps: {len(all_errors)}")
         print(f"Average MSE: {np.mean(all_errors):.6f}")
-        print(f"RMSE: {np.sqrt(np.mean(all_errors)):.6f}")
-        print(f"Std Dev: {np.std(all_errors):.6f}")
+        print(f"RMSE: {rmse:.6f}")
         
-        # Provide performance interpretation
-        rmse = np.sqrt(np.mean(all_errors))
-        if rmse < 0.003:
-            print("🎉 Excellent prediction accuracy!")
-        elif rmse < 0.01:
-            print("✅ Good prediction accuracy!")
-        elif rmse < 0.05:
-            print("⚠️  Moderate prediction accuracy")
-        else:
-            print("❌ Poor prediction accuracy - model needs improvement")
+        if rmse < 0.003: print("🎉 Excellent prediction accuracy!")
+        elif rmse < 0.01: print("✅ Good prediction accuracy!")
+        elif rmse < 0.05: print("⚠️  Moderate prediction accuracy")
+        else: print("❌ Poor prediction accuracy - model needs improvement")
         
         if args.video:
             print(f"\nVideos saved in '{model_paths['video_dir']}' directory")
-        else:
-            print(f"\nTo generate videos, rerun with --video flag")
 
 if __name__ == "__main__":
     main()

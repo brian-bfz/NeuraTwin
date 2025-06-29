@@ -17,6 +17,7 @@ from ..dataset.dataset_gnn_dyn import ParticleDataset
 from ..model.gnn_dyn import PropNetDiffDenModel
 from ..model.rollout import Rollout
 from ..utils import set_seed, count_trainable_parameters, get_lr, AverageMeter, load_yaml, save_yaml, YYYY_MM_DD_hh_mm_ss_ms, ddp_setup
+from ..utils.training import collate_fn, compute_per_sample_mse_sum
 from ..paths import *
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -25,51 +26,6 @@ import torch.multiprocessing as mp
 
 
 # from env.flex_env import FlexEnv
-
-def collate_fn(data):
-    """
-    Custom collation function for batching variable-sized particle data.
-    Pads sequences to maximum particle count in batch and handles temporal structure.
-    
-    Args:
-        data: list of tuples - [(states, states_delta, attrs, particle_num, topological_edges, first_states), ...] where:
-            states: [particle_num, time, 3] - particle positions over time
-            states_delta: [particle_num, time-1, 3] - particle displacements
-            attrs: [particle_num, time] - particle attributes (0=object, 1=robot)
-            particle_num: int - number of particles in this sample
-            topological_edges: [particle_num, particle_num] - adjacency matrix for topological edges
-            first_states: [particle_num, 3] - first frame states for topological edge computations
-            
-    Returns:
-        states_tensor: [batch_size, time, max_particles, 3] - padded position sequences
-        states_delta_tensor: [batch_size, time-1, max_particles, 3] - padded displacement sequences
-        attr: [batch_size, time, max_particles] - padded attribute sequences
-        particle_num_tensor: [batch_size] - particle counts per sample
-        topological_edges_tensor: [batch_size, max_particles, max_particles] - padded topological edges
-        first_states_tensor: [batch_size, max_particles, 3] - padded first frame states
-    """
-    states, states_delta, attrs, particle_num, topological_edges, first_states = zip(*data)
-    max_len = max(particle_num)  # Maximum particles in this batch
-    batch_size = len(data)
-    n_time, _, n_dim = states[0].shape
-    
-    # Initialize padded tensors
-    states_tensor = torch.zeros((batch_size, n_time, max_len, n_dim), dtype=torch.float32)
-    states_delta_tensor = torch.zeros((batch_size, n_time - 1, max_len, n_dim), dtype=torch.float32)
-    attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
-    particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
-    topological_edges_tensor = torch.zeros((batch_size, max_len, max_len), dtype=torch.float32)
-    first_states_tensor = torch.zeros((batch_size, max_len, n_dim), dtype=torch.float32)
-
-    # Fill tensors with actual data (rest remains zero-padded)
-    for i in range(len(data)):
-        states_tensor[i, :, :particle_num[i], :] = states[i]
-        states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
-        attr[i, :, :particle_num[i]] = attrs[i]
-        topological_edges_tensor[i, :particle_num[i], :particle_num[i]] = topological_edges[i]
-        first_states_tensor[i, :particle_num[i], :] = first_states[i]
-
-    return states_tensor, states_delta_tensor, attr, particle_num_tensor, topological_edges_tensor, first_states_tensor
 
 # ============================================================================
 # MAIN TRAINING FUNCTION
@@ -359,28 +315,7 @@ def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
                         if epoch_timer and phase == 'train':
                             epoch_timer.end_timer('rollout')
 
-                        # Vectorized loss calculation for efficiency.
-                        # The original code computes the mean loss per sample and sums them up.
-                        # This implementation replicates that logic without a loop.
-                        
-                        # Create a mask to select only the valid particles for each sample.
-                        max_particles = s_pred.shape[1]
-                        arange = torch.arange(max_particles, device=s_pred.device)
-                        # Unsqueeze to enable broadcasting over feature dimension.
-                        mask = (arange[None, :] < particle_nums[:, None]).unsqueeze(-1)
-
-                        # Compute MSE loss without reduction to get per-element squared errors.
-                        loss_matrix = F.mse_loss(s_pred, s_nxt, reduction='none')
-                        
-                        # Apply mask and sum the squared errors for each sample.
-                        sum_sq_err_per_sample = torch.sum(loss_matrix * mask, dim=(1, 2))
-                        
-                        # Normalize by the number of valid elements to get the mean for each sample.
-                        elements_per_sample = particle_nums * s_pred.shape[2]
-                        mse_per_sample = sum_sq_err_per_sample / (elements_per_sample + 1e-9)
-                        
-                        # Accumulate the sum of per-sample MSEs, matching the original loop's behavior.
-                        loss += torch.sum(mse_per_sample)
+                        loss += compute_per_sample_mse_sum(s_pred, s_nxt, particle_nums)
 
                     # Normalize loss by batch size and rollout steps
                     loss = loss / (n_rollout * B)

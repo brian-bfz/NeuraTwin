@@ -7,6 +7,65 @@ import numpy as np
 import torch
 import sys
 from torch.autograd import Variable
+import torch.nn.functional as F
+
+
+def collate_fn(data):
+    """
+    Custom collation function for batching variable-sized particle data.
+    Pads sequences to maximum particle count in batch and handles temporal structure.
+    """
+    states, states_delta, attrs, particle_num, topological_edges, first_states = zip(*data)
+    max_len = max(particle_num)
+    batch_size = len(data)
+    
+    # Check if states is not empty to get shape
+    if not states or states[0] is None:
+        return None, None, None, None, None, None
+
+    n_time, _, n_dim = states[0].shape
+    
+    states_tensor = torch.zeros((batch_size, n_time, max_len, n_dim), dtype=torch.float32)
+    states_delta_tensor = torch.zeros((batch_size, n_time - 1, max_len, n_dim), dtype=torch.float32)
+    attr = torch.zeros((batch_size, n_time, max_len), dtype=torch.float32)
+    particle_num_tensor = torch.tensor(particle_num, dtype=torch.int32)
+    topological_edges_tensor = torch.zeros((batch_size, max_len, max_len), dtype=torch.float32)
+    first_states_tensor = torch.zeros((batch_size, max_len, n_dim), dtype=torch.float32)
+
+    for i in range(len(data)):
+        states_tensor[i, :, :particle_num[i], :] = states[i]
+        states_delta_tensor[i, :, :particle_num[i], :] = states_delta[i]
+        attr[i, :, :particle_num[i]] = attrs[i]
+        topological_edges_tensor[i, :particle_num[i], :particle_num[i]] = topological_edges[i]
+        first_states_tensor[i, :particle_num[i], :] = first_states[i]
+
+    return states_tensor, states_delta_tensor, attr, particle_num_tensor, topological_edges_tensor, first_states_tensor
+
+
+def compute_per_sample_mse_sum(s_pred, s_nxt, particle_nums):
+    """
+    Computes the sum of mean squared errors for each sample in a batch.
+    This function is designed to replicate the behavior of a looped MSE calculation
+    in a vectorized and efficient manner.
+    """
+    # Create a mask to select only the valid particles for each sample.
+    max_particles = s_pred.shape[1]
+    arange = torch.arange(max_particles, device=s_pred.device)
+    # Unsqueeze to enable broadcasting over feature dimension.
+    mask = (arange[None, :] < particle_nums[:, None]).unsqueeze(-1)
+
+    # Compute MSE loss without reduction to get per-element squared errors.
+    loss_matrix = F.mse_loss(s_pred, s_nxt, reduction='none')
+    
+    # Apply mask and sum the squared errors for each sample.
+    sum_sq_err_per_sample = torch.sum(loss_matrix * mask, dim=(1, 2))
+    
+    # Normalize by the number of valid elements to get the mean for each sample.
+    elements_per_sample = particle_nums * s_pred.shape[2]
+    mse_per_sample = sum_sq_err_per_sample / (elements_per_sample + 1e-9)
+    
+    # Return the sum of per-sample MSEs, matching the original loop's behavior.
+    return torch.sum(mse_per_sample)
 
 
 def set_seed(seed):
@@ -37,7 +96,7 @@ def count_trainable_parameters(model):
 
 
 # ============================================================================
-# DEPRECATED
+# NOT USED
 # ============================================================================
 
 def rand_float(lo, hi):

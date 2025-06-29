@@ -64,6 +64,22 @@ def construct_edges_from_tensor(points, adj_thresh, topk):
 
     return adj_matrix
 
+def adj_mat_to_sparse_edge(adj_matrix):
+    """
+    Convert adjacency matrix to sparse edge representation
+    """
+    n_rels = adj_matrix.sum(dim=(1,2)).long()  # [B] - Number of edges per batch
+    n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
+    rels = adj_matrix.nonzero()  # [E_c, 3] - each row is [batch_idx, receiver_idx, sender_idx]
+
+    total_rels = rels.shape[0]
+    if total_rels > 0:
+        cs = torch.cumsum(n_rels, 0)
+        cs_shifted = torch.cat([torch.zeros(1, device=adj_matrix.device, dtype=torch.long), cs[:-1]])
+        rels_idx = torch.arange(total_rels, device=adj_matrix.device, dtype=torch.long) - cs_shifted.repeat_interleave(n_rels)
+    else:
+        rels_idx = torch.tensor([], device=adj_matrix.device, dtype=torch.long)
+    return n_rel, rels, rels_idx
 
 def construct_collision_edges(states, adj_thresh, mask, tool_mask, topk, connect_tools_all, topological_edges):
     """
@@ -145,18 +161,8 @@ def construct_collision_edges(states, adj_thresh, mask, tool_mask, topk, connect
     adj_matrix[topological_mask] = 0
 
     # Convert adjacency matrix to sparse edge representation
-    n_rels = adj_matrix.sum(dim=(1,2)).long()  # [B] - Number of edges per batch
-    n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
-    rels = adj_matrix.nonzero()  # [E_c, 3] - each row is [batch_idx, receiver_idx, sender_idx]
+    n_rel, rels, rels_idx = adj_mat_to_sparse_edge(adj_matrix)
 
-    total_rels = rels.shape[0]
-    if total_rels > 0:
-        cs = torch.cumsum(n_rels, 0)
-        cs_shifted = torch.cat([torch.zeros(1, device=states.device, dtype=torch.long), cs[:-1]])
-        rels_idx = torch.arange(total_rels, device=states.device, dtype=torch.long) - cs_shifted.repeat_interleave(n_rels)
-    else:
-        rels_idx = torch.tensor([], device=states.device, dtype=torch.long)
-    
     # Create receiver and sender matrices
     Rr = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
     Rs = torch.zeros((B, n_rel, N), device=states.device, dtype=states.dtype)
@@ -182,18 +188,8 @@ def construct_topological_edges(adj_matrix, first_states):
     B, N, _ = first_states.shape
     
     # Convert adjacency matrix to sparse edge representation
-    n_rels = adj_matrix.sum(dim=(1,2)).long()  # [B] - Number of edges per batch
-    n_rel = n_rels.max().long().item()  # int - Maximum edges across batch
-    rels = adj_matrix.nonzero()  # [E_c, 3] - each row is [batch_idx, receiver_idx, sender_idx]
+    n_rel, rels, rels_idx = adj_mat_to_sparse_edge(adj_matrix)
 
-    total_rels = rels.shape[0]
-    if total_rels > 0:
-        cs = torch.cumsum(n_rels, 0)
-        cs_shifted = torch.cat([torch.zeros(1, device=first_states.device, dtype=torch.long), cs[:-1]])
-        rels_idx = torch.arange(total_rels, device=first_states.device, dtype=torch.long) - cs_shifted.repeat_interleave(n_rels)
-    else:
-        rels_idx = torch.tensor([], device=first_states.device, dtype=torch.long)
-    
     # Create receiver and sender matrices
     Rr = torch.zeros((B, n_rel, N), device=first_states.device, dtype=first_states.dtype)
     Rs = torch.zeros((B, n_rel, N), device=first_states.device, dtype=first_states.dtype)
