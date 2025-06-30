@@ -3,6 +3,52 @@ Mathematical operations and calculations utilities.
 """
 
 import numpy as np
+import torch
+
+def calculate_NLL(states, means, variances, n_history, particle_nums):
+    """
+    Calculate the NLL of the predictions
+
+    Args:
+        states: [n_sample, n_timesteps, n_particles, 3] - batched episode states with history padding
+        means: [n_sample, n_timesteps, n_particles, 3] - mean of the predictions
+        variances: [n_sample, n_timesteps, n_particles, 3] - variance of the predictions
+        n_history: int - number of history steps
+        particle_nums: [n_sample] - number of valid particles per sample
+
+    Returns:
+        nll: [1] - mean NLL of the predictions
+    """
+    # Extract only the future predictions (after history)
+    states = states[:, n_history:, :, :]
+    means = means[:, n_history:, :, :]
+    variances = variances[:, n_history:, :, :]
+
+    # Ensure variances are positive
+    variances = torch.clamp(variances, min=1e-8)
+
+    # Calculate NLL components
+    nll_components = 0.5 * (torch.log(2 * torch.pi * variances) + (states - means) ** 2 / variances)
+    
+    # Sum over dimensions (x, y, z), then average over valid particles, samples and timesteps
+    # We need to handle variable particle numbers per sample
+    total_nll = 0.0
+    total_valid_particles = 0
+    
+    for i in range(states.shape[0]):  # For each sample
+        p_num = particle_nums[i].item()  # Number of valid particles for this sample
+        
+        # Sum over dimensions for valid particles only
+        sample_nll = torch.sum(nll_components[i, :, :p_num, :], dim=2)  # Sum over x,y,z dimensions
+        
+        # Sum over timesteps and particles for this sample
+        total_nll += torch.sum(sample_nll)
+        total_valid_particles += p_num * states.shape[1]  # particles * timesteps
+    
+    # Average over all valid particles and timesteps
+    nll = total_nll / total_valid_particles if total_valid_particles > 0 else 0.0
+    
+    return nll
 
 def norm(x, p=2):
     """

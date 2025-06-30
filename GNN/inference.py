@@ -33,7 +33,7 @@ class InferenceEngine:
     Handles loading trained models and generating predictions with error calculation.
     """
     
-    def __init__(self, model_path, config_path, data_file):
+    def __init__(self, model_path, config_path, data_file = None):
         """
         Initialize the inference engine with trained model and data pipeline.
         
@@ -47,7 +47,7 @@ class InferenceEngine:
         
         if data_file is None:
             data_file = self.config['dataset']['file']
-        self.dataset = ParticleDataset(data_file, self.config, 'train')
+        self.dataset = ParticleDataset(data_file, self.config, 'valid')
         
         self.n_history = self.config['train']['n_history']
         
@@ -131,8 +131,6 @@ def main():
     parser.add_argument("--video", action='store_true',
                        help="Generate visualization videos (optional)")
     parser.add_argument("--config_path", type=str, default=None)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--num_workers", type=int, default=4)
     args = parser.parse_args()
     
     try:
@@ -150,9 +148,9 @@ def main():
     inference_dataset = InferenceDataset(inference_engine.dataset, test_episodes)
     dataloader = DataLoader(
         inference_dataset,
-        batch_size=args.batch_size,
+        batch_size=512,
         shuffle=False,
-        num_workers=args.num_workers,
+        num_workers=10,
         collate_fn=collate_fn
     )
     
