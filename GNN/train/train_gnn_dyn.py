@@ -1,6 +1,6 @@
 import multiprocessing as mp
 mp.set_start_method('spawn', force=True)
-import os, sys, argparse
+import os, sys, argparse, time
 import cv2
 import numpy as np
 import json
@@ -78,7 +78,8 @@ def train(rank=None, world_size=None, TRAIN_DIR=None, profiling=False):
     ckp_per_iter = config['train']['ckp_per_iter']
     log_per_iter = config['train']['log_per_iter']
     n_epoch = config['train']['n_epoch']
-    set_seed(config['train']['random_seed'])
+    set_seed(int(time.time()))
+    print(f"Using seed: {int(time.time())}")
     use_gpu = torch.cuda.is_available()
 
     # ========================================================================

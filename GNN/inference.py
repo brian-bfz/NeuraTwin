@@ -99,25 +99,25 @@ class InferenceEngine:
         
         return torch.stack(predicted_states_list, dim=1)
 
-    def calculate_prediction_error(self, predicted_states, actual_states):
-        """
-        Calculate MSE errors between predicted and ground truth trajectories.
+def calculate_prediction_error(predicted_states, actual_states):
+    """
+    Calculate MSE errors between predicted and ground truth trajectories.
         
-        Args:
-            predicted_states: [timesteps, particles, 3] - predicted trajectory
-            actual_states: [timesteps, particles, 3] - ground truth trajectory
+    Args:
+        predicted_states: [timesteps, particles, 3] - predicted trajectory
+        actual_states: [timesteps, particles, 3] - ground truth trajectory
             
-        Returns:
-            errors: list[float] - MSE error for each timestep
-        """
-        errors = []
-        n_timesteps = min(len(predicted_states), len(actual_states))
+    Returns:
+        errors: list[float] - MSE error for each timestep
+    """
+    errors = []
+    n_timesteps = min(len(predicted_states), len(actual_states))
         
-        for t in range(n_timesteps):
-            error = torch.nn.functional.mse_loss(predicted_states[t], actual_states[t]).item()
-            errors.append(error)
+    for t in range(n_timesteps):
+        error = torch.nn.functional.mse_loss(predicted_states[t], actual_states[t]).item()
+        errors.append(error)
             
-        return errors
+    return errors
 
 
 def main():
@@ -161,7 +161,6 @@ def main():
     print("="*60)
     print("OBJECT MOTION PREDICTION TEST")
     print("="*60)
-    print(f"Testing episodes: {test_episodes}")
     print(f"Video generation: {'Enabled' if args.video else 'Disabled'}")
     
     all_errors = []
@@ -182,7 +181,7 @@ def main():
             batch_size = states.shape[0]
             for i in range(batch_size):
                 p_num = particle_nums[i].item()
-                errors = inference_engine.calculate_prediction_error(predicted_states[i][:, :p_num, :], states[i][:, :p_num, :])
+                errors = calculate_prediction_error(predicted_states[i][:, :p_num, :], states[i][:, :p_num, :])
                 all_errors.extend(errors)
                 if args.video:
 

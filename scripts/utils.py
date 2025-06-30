@@ -28,7 +28,7 @@ def parse_episodes(episodes_arg):
             if start > end:
                 raise ValueError(f"Invalid range: start ({start}) > end ({end})")
             episodes = list(range(start, end + 1))  # inclusive
-            print(f"Using episode range: {start} to {end} (inclusive) -> {episodes}")
+            print(f"Using episode range: {start} to {end} (inclusive)")
             return episodes
         except ValueError as e:
             raise ValueError(f"Invalid range format '{episodes_arg[0]}': {e}")
